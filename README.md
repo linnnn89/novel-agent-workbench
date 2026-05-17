@@ -35,4 +35,20 @@ src/          future application source code
 tests/        future tests
 ```
 
-Current status: project folder created. No executable application code has been added yet.
+## Current Status
+
+MVP-0 first storage slice is implemented:
+
+- Python package skeleton.
+- `ProjectStore`.
+- Atomic JSON write with `.bak` backups.
+- Project initialization.
+- Basic project lock.
+- `config.json` and `secrets.local.json` separation.
+- Unit tests.
+
+Verification command:
+
+```powershell
+py -3.13 -m unittest discover -s tests
+```
