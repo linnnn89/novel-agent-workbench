@@ -17,7 +17,7 @@ Current backend verification command:
 py -3.13 -m unittest discover -s tests
 ```
 
-Current implemented tests cover the storage kernel only. Draft/confirmed tests belong to a later MVP slice.
+Current implemented tests cover storage, registry, foundation config, Provider config/interface, draft generation, explicit draft commit, and safe project state summaries.
 
 Checkpoint tests currently cover:
 
@@ -78,3 +78,15 @@ Draft generation tests currently cover:
 - draft artifact/index exclusion of prompt text and plaintext secrets,
 - provider error path leaving no draft artifact behind,
 - checkpoint inclusion of draft artifacts without secrets or prompt text.
+
+Draft commit and project state tests currently cover:
+
+- draft status checks,
+- explicit draft commit to confirmed chapter,
+- duplicate commit rejection,
+- pre-commit checkpoint creation,
+- confirmed chapter artifact and index creation,
+- commit log exclusion of prompt text, chapter content, and plaintext secrets,
+- checkpoint-after-commit exclusion of prompt text and plaintext secrets,
+- no Memory Bank, RAG, or export side effects,
+- public project state exclusion of prompt text, chapter content, and plaintext secrets.

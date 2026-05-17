@@ -88,6 +88,14 @@ MVP-1 draft generation service slice:
 Mock writer output -> draft artifact only; no confirmed chapters, Memory Bank, RAG, or export side effects.
 ```
 
+MVP-1 draft commit boundary slice:
+
+```text
+Draft review/status + explicit draft commit -> confirmed chapter artifact/index + safe project state summary.
+```
+
+Confirmed chapters are now the only stored candidate for future formal context. Memory Bank, RAG, and export auto-updates remain intentionally unimplemented.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

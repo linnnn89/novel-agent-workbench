@@ -1,6 +1,12 @@
 """Core package for the new novel agent workbench."""
 
-from .drafts import DraftGenerationError, DraftGenerationRequest, DraftGenerationResult, DraftGenerationService
+from .drafts import (
+    DraftCommitResult,
+    DraftGenerationError,
+    DraftGenerationRequest,
+    DraftGenerationResult,
+    DraftGenerationService,
+)
 from .providers import (
     ModelRoleConfig,
     MockProviderClient,
@@ -17,6 +23,7 @@ from .providers import (
     read_provider_call_log,
     set_model_role_config,
 )
+from .project_state import public_project_state
 from .storage import InvalidProjectIdError, ProjectLockError, ProjectRegistry, ProjectStore, StorageError
 
 __all__ = [
@@ -34,6 +41,7 @@ __all__ = [
     "ProjectStore",
     "StorageError",
     "create_provider_client",
+    "DraftCommitResult",
     "DraftGenerationError",
     "DraftGenerationRequest",
     "DraftGenerationResult",
@@ -42,5 +50,6 @@ __all__ = [
     "generate_with_provider",
     "get_model_role_config",
     "read_provider_call_log",
+    "public_project_state",
     "set_model_role_config",
 ]

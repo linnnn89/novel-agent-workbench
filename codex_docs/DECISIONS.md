@@ -127,3 +127,19 @@ Decision: Add a backend-only Draft Generation Service that writes mock writer ou
 Reason: Generation must be separated from confirmation. A draft can be inspected, revised, or discarded later, but it must not update formal context, Memory Bank, RAG, confirmed chapters, or export state.
 
 Impact: `DraftGenerationService` writes `data/drafts/*.json` and `data/drafts_index.json`. Draft artifacts store generated text and request summaries, but not prompt text or plaintext secrets. Confirmed chapter commit logic remains unimplemented.
+
+## 2026-05-17: MVP-1 Explicit Draft Commit Boundary
+
+Decision: Add an explicit commit path from draft artifact to confirmed chapter artifact.
+
+Reason: Confirmed chapters must only be created after an explicit backend operation. This prevents generation from silently mutating formal context.
+
+Impact: `DraftGenerationService.commit_draft(...)` creates a pre-commit checkpoint, writes `data/confirmed_chapters/<chapter_id>.json`, updates `data/confirmed_chapters.json`, marks the source draft as `committed`, and appends metadata to `data/commit_log.json`. Commit does not update Memory Bank, RAG, export settings, or export files.
+
+## 2026-05-17: MVP-1 Safe Project State Summary
+
+Decision: Add `public_project_state(...)` as the backend state surface for future UI work.
+
+Reason: UI-facing state should be available without exposing prompt text, generated chapter content, or plaintext secrets.
+
+Impact: The state summary reports counts, latest draft metadata, latest confirmed chapter metadata, role configuration summaries, and masked secrets only.

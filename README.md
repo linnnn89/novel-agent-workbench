@@ -57,6 +57,8 @@ MVP-0 first storage slice is implemented:
 - Provider interface objects and a deterministic local Mock Provider.
 - Provider call audit log at `data/provider_call_log.json`, with prompt/secrets excluded.
 - Draft Generation Service skeleton that writes mock writer output to draft artifacts only.
+- Explicit draft commit boundary that promotes drafts to confirmed chapter artifacts only when called.
+- Safe project state summary for future UI use, excluding prompt text, chapter content, and plaintext secrets.
 - Unit tests.
 
 Verification command:
