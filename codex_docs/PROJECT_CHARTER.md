@@ -14,13 +14,14 @@ Build a local, personal, recoverable long-form novel writing workbench that can 
 
 1. Do not modify `I:\AI-NOVEL\Tonade_DSv4-flash_100w_novel_agent-main` in place.
 2. Do not delete user data or generated work silently.
-3. Write Markdown after every meaningful change.
-4. Keep business logic in backend modules, not frontend JavaScript.
-5. Keep draft revisions separate from confirmed chapters.
-6. Only confirmed chapters may update formal context, Memory Bank, RAG, game state, and export.
-7. API keys must not be logged, exported, returned in app state, or stored in general config.
-8. Cross-project import means copy with new ids, never runtime dynamic reference.
-9. MVP work should be phased; do not jump into advanced World Book, Prompt Inspector, or browser automation before safety and context foundations are stable.
+3. During early MVP work, do not perform real file deletion. Retire files by renaming with a clear suffix such as `.trash` or `.ontodelete`.
+4. Write Markdown after every meaningful change.
+5. Keep business logic in backend modules, not frontend JavaScript.
+6. Keep draft revisions separate from confirmed chapters.
+7. Only confirmed chapters may update formal context, Memory Bank, RAG, game state, and export.
+8. API keys must not be logged, exported, returned in app state, or stored in general config.
+9. Cross-project import means copy with new ids, never runtime dynamic reference.
+10. MVP work should be phased; do not jump into advanced World Book, Prompt Inspector, or browser automation before safety and context foundations are stable.
 
 ## Reference Project Usage
 
@@ -64,6 +65,12 @@ I:\AI-NOVEL\novel_agent_workbench\workspace_projects
 ```
 
 This directory is for real local project data and must not be tracked by Git.
+
+Deletion policy:
+
+```text
+No real deletion in early MVP. Use .trash or .ontodelete suffixes for reversible retirement.
+```
 
 ## Construction Strategy
 

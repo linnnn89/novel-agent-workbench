@@ -55,3 +55,11 @@ Decision: Store real runtime project data under `workspace_projects/` inside `no
 Reason: This keeps new project data isolated from the reference project and makes it easy to exclude real user/runtime data from Git.
 
 Impact: `workspace_projects/` is ignored by Git. Unit tests should use temporary directories unless explicitly testing default path behavior.
+
+## 2026-05-17: No Real File Deletion In Early MVP
+
+Decision: Do not support or perform real file deletion during early MVP work.
+
+Reason: The user wants maximum recoverability. Files that appear unnecessary should remain restorable.
+
+Impact: When a file must be retired, rename it with a clear suffix such as `.trash` or `.ontodelete` instead of deleting it. Actual deletion requires a later explicit user decision and a documented recovery/backup policy.
