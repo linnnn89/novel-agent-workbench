@@ -112,6 +112,14 @@ Backend-only command runner for project creation, mock writer configuration, dra
 
 This is not a frontend and not an HTTP API. It is a local verification and operator convenience layer over `WorkbenchApplicationService`.
 
+MVP-1 operable backend workbench slice:
+
+```text
+CLI Quickstart + Application Service contract + read-only safety audit + provider preflight boundary.
+```
+
+Real Provider integration must not start until the mock project path and `audit-project` pass.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

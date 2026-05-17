@@ -93,6 +93,29 @@ class CliTest(unittest.TestCase):
             self.assertEqual(list_code, 0)
             self.assertEqual(len(json.loads(list_stdout)["result"]), 1)
 
+    def test_audit_project_checks_smoke_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            smoke_code, _, smoke_stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "smoke",
+                    "demo",
+                    "--chapter-id",
+                    "chapter_001",
+                    "--prompt",
+                    "private audit cli prompt",
+                    "--commit",
+                ]
+            )
+            audit_code, audit_stdout, audit_stderr = run_cli(["--projects-root", temp, "audit-project", "demo"])
+            payload = json.loads(audit_stdout)
+
+            self.assertEqual(smoke_code, 0, smoke_stderr)
+            self.assertEqual(audit_code, 0, audit_stderr)
+            self.assertTrue(payload["result"]["ok"], audit_stdout)
+            self.assertNotIn("private audit cli prompt", audit_stdout)
+
 
 def run_cli(args: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()

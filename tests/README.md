@@ -105,4 +105,12 @@ CLI tests currently cover:
 - one-command smoke flow with mock writer and explicit commit,
 - split create/configure/generate/commit/list commands,
 - JSON error output on failed generation,
-- no prompt text in smoke JSON output.
+- no prompt text in smoke JSON output,
+- `audit-project` checking a smoke-generated project.
+
+Audit tests currently cover:
+
+- clean smoke project passes audit,
+- plaintext `sk-...` / `api_key` in config fails audit,
+- prompt text in provider log fails audit,
+- content in commit log fails audit.

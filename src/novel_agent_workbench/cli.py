@@ -71,6 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
     read_confirmed.add_argument("project_id")
     read_confirmed.add_argument("chapter_id")
 
+    audit = subparsers.add_parser("audit-project")
+    audit.add_argument("project_id")
+
     smoke = subparsers.add_parser("smoke")
     smoke.add_argument("project_id")
     smoke.add_argument("--title", default="")
@@ -113,6 +116,8 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":
         return app.read_confirmed_chapter(args.project_id, args.chapter_id)
+    if command == "audit-project":
+        return app.audit_project(args.project_id)
     if command == "smoke":
         return run_smoke(app, args)
     raise ValueError(f"Unknown command: {command}")

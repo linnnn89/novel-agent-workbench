@@ -37,6 +37,19 @@ class WorkbenchApplicationServiceTest(unittest.TestCase):
             self.assertEqual(read_draft["status"], "draft")
             self.assertEqual(committed["chapter_id"], "chapter_001")
             self.assertEqual(confirmed["source_draft_id"], draft["draft_id"])
+            self.assertEqual(
+                set(state),
+                {
+                    "project_id",
+                    "config",
+                    "secrets",
+                    "draft_count",
+                    "committed_chapter_count",
+                    "latest_draft",
+                    "latest_committed_chapter",
+                    "provider_roles",
+                },
+            )
             self.assertEqual(state["draft_count"], 1)
             self.assertEqual(state["committed_chapter_count"], 1)
             self.assertNotIn("private facade prompt", json.dumps(state, ensure_ascii=False))
@@ -65,6 +78,17 @@ class WorkbenchApplicationServiceTest(unittest.TestCase):
             self.assertNotIn("private state prompt", state_text)
             self.assertNotIn("MOCK writer", state_text)
             self.assertNotIn("sk-", state_text)
+
+    def test_facade_audit_project_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_project("demo")
+            app.configure_mock_writer("demo")
+
+            audit = app.audit_project("demo")
+
+            self.assertEqual(set(audit), {"ok", "project_id", "findings", "checked_paths"})
+            self.assertTrue(audit["ok"], json.dumps(audit, ensure_ascii=False))
 
 
 if __name__ == "__main__":

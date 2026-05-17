@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .audit import audit_project
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .project_state import public_project_state
 from .providers import set_model_role_config
@@ -86,6 +87,9 @@ class WorkbenchApplicationService:
 
     def read_confirmed_chapter(self, project_id: str, chapter_id: str) -> dict[str, Any]:
         return DraftGenerationService(self._open_store(project_id)).read_confirmed_chapter(chapter_id)
+
+    def audit_project(self, project_id: str) -> dict[str, Any]:
+        return audit_project(self._open_store(project_id))
 
     def _open_store(self, project_id: str) -> ProjectStore:
         return self.registry.open_project(project_id)

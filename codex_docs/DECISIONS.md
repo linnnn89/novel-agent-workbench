@@ -159,3 +159,19 @@ Decision: Add `novel_agent_workbench.cli` as a backend-only command runner.
 Reason: The user needs a way to run the local backend loop without writing Python code, while still avoiding UI and HTTP complexity.
 
 Impact: The CLI delegates to `WorkbenchApplicationService`, outputs JSON, and supports `smoke`, project creation/listing, safe state, mock writer config, draft generation/list/read, explicit commit, and confirmed chapter list/read. It does not call real Providers or start a server.
+
+## 2026-05-17: MVP-1 Read-Only Safety Audit
+
+Decision: Add `audit_project(...)` and the `audit-project` CLI command before real Provider integration.
+
+Reason: Before any real API key or Provider is introduced, the project needs a repeatable local check for obvious key, prompt, content, log, checkpoint, and public-state leaks.
+
+Impact: Audit is read-only and returns JSON with `ok`, `findings`, and `checked_paths`. Real Provider integration must pass `audit-project` first.
+
+## 2026-05-17: MVP-2 Provider Preflight Boundary
+
+Decision: Document Provider request/response and error contracts before implementing real Provider calls.
+
+Reason: Real Provider integration is a higher-risk step because it introduces network side effects, API keys, and cost. The contract must require `project_secret.*` references, `secrets.local.json` storage, no plaintext keys in config, and no prompt/secrets in logs.
+
+Impact: `codex_docs\APPLICATION_SERVICE_CONTRACT.md` records current Provider fields and error types. No real Provider has been added.

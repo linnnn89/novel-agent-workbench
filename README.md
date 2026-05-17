@@ -61,6 +61,7 @@ MVP-0 first storage slice is implemented:
 - Safe project state summary for future UI use, excluding prompt text, chapter content, and plaintext secrets.
 - Minimal backend application service facade for project creation, state, drafts, and explicit commit.
 - Backend-only CLI smoke runner for the project -> mock draft -> optional commit loop.
+- Backend-only safety audit for config, logs, checkpoints, and public state.
 - Unit tests.
 
 Verification command:
@@ -74,4 +75,11 @@ Backend-only CLI smoke example:
 ```powershell
 $env:PYTHONPATH="I:\AI-NOVEL\novel_agent_workbench\src"
 py -3.13 -m novel_agent_workbench.cli --projects-root I:\AI-NOVEL\novel_agent_workbench\workspace_projects smoke demo_project --title "Demo Novel" --chapter-id chapter_001 --chapter-title "Opening" --prompt "Write a short mock opening." --commit
+```
+
+Operator docs:
+
+```text
+codex_docs\CLI_QUICKSTART.md
+codex_docs\APPLICATION_SERVICE_CONTRACT.md
 ```

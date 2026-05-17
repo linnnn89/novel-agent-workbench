@@ -1,6 +1,7 @@
 """Core package for the new novel agent workbench."""
 
 from .application_service import WorkbenchApplicationService
+from .audit import AuditFinding, audit_project
 from .drafts import (
     DraftCommitResult,
     DraftGenerationError,
@@ -42,6 +43,8 @@ __all__ = [
     "ProjectStore",
     "StorageError",
     "WorkbenchApplicationService",
+    "AuditFinding",
+    "audit_project",
     "create_provider_client",
     "DraftCommitResult",
     "DraftGenerationError",
