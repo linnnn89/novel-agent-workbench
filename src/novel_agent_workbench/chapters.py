@@ -8,7 +8,7 @@ from .storage import ProjectStore, utc_stamp
 
 
 CHAPTER_WORKFLOW_FILENAME = "chapters_workflow.json"
-CHAPTER_STATUSES = {"planned", "drafting", "draft_ready", "committed", "blocked"}
+CHAPTER_STATUSES = {"planned", "drafting", "draft_ready", "review_ready", "committed", "blocked"}
 
 
 class ChapterWorkflowError(RuntimeError):
@@ -23,6 +23,7 @@ class ChapterWorkflowEntry:
     created_at: str
     updated_at: str
     latest_draft_id: str = ""
+    latest_review_id: str = ""
     confirmed_chapter_id: str = ""
     error_summary: dict[str, Any] | None = None
 
@@ -64,6 +65,25 @@ class ChapterWorkflowService:
         current = self._find(chapter_id)
         status = "committed" if current and current.get("status") == "committed" else "draft_ready"
         return self._upsert(chapter_id, title=title, status=status, latest_draft_id=draft_id, error_summary={})
+
+    def mark_review_ready(
+        self,
+        chapter_id: str,
+        *,
+        title: str = "",
+        draft_id: str,
+        review_id: str,
+    ) -> dict[str, Any]:
+        current = self._find(chapter_id)
+        status = "committed" if current and current.get("status") == "committed" else "review_ready"
+        return self._upsert(
+            chapter_id,
+            title=title,
+            status=status,
+            latest_draft_id=draft_id,
+            latest_review_id=review_id,
+            error_summary={},
+        )
 
     def mark_committed(
         self,
@@ -126,6 +146,7 @@ class ChapterWorkflowService:
         title: str = "",
         status: str,
         latest_draft_id: str | None = None,
+        latest_review_id: str | None = None,
         confirmed_chapter_id: str | None = None,
         error_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -147,6 +168,9 @@ class ChapterWorkflowService:
                 "status": status,
                 "updated_at": now,
                 "latest_draft_id": latest_draft_id if latest_draft_id is not None else str(item.get("latest_draft_id") or ""),
+                "latest_review_id": latest_review_id
+                if latest_review_id is not None
+                else str(item.get("latest_review_id") or ""),
                 "confirmed_chapter_id": confirmed_chapter_id
                 if confirmed_chapter_id is not None
                 else str(item.get("confirmed_chapter_id") or ""),
@@ -159,6 +183,7 @@ class ChapterWorkflowService:
                 "title": title.strip(),
                 "status": status,
                 "latest_draft_id": latest_draft_id or "",
+                "latest_review_id": latest_review_id or "",
                 "confirmed_chapter_id": confirmed_chapter_id or "",
                 "error_summary": error_summary or {},
             }
@@ -175,6 +200,7 @@ def default_entry(chapter_id: str, timestamp: str) -> dict[str, Any]:
         "created_at": timestamp,
         "updated_at": timestamp,
         "latest_draft_id": "",
+        "latest_review_id": "",
         "confirmed_chapter_id": "",
         "error_summary": {},
     }

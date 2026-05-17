@@ -101,6 +101,17 @@ def build_parser() -> argparse.ArgumentParser:
     commit.add_argument("project_id")
     commit.add_argument("draft_id")
 
+    review = subparsers.add_parser("review-draft")
+    review.add_argument("project_id")
+    review.add_argument("draft_id")
+
+    list_reviews = subparsers.add_parser("list-reviews")
+    list_reviews.add_argument("project_id")
+
+    read_review = subparsers.add_parser("read-review")
+    read_review.add_argument("project_id")
+    read_review.add_argument("review_id")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -212,6 +223,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.read_draft(args.project_id, args.draft_id)
     if command == "commit-draft":
         return app.commit_draft(args.project_id, args.draft_id)
+    if command == "review-draft":
+        return app.review_draft(args.project_id, args.draft_id)
+    if command == "list-reviews":
+        return app.list_reviews(args.project_id)
+    if command == "read-review":
+        return app.read_review(args.project_id, args.review_id)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

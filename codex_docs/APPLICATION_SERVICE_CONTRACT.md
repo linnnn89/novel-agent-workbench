@@ -11,6 +11,7 @@ It must stay thin. It delegates to:
 ```text
 ProjectRegistry
 DraftGenerationService
+DraftReviewService
 public_project_state
 set_model_role_config
 ```
@@ -65,10 +66,12 @@ project_id
 config
 secrets
 draft_count
+review_count
 chapter_count
 committed_chapter_count
 latest_chapter
 latest_draft
+latest_review
 latest_committed_chapter
 provider_roles
 ```
@@ -88,6 +91,7 @@ status
 created_at
 updated_at
 latest_draft_id
+latest_review_id
 confirmed_chapter_id
 error_summary
 ```
@@ -320,6 +324,45 @@ Must not update Memory Bank, RAG, or exports.
 On successful explicit commit, chapter workflow state updates to `committed` with `confirmed_chapter_id`.
 
 On failed commit, chapter workflow records metadata-only error. If the chapter is already `committed`, it must not be downgraded to `blocked`.
+
+### review_draft(project_id, draft_id)
+
+Creates a metadata-only Draft Review / Quality Check artifact for one draft.
+
+Returns:
+
+```text
+review_id
+draft_id
+chapter_id
+status
+path
+provider
+model
+usage
+```
+
+Current implementation uses the configured `scorer` role, normally `provider=mock`.
+
+On success, chapter workflow state may update to `review_ready` with `latest_review_id`.
+
+Must not auto-commit, auto-revise, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or enable real Providers.
+
+Must not return draft content, original prompt text, raw Provider responses, request bodies, or plaintext secrets.
+
+### list_reviews(project_id)
+
+Returns review metadata from `data/reviews_index.json`.
+
+Metadata-only. Must not return draft content, prompt text, raw Provider responses, or plaintext secrets.
+
+### read_review(project_id, review_id)
+
+Returns one review artifact from `data/reviews/*.json`.
+
+May return scores, issues, recommendation, and short safe comments.
+
+Must not return draft content, original prompt text, raw Provider responses, or plaintext secrets.
 
 ### list_confirmed_chapters(project_id)
 

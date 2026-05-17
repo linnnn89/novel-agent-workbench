@@ -74,6 +74,8 @@ MVP-0 first storage slice is implemented:
 - Controlled Chutes real draft generation gate: `chutes_openai` can generate a writer draft only after `enable-real-provider` sets `settings.real_generation_enabled=true`, the project secret exists, and audit leak checks pass.
 - One-command Chutes runbook `chutes-generate-once` that performs audit precheck, safe secret/config setup, explicit gate enable, real draft generation, gate disable, optional secret cleanup, and audit postcheck with metadata-only output.
 - Minimal chapter workflow state at `data/chapters_workflow.json`, tracking planned/drafting/draft_ready/committed/blocked without prompt text, chapter content, or plaintext secrets.
+- Draft Review / Quality Check skeleton using mock scorer output to create metadata-only review artifacts at `data/reviews/*.json` plus `data/reviews_index.json`.
+- Chapter workflow can now move to `review_ready` with `latest_review_id`; review does not auto-commit, update Memory Bank/RAG/export, or store draft content/prompt/API keys.
 - Unit tests.
 
 Verification command:

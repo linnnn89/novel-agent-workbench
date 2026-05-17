@@ -71,6 +71,12 @@ Configure mock writer:
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test configure-mock-writer demo_project
 ```
 
+Configure mock scorer for Draft Review / Quality Check:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test configure-provider-role demo_project scorer --provider mock --model mock-scorer
+```
+
 Plan a chapter:
 
 ```powershell
@@ -234,6 +240,16 @@ Read a draft:
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-draft demo_project <draft_id>
 ```
 
+Review a draft with the mock scorer:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test review-draft demo_project <draft_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-reviews demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-review demo_project <review_id>
+```
+
+Review output is metadata-only. It does not include the draft body, original prompt, raw Provider response, or API key. It also does not commit the draft, revise it, update Memory Bank/RAG, or create exports.
+
 Explicitly commit a draft:
 
 ```powershell
@@ -319,6 +335,14 @@ DraftGenerationError: Draft is not committable
 ```
 
 Meaning: the draft was already committed, or another confirmed chapter already owns the same `chapter_id`.
+
+Duplicate review:
+
+```text
+DraftReviewError: Draft already has a review
+```
+
+Meaning: the draft has already produced one review artifact. This phase keeps review creation idempotent by rejecting duplicate review writes.
 
 Unsafe project id:
 

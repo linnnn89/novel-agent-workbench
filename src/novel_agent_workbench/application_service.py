@@ -20,6 +20,7 @@ from .providers import (
     set_project_secret,
 )
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
+from .reviews import DraftReviewService
 from .storage import ProjectRegistry, ProjectStore
 
 
@@ -134,6 +135,16 @@ class WorkbenchApplicationService:
     def commit_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
         result = DraftGenerationService(self._open_store(project_id)).commit_draft(draft_id)
         return result.to_dict()
+
+    def review_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
+        result = DraftReviewService(self._open_store(project_id)).review_draft(draft_id)
+        return result.to_dict()
+
+    def list_reviews(self, project_id: str) -> list[dict[str, Any]]:
+        return DraftReviewService(self._open_store(project_id)).list_reviews()
+
+    def read_review(self, project_id: str, review_id: str) -> dict[str, Any]:
+        return DraftReviewService(self._open_store(project_id)).read_review(review_id)
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()

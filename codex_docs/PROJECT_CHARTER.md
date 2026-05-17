@@ -192,6 +192,14 @@ chapters_workflow.json + planned/drafting/draft_ready/committed/blocked + chapte
 
 Chapter workflow state is metadata-only. It may reference draft ids and confirmed chapter ids, but it must not store prompt text, generated content, raw provider responses, or plaintext secrets.
 
+MVP-3.5 draft review slice:
+
+```text
+reviews/*.json + reviews_index.json + mock scorer review + review_ready workflow state.
+```
+
+Draft Review / Quality Check is backend-only and metadata-only. It may record scores, issues, recommendation, Provider/model/usage, draft id, and chapter id. It must not store draft content, original prompts, raw Provider responses, or plaintext secrets. It must not auto-commit, auto-revise, update Memory Bank, update RAG, create exports, create DOCX, or enable new real Providers.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

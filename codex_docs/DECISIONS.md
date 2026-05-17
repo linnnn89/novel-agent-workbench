@@ -271,3 +271,11 @@ Decision: Add `data/chapters_workflow.json` as the metadata-only chapter workflo
 Reason: Drafts and confirmed chapters are artifacts, but future UI and scoring/revision flows need a stable chapter-level state boundary before any complex workflow is added.
 
 Impact: Chapters can move through `planned`, `drafting`, `draft_ready`, `committed`, and `blocked`. Draft generation marks `drafting` then `draft_ready` on success or `blocked` on provider/config failure. Explicit commit marks `committed`; duplicate or failed commit records metadata-only error without downgrading an already committed chapter. CLI commands `mark-chapter-planned`, `chapter-status`, and `list-chapters` expose the state. Workflow state stores only metadata and error summaries, never prompt text, generated content, or plaintext secrets.
+
+## 2026-05-17: MVP-3.5 Draft Review Skeleton
+
+Decision: Add a backend-only Draft Review / Quality Check layer using the existing `scorer` role and deterministic `mock` Provider.
+
+Reason: Before adding automatic revision or complex scoring, the workbench needs a safe review artifact boundary that can be inspected by humans and future UI code without mutating confirmed chapters or formal context.
+
+Impact: `DraftReviewService.review_draft(...)` writes `data/reviews/*.json` and `data/reviews_index.json`, then marks chapter workflow state as `review_ready` with `latest_review_id`. Review artifacts contain review metadata, scores, issues, recommendation, Provider/model/usage, and character-count summaries only. They must not store draft content, original prompts, raw Provider responses, or plaintext secrets. CLI commands `review-draft`, `list-reviews`, and `read-review` expose the flow. Review does not auto-commit, auto-revise, update Memory Bank, update RAG, create exports, create DOCX, or call new real Providers.

@@ -40,6 +40,7 @@ from .providers import (
 )
 from .project_state import public_project_state
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
+from .reviews import DraftReviewError, DraftReviewResult, DraftReviewService
 from .storage import InvalidProjectIdError, ProjectLockError, ProjectRegistry, ProjectStore, StorageError
 
 __all__ = [
@@ -75,6 +76,9 @@ __all__ = [
     "DraftGenerationRequest",
     "DraftGenerationResult",
     "DraftGenerationService",
+    "DraftReviewError",
+    "DraftReviewResult",
+    "DraftReviewService",
     "fake_test_model_role",
     "generate_with_provider",
     "get_model_role_config",

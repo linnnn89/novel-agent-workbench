@@ -6,10 +6,11 @@ Current backend modules:
 
 - `application_service.py`: stable backend facade for future CLI, HTTP, or UI layers.
 - `audit.py`: read-only safety audit for config, logs, checkpoints, and public state.
-- `chapters.py`: metadata-only chapter workflow state for planned/drafting/draft_ready/committed/blocked.
+- `chapters.py`: metadata-only chapter workflow state for planned/drafting/draft_ready/review_ready/committed/blocked.
 - `cli.py`: backend-only command-line runner for smoke testing and scripted local workflows.
 - `drafts.py`: backend-only Draft Generation Service that writes mock writer output into draft artifacts without confirmed-state side effects.
 - `project_state.py`: UI-safe backend state summary with masked secrets and no prompt/chapter content.
+- `reviews.py`: metadata-only Draft Review / Quality Check service that writes mock scorer review artifacts without storing draft content, prompts, raw responses, or secrets.
 - `runbooks.py`: safe operator runbooks for controlled real Provider workflows, currently `chutes-generate-once`.
 - `storage.py`: safe local project storage kernel, checkpoint ZIP creation, reversible checkpoint restore, and backend-only project registry.
 - `config.py`: default project config, schema version, and placeholder data structures.

@@ -5,6 +5,7 @@ from typing import Any
 from .chapters import ChapterWorkflowService
 from .drafts import DraftGenerationService
 from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
+from .reviews import DraftReviewService
 from .storage import ProjectStore
 
 
@@ -14,8 +15,10 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     if initialize:
         store.initialize()
     draft_service = DraftGenerationService(store)
+    review_service = DraftReviewService(store)
     chapter_service = ChapterWorkflowService(store)
     drafts = draft_service.list_drafts()
+    reviews = review_service.list_reviews()
     confirmed = draft_service.list_confirmed_chapters()
     chapters = chapter_service.list_chapters()
     store_state = store.public_state()
@@ -29,10 +32,12 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         },
         "secrets": store_state.get("secrets", {}),
         "draft_count": len(drafts),
+        "review_count": len(reviews),
         "chapter_count": len(chapters),
         "committed_chapter_count": len(confirmed),
         "latest_chapter": safe_chapter_summary(latest_by(chapters, "updated_at")),
         "latest_draft": safe_draft_summary(latest_by(drafts, "created_at")),
+        "latest_review": safe_review_summary(latest_by(reviews, "created_at")),
         "latest_committed_chapter": safe_confirmed_summary(latest_by(confirmed, "committed_at")),
         "provider_roles": provider_roles_summary(store),
     }
@@ -98,6 +103,21 @@ def safe_confirmed_summary(item: dict[str, Any] | None) -> dict[str, Any] | None
     }
 
 
+def safe_review_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "review_id": item.get("review_id"),
+        "draft_id": item.get("draft_id"),
+        "chapter_id": item.get("chapter_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "provider": item.get("provider"),
+        "model": item.get("model"),
+        "recommendation": item.get("recommendation"),
+    }
+
+
 def safe_chapter_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
     if item is None:
         return None
@@ -106,6 +126,7 @@ def safe_chapter_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
         "title": item.get("title"),
         "status": item.get("status"),
         "latest_draft_id": item.get("latest_draft_id"),
+        "latest_review_id": item.get("latest_review_id"),
         "confirmed_chapter_id": item.get("confirmed_chapter_id"),
         "updated_at": item.get("updated_at"),
         "error_summary": item.get("error_summary") if isinstance(item.get("error_summary"), dict) else {},

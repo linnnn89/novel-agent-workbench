@@ -17,17 +17,30 @@ Current backend verification command:
 py -3.13 -m unittest discover -s tests
 ```
 
-Current implemented tests cover storage, registry, foundation config, Provider config/interface, draft generation, explicit draft commit, and safe project state summaries.
+Current implemented tests cover storage, registry, foundation config, Provider config/interface, draft generation, draft review, explicit draft commit, and safe project state summaries.
 
 Chapter workflow tests currently cover:
 
 - planned chapter creation,
 - generate success moving state to `draft_ready`,
+- review success moving state to `review_ready`,
 - explicit commit moving state to `committed`,
 - generation failure moving state to `blocked` without prompt leakage,
 - duplicate commit keeping `committed` while recording metadata-only error,
 - chapter CLI commands `mark-chapter-planned`, `chapter-status`, and `list-chapters`,
 - public state and audit output excluding prompt text, generated content, and plaintext secrets.
+
+Draft review tests currently cover:
+
+- mock scorer review artifact creation at `data/reviews/*.json`,
+- review index creation at `data/reviews_index.json`,
+- chapter state moving to `review_ready` with `latest_review_id`,
+- no confirmed chapter, Memory Bank, RAG, or export side effects,
+- review artifacts, review index, provider logs, public state, audit output, and CLI output excluding draft content, prompt text, and plaintext secrets,
+- missing draft rejection,
+- duplicate review rejection,
+- blocked chapter review rejection,
+- CLI commands `review-draft`, `list-reviews`, and `read-review`.
 
 Checkpoint tests currently cover:
 
@@ -123,6 +136,7 @@ Application service facade tests currently cover:
 - mock writer configuration through the backend facade,
 - draft generation/list/read through the backend facade,
 - explicit commit and confirmed chapter read through the backend facade,
+- draft review/list/read through the backend facade,
 - facade state exclusion of prompt text, chapter content, and plaintext secrets,
 - failed generation leaving no draft behind,
 - facade enable/disable real-provider flag updates without plaintext secret exposure,
