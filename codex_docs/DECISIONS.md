@@ -1,0 +1,41 @@
+# Decisions
+
+## 2026-05-17: Reference Project Is Read-Only
+
+Decision: `I:\AI-NOVEL\Tonade_DSv4-flash_100w_novel_agent-main` is reference-only.
+
+Reason: The old project is a model to learn from, not a canvas to overwrite. New code must be built in a separate folder.
+
+Impact: All implementation work targets `I:\AI-NOVEL\novel_agent_workbench`.
+
+## 2026-05-17: Active Implementation Folder
+
+Decision: Use `novel_agent_workbench` as the active construction directory.
+
+Reason: The name is clear, neutral, and separate from the old downloaded source.
+
+Impact: New source, tests, docs, and logs start under this folder.
+
+## 2026-05-17: Construction Strategy
+
+Decision: Use clean skeleton first.
+
+Reason: Avoid inheriting hidden coupling, historical baggage, and the reference project's current generate-and-commit architecture risk. Reuse from the reference project must be selective, reviewed, and documented.
+
+Impact: New modules should be designed around the target architecture first. Reference code may inform behavior, prompts, tests, and small helper implementations, but large blind copying is not the default path.
+
+## 2026-05-17: MVP-0 First Engineering Slice
+
+Decision: Start MVP-0 with the local storage kernel.
+
+Reason: Public agentic-coding guidance emphasizes verification, scoped plans, checkpoints, and persistent context. Python and SQLite documentation also support the conclusion that local data integrity should be built on atomic write/commit behavior. This project's highest early risk is data corruption or state pollution, so storage safety should precede UI, LLM providers, and generation workflows.
+
+Impact: The first code implementation should create `ProjectStore` plus tests for project initialization, atomic JSON writes, backup behavior, file locking, and secrets/config separation.
+
+## 2026-05-17: Local Git Repository
+
+Decision: Initialize a local Git repository in `novel_agent_workbench`.
+
+Reason: Local version control gives clear change snapshots, diffs, and rollback points during AI-led development. This is local only and does not imply GitHub or any network push.
+
+Impact: All future implementation changes should be reviewable through Git status/diff. Secrets and generated runtime outputs are excluded by `.gitignore`.
