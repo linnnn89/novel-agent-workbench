@@ -4,4 +4,4 @@ This package contains the new implementation code.
 
 Current MVP-0 module:
 
-- `storage.py`: safe local project storage kernel, checkpoint ZIP creation, and reversible checkpoint restore.
+- `storage.py`: safe local project storage kernel, checkpoint ZIP creation, reversible checkpoint restore, and backend-only project registry.

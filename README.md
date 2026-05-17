@@ -47,6 +47,8 @@ MVP-0 first storage slice is implemented:
 - `config.json` and `secrets.local.json` separation.
 - Checkpoint ZIP with embedded manifest.
 - Reversible checkpoint restore using `.trash` for overwritten files.
+- `ProjectRegistry` for creating, opening, and listing multiple projects.
+- Default runtime routing to `workspace_projects/`.
 - Unit tests.
 
 Verification command:

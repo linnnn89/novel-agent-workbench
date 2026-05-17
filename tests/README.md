@@ -28,3 +28,13 @@ Checkpoint tests currently cover:
 - `.trash` retirement of overwritten files,
 - project mismatch rejection,
 - unsafe checkpoint path rejection.
+
+Registry tests currently cover:
+
+- default `workspace_projects` routing,
+- project creation,
+- opening existing projects,
+- missing project rejection,
+- discovery of valid unindexed projects,
+- unsafe project id rejection,
+- no hard delete API.

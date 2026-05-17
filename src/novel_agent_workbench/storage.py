@@ -14,6 +14,8 @@ from typing import Any, Iterator
 
 
 TRASH_SUFFIX = ".trash"
+REGISTRY_FILENAME = "registry.json"
+DEFAULT_PROJECTS_DIRNAME = "workspace_projects"
 
 
 class StorageError(RuntimeError):
@@ -26,6 +28,124 @@ class InvalidProjectIdError(ValueError):
 
 class ProjectLockError(StorageError):
     """Raised when a project is already locked."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectRegistry:
+    """Backend-only entrypoint for multiple local projects."""
+
+    projects_root: Path
+
+    @classmethod
+    def default(cls) -> "ProjectRegistry":
+        package_root = Path(__file__).resolve().parents[2]
+        return cls.open(package_root / DEFAULT_PROJECTS_DIRNAME)
+
+    @classmethod
+    def open(cls, projects_root: str | Path) -> "ProjectRegistry":
+        return cls(projects_root=Path(projects_root).resolve())
+
+    @property
+    def registry_path(self) -> Path:
+        return self.projects_root / REGISTRY_FILENAME
+
+    def initialize(self) -> None:
+        self.projects_root.mkdir(parents=True, exist_ok=True)
+        if not self.registry_path.exists():
+            self._atomic_write_registry([])
+
+    def create_project(self, project_id: str, *, title: str = "") -> ProjectStore:
+        validate_project_id(project_id)
+        self.initialize()
+        store = ProjectStore.open(self.projects_root, project_id)
+        store.initialize()
+        meta = store.read_project_meta()
+        meta.update(
+            {
+                "project_id": project_id,
+                "title": title.strip() or project_id,
+                "created_at": meta.get("created_at") or utc_stamp(),
+                "updated_at": utc_stamp(),
+                "schema_version": int(meta.get("schema_version") or 1),
+            }
+        )
+        store.write_project_meta(meta)
+        self._upsert_entry(
+            {
+                "project_id": project_id,
+                "title": meta["title"],
+                "path": str(store.root),
+                "created_at": meta["created_at"],
+                "updated_at": meta["updated_at"],
+            }
+        )
+        return store
+
+    def open_project(self, project_id: str) -> ProjectStore:
+        validate_project_id(project_id)
+        store = ProjectStore.open(self.projects_root, project_id)
+        if not store.project_meta_path.exists():
+            raise StorageError(f"Project does not exist: {project_id}")
+        return store
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        self.initialize()
+        entries = self._read_registry()
+        repaired = self._discover_missing_entries(entries)
+        if repaired != entries:
+            self._atomic_write_registry(repaired)
+        return sorted(
+            repaired,
+            key=lambda item: (str(item.get("updated_at") or ""), str(item.get("project_id") or "")),
+            reverse=True,
+        )
+
+    def _upsert_entry(self, entry: dict[str, Any]) -> None:
+        entries = [item for item in self._read_registry() if item.get("project_id") != entry["project_id"]]
+        entries.append(entry)
+        self._atomic_write_registry(entries)
+
+    def _discover_missing_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        known = {str(item.get("project_id") or "") for item in entries}
+        repaired = list(entries)
+        for child in sorted(self.projects_root.iterdir() if self.projects_root.exists() else []):
+            if not child.is_dir():
+                continue
+            project_id = child.name
+            if project_id in known:
+                continue
+            try:
+                validate_project_id(project_id)
+                store = ProjectStore.open(self.projects_root, project_id)
+                meta = store.read_project_meta()
+            except (InvalidProjectIdError, StorageError, json.JSONDecodeError):
+                continue
+            if meta.get("project_id") != project_id:
+                continue
+            repaired.append(
+                {
+                    "project_id": project_id,
+                    "title": str(meta.get("title") or project_id),
+                    "path": str(store.root),
+                    "created_at": str(meta.get("created_at") or ""),
+                    "updated_at": str(meta.get("updated_at") or meta.get("created_at") or ""),
+                }
+            )
+        return repaired
+
+    def _read_registry(self) -> list[dict[str, Any]]:
+        self.initialize()
+        text = self.registry_path.read_text(encoding="utf-8").strip()
+        if not text:
+            return []
+        value = json.loads(text)
+        if not isinstance(value, list):
+            raise StorageError("registry.json must contain a list.")
+        return [item for item in value if isinstance(item, dict)]
+
+    def _atomic_write_registry(self, entries: list[dict[str, Any]]) -> None:
+        self.projects_root.mkdir(parents=True, exist_ok=True)
+        atomic_write_json_file(self.registry_path, entries)
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,25 +303,11 @@ class ProjectStore:
                 retire_path(lock_path)
 
     def _atomic_write_json(self, path: Path, data: Any) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             backup_path = self._backup_path_for(path)
             backup_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, backup_path)
-
-        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-        temp_path = Path(temp_name)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as file:
-                json.dump(data, file, ensure_ascii=False, indent=2, sort_keys=True)
-                file.write("\n")
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temp_path, path)
-        except Exception:
-            if temp_path.exists():
-                retire_path(temp_path)
-            raise
+        atomic_write_json_file(path, data)
 
     def _atomic_write_bytes(self, path: Path, data: bytes, *, retire_existing: bool = False) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -324,3 +430,20 @@ def safe_filename(value: str) -> str:
     cleaned = "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in value)
     cleaned = cleaned.strip("._")
     return cleaned or "checkpoint"
+
+
+def atomic_write_json_file(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2, sort_keys=True)
+            file.write("\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        if temp_path.exists():
+            retire_path(temp_path)
+        raise

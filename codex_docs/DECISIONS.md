@@ -87,3 +87,11 @@ Decision: ProjectStore checkpoints use ZIP archives with an embedded `checkpoint
 Reason: A ZIP archive is portable, inspectable, and easy to restore locally. The manifest gives future tools a deterministic file list, size, and hash inventory.
 
 Impact: Checkpoints exclude secrets by default and restore without hard deletion. Existing files overwritten during restore are first retired with `.trash`.
+
+## 2026-05-17: MVP-0 Project Registry
+
+Decision: Add a backend-only `ProjectRegistry` to route and index multiple local projects under `workspace_projects/`.
+
+Reason: Multi-project isolation requires a single safe entrypoint for creating, opening, and listing projects before any UI or generation workflow exists.
+
+Impact: `ProjectRegistry` manages root-level `registry.json`, returns `ProjectStore` instances, and exposes no hard delete API.

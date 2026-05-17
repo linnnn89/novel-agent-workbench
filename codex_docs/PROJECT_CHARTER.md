@@ -56,6 +56,12 @@ Second engineering slice:
 ProjectStore checkpoint ZIP + manifest + reversible restore
 ```
 
+Third engineering slice:
+
+```text
+ProjectRegistry + default workspace_projects routing + registry.json + unit tests
+```
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:
