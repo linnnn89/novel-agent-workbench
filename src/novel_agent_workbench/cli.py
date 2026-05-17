@@ -74,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     audit = subparsers.add_parser("audit-project")
     audit.add_argument("project_id")
 
+    provider_status = subparsers.add_parser("provider-status")
+    provider_status.add_argument("project_id")
+    provider_status.add_argument("role", choices=["writer", "scorer", "reviser"])
+
+    subparsers.add_parser("list-provider-adapters")
+
     smoke = subparsers.add_parser("smoke")
     smoke.add_argument("project_id")
     smoke.add_argument("--title", default="")
@@ -118,6 +124,10 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.read_confirmed_chapter(args.project_id, args.chapter_id)
     if command == "audit-project":
         return app.audit_project(args.project_id)
+    if command == "provider-status":
+        return app.provider_status(args.project_id, args.role)
+    if command == "list-provider-adapters":
+        return app.list_provider_adapters()
     if command == "smoke":
         return run_smoke(app, args)
     raise ValueError(f"Unknown command: {command}")

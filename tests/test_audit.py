@@ -42,6 +42,54 @@ class ProjectAuditTest(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertIn("possible_secret_in_config", {item["code"] for item in result["findings"]})
 
+    def test_audit_fails_on_raw_provider_api_key_in_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            config = store.read_config()
+            config["model_roles"]["writer"].update(
+                {"provider": "mock", "model": "mock-writer", "settings": {"api_key": "sk-test-secret"}}
+            )
+            store.write_config(config)
+
+            result = audit_project(store)
+            codes = {item["code"] for item in result["findings"]}
+
+            self.assertFalse(result["ok"])
+            self.assertIn("raw_provider_api_key_in_config", codes)
+
+    def test_audit_flags_disabled_provider_without_network(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            config = store.read_config()
+            config["model_roles"]["writer"].update({"provider": "deepseek", "model": "deepseek-chat"})
+            store.write_config(config)
+
+            result = audit_project(store)
+            codes = {item["code"] for item in result["findings"]}
+
+            self.assertFalse(result["ok"])
+            self.assertIn("provider_adapter_disabled", codes)
+            self.assertIn("provider_missing_secret_ref", codes)
+
+    def test_audit_flags_missing_provider_secret_without_leaking_value(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            config = store.read_config()
+            config["model_roles"]["writer"].update(
+                {"provider": "deepseek", "model": "deepseek-chat", "api_key_ref": "project_secret.deepseek_key"}
+            )
+            store.write_config(config)
+
+            result = audit_project(store)
+            text = json.dumps(result, ensure_ascii=False)
+
+            self.assertFalse(result["ok"])
+            self.assertIn("provider_missing_secret", {item["code"] for item in result["findings"]})
+            self.assertNotIn("sk-", text)
+
     def test_audit_fails_on_prompt_text_in_provider_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = ProjectStore.open(Path(temp), "demo")

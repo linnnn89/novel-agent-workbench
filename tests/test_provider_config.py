@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -19,9 +21,12 @@ from novel_agent_workbench import (
     fake_test_model_role,
     generate_with_provider,
     get_model_role_config,
+    list_provider_adapters,
     read_provider_call_log,
+    resolve_project_secret,
     set_model_role_config,
 )
+from novel_agent_workbench.drafts import DraftGenerationRequest, DraftGenerationService
 
 
 class ProviderConfigTest(unittest.TestCase):
@@ -93,18 +98,18 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertIn("Missing project secret", result.message)
             self.assertNotIn("deepseek_api_key", result.masked_key)
 
-    def test_fake_connection_passes_with_project_secret_and_never_returns_plain_secret(self) -> None:
+    def test_fake_connection_passes_with_mock_project_secret_and_never_returns_plain_secret(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = ProjectStore.open(Path(temp), "demo")
             store.initialize()
-            store.update_secrets({"deepseek_api_key": "sk-test-secret"})
+            store.update_secrets({"mock_api_key": "sk-test-secret"})
             role_config = set_model_role_config(
                 store,
                 "writer",
                 {
-                    "provider": "deepseek",
-                    "model": "deepseek-test",
-                    "api_key_ref": "project_secret.deepseek_api_key",
+                    "provider": "mock",
+                    "model": "mock-writer",
+                    "api_key_ref": "project_secret.mock_api_key",
                 },
             )
 
@@ -117,6 +122,45 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertEqual(result.masked_key, "sk-****cret")
             self.assertNotIn("sk-test-secret", result_text)
             self.assertNotIn("sk-test-secret", store.config_path.read_text(encoding="utf-8"))
+
+    def test_provider_adapter_registry_keeps_real_adapters_disabled(self) -> None:
+        adapters = {item["adapter_id"]: item for item in list_provider_adapters()}
+
+        self.assertTrue(adapters["mock"]["enabled"])
+        self.assertFalse(adapters["mock"]["network_allowed"])
+        self.assertFalse(adapters["openai_compatible"]["enabled"])
+        self.assertFalse(adapters["openai_compatible"]["network_allowed"])
+        self.assertFalse(adapters["deepseek"]["enabled"])
+        self.assertFalse(adapters["deepseek"]["network_allowed"])
+
+    def test_resolve_project_secret_reads_only_secrets_local_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-env-secret"}):
+                with self.assertRaises(ProviderError) as missing:
+                    resolve_project_secret(store, "project_secret.DEEPSEEK_API_KEY")
+
+            self.assertEqual(missing.exception.error_type, "missing_secret")
+            store.update_secrets({"DEEPSEEK_API_KEY": "sk-local-secret"})
+
+            self.assertEqual(resolve_project_secret(store, "project_secret.DEEPSEEK_API_KEY"), "sk-local-secret")
+
+    def test_resolve_project_secret_reports_invalid_missing_and_empty_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            store.update_secrets({"empty_key": ""})
+
+            cases = [
+                ("sk-raw", "invalid_secret_ref"),
+                ("project_secret.missing_key", "missing_secret"),
+                ("project_secret.empty_key", "empty_secret"),
+            ]
+            for api_key_ref, error_type in cases:
+                with self.assertRaises(ProviderError) as context:
+                    resolve_project_secret(store, api_key_ref)
+                self.assertEqual(context.exception.error_type, error_type)
 
     def test_invalid_role_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -163,8 +207,25 @@ class ProviderConfigTest(unittest.TestCase):
             with self.assertRaises(ProviderError) as context:
                 generate_with_provider(store, ProviderRequest(role="writer", prompt="do not call network"))
 
-            self.assertEqual(context.exception.error_type, "unsupported_provider")
+            self.assertEqual(context.exception.error_type, "adapter_disabled")
             self.assertEqual(read_provider_call_log(store)["calls"][0]["status"], "error")
+
+    def test_disabled_provider_no_network_and_no_draft_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_model_role_config(store, "writer", {"provider": "deepseek", "model": "deepseek-test"})
+            service = DraftGenerationService(store)
+
+            with patch("socket.create_connection", side_effect=AssertionError("network attempted")):
+                with self.assertRaises(ProviderError) as context:
+                    service.generate_draft(DraftGenerationRequest(chapter_id="chapter_001", prompt="no network"))
+
+            self.assertEqual(context.exception.error_type, "adapter_disabled")
+            self.assertFalse((store.data_dir / "drafts").exists())
+            self.assertFalse((store.data_dir / "confirmed_chapters").exists())
+            self.assertFalse((store.root / "exports").exists())
+            self.assertFalse((store.data_dir / "rag").exists())
 
     def test_mock_provider_reports_missing_model_and_secret_ref(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -11,4 +11,4 @@ Current backend modules:
 - `project_state.py`: UI-safe backend state summary with masked secrets and no prompt/chapter content.
 - `storage.py`: safe local project storage kernel, checkpoint ZIP creation, reversible checkpoint restore, and backend-only project registry.
 - `config.py`: default project config, schema version, and placeholder data structures.
-- `providers.py`: writer/scorer/reviser config parsing, `project_secret.*` validation, fake connection tests, Provider request/response interface, deterministic Mock Provider, and safe provider call logging.
+- `providers.py`: writer/scorer/reviser config parsing, Provider adapter registry, `project_secret.*` resolver, fake/no-network status checks, Provider request/response interface, deterministic Mock Provider, disabled real-provider placeholders, and safe provider call logging.

@@ -174,6 +174,46 @@ Must not modify project files.
 
 Must not return prompt text, generated content, or plaintext secrets.
 
+### provider_status(project_id, role)
+
+Runs a local Provider configuration check for one role.
+
+Returns:
+
+```text
+ok
+role
+provider
+model
+mode
+message
+has_api_key
+masked_key
+adapter_enabled
+network_allowed
+error_type
+```
+
+Must not send network requests.
+
+Must not create drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
+
+Must not return plaintext secrets.
+
+### list_provider_adapters()
+
+Returns registered Provider adapter metadata:
+
+```text
+adapter_id
+enabled
+network_allowed
+requires_secret
+description
+```
+
+Metadata-only. Must not read project secrets and must not send network requests.
+
 ## Provider Contract Summary
 
 Current enabled Provider:
@@ -195,9 +235,12 @@ Provider error types currently used:
 ```text
 missing_provider
 unsupported_provider
+adapter_disabled
 missing_model
 missing_secret_ref
 missing_secret
+empty_secret
+invalid_secret_ref
 invalid_request
 rate_limit
 timeout

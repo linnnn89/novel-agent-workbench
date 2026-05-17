@@ -191,3 +191,27 @@ Decision: Extend `audit-project` to check confirmed chapter consistency and keep
 Reason: Explicit commit writes multiple files. Per-file atomic writes plus pre-commit checkpoint are useful, but a crash or future bug can still leave an artifact/index/status mismatch.
 
 Impact: Audit now checks orphan confirmed artifacts, missing confirmed artifacts, source draft commit status, missing commit log entries, unsafe confirmed artifact paths, default checkpoint secret inclusion, and public-state leaks. Audit uses a no-initialize public state path so uninitialized projects are not modified during audit.
+
+## 2026-05-17: MVP-2 Provider Adapter Registry
+
+Decision: Introduce a Provider adapter registry before enabling any real Provider.
+
+Reason: Real Provider access introduces network, API key, and cost risks. The system needs a single source of truth for which adapters are enabled and whether network is allowed.
+
+Impact: `mock` is the only enabled adapter. `openai_compatible` and `deepseek` are registered as disabled placeholders with `network_allowed=false`. Generation with a disabled adapter returns `adapter_disabled` and does not attempt HTTP.
+
+## 2026-05-17: MVP-2 Project Secret Resolver Contract
+
+Decision: Provider API keys may only be resolved from `data/secrets.local.json` through `project_secret.<name>` references.
+
+Reason: This keeps plaintext keys out of `config.json`, public state, logs, checkpoints, and audit output. Environment variables are intentionally not a secret source for project Provider config.
+
+Impact: `resolve_project_secret(...)` rejects missing, empty, and invalid refs with stable error types. Provider status checks may mask key presence but never return plaintext.
+
+## 2026-05-17: MVP-2 Provider Preflight CLI And Audit
+
+Decision: Add backend-only Provider preflight commands and Provider-aware audit rules.
+
+Reason: The user needs a local way to inspect Provider readiness before any UI or real HTTP integration exists.
+
+Impact: `provider-status` and `list-provider-adapters` return JSON and do not send network requests. `audit-project` now flags raw Provider keys in config, disabled adapters, missing secret refs, and missing local secrets. Passing `audit-project` remains required before real Provider enablement.

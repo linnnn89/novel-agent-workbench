@@ -90,6 +90,20 @@ class WorkbenchApplicationServiceTest(unittest.TestCase):
             self.assertEqual(set(audit), {"ok", "project_id", "findings", "checked_paths"})
             self.assertTrue(audit["ok"], json.dumps(audit, ensure_ascii=False))
 
+    def test_provider_status_facade_is_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_project("demo")
+            app.configure_mock_writer("demo")
+
+            result = app.provider_status("demo", "writer")
+            adapters = app.list_provider_adapters()
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["provider"], "mock")
+            self.assertFalse(result["network_allowed"])
+            self.assertIn("mock", {item["adapter_id"] for item in adapters})
+
 
 if __name__ == "__main__":
     unittest.main()

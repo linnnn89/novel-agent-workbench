@@ -12,6 +12,7 @@ from .drafts import (
 from .providers import (
     ModelRoleConfig,
     MockProviderClient,
+    ProviderAdapterInfo,
     ProviderConfigError,
     ProviderClient,
     ProviderConnectionResult,
@@ -22,7 +23,10 @@ from .providers import (
     fake_test_model_role,
     generate_with_provider,
     get_model_role_config,
+    list_provider_adapters,
+    provider_status,
     read_provider_call_log,
+    resolve_project_secret,
     set_model_role_config,
 )
 from .project_state import public_project_state
@@ -32,6 +36,7 @@ __all__ = [
     "InvalidProjectIdError",
     "ModelRoleConfig",
     "MockProviderClient",
+    "ProviderAdapterInfo",
     "ProviderConfigError",
     "ProviderClient",
     "ProviderConnectionResult",
@@ -54,7 +59,10 @@ __all__ = [
     "fake_test_model_role",
     "generate_with_provider",
     "get_model_role_config",
+    "list_provider_adapters",
+    "provider_status",
     "read_provider_call_log",
+    "resolve_project_secret",
     "public_project_state",
     "set_model_role_config",
 ]

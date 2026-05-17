@@ -7,7 +7,7 @@ from typing import Any
 from .audit import audit_project
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .project_state import public_project_state
-from .providers import set_model_role_config
+from .providers import list_provider_adapters, provider_status, set_model_role_config
 from .storage import ProjectRegistry, ProjectStore
 
 
@@ -90,6 +90,12 @@ class WorkbenchApplicationService:
 
     def audit_project(self, project_id: str) -> dict[str, Any]:
         return audit_project(self._open_store(project_id))
+
+    def provider_status(self, project_id: str, role: str) -> dict[str, Any]:
+        return provider_status(self._open_store(project_id), role).to_dict()
+
+    def list_provider_adapters(self) -> list[dict[str, Any]]:
+        return list_provider_adapters()
 
     def _open_store(self, project_id: str) -> ProjectStore:
         return self.registry.open_project(project_id)

@@ -56,7 +56,11 @@ Provider config tests currently cover:
 - raw API key rejection,
 - raw `api_key_ref` rejection,
 - missing project secret reporting,
-- fake connection success without network,
+- fake connection success without network for mock roles,
+- Provider adapter registry state,
+- project secret resolver reads only `secrets.local.json`,
+- resolver errors for invalid, missing, and empty secret refs,
+- disabled real-provider adapters failing locally without draft/confirmed/Memory/RAG/export side effects,
 - invalid role rejection.
 
 Provider interface tests currently cover:
@@ -108,6 +112,9 @@ CLI tests currently cover:
 - JSON error output on failed generation,
 - no prompt text in smoke JSON output,
 - `audit-project` checking a smoke-generated project.
+- `provider-status` for mock writer,
+- disabled provider status without network,
+- Provider status output excluding plaintext secrets.
 
 Audit tests currently cover:
 
@@ -118,3 +125,6 @@ Audit tests currently cover:
 - orphan confirmed artifact detection,
 - confirmed index entry with uncommitted source draft detection,
 - audit read-only behavior on uninitialized projects.
+- raw Provider API keys in config/settings,
+- disabled Provider adapter findings,
+- missing Provider secret refs and local secrets.

@@ -128,6 +128,14 @@ safe ASCII chapter_id validation + read-only audit + half-commit consistency che
 
 Audit must not write project files. It should detect obvious confirmed chapter inconsistencies before later UI or real Provider work.
 
+MVP-2 provider adapter skeleton slice:
+
+```text
+Provider adapter registry + project_secret resolver + disabled real-provider placeholders + provider-status CLI + Provider-aware audit.
+```
+
+`mock` remains the only enabled adapter. `openai_compatible` and `deepseek` are reserved but disabled and must not send network requests. Real Provider work requires a passing `audit-project` gate and an explicit later decision.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .providers import ModelRoleConfig, get_provider_adapter
 from .project_state import public_project_state
 from .storage import ProjectStore
 
@@ -67,6 +68,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
         ],
     )
     audit_checkpoints(store, checked_paths=checked_paths, findings=findings)
+    audit_provider_adapter_config(store, checked_paths=checked_paths, findings=findings)
     audit_draft_confirmed_consistency(store, checked_paths=checked_paths, findings=findings)
     audit_public_state(store, checked_paths=checked_paths, findings=findings)
     return {
@@ -245,6 +247,94 @@ def audit_draft_confirmed_consistency(
                     message=f"Confirmed chapter {chapter_id} has no commit log entry for draft {source_draft_id}.",
                 )
             )
+
+
+def audit_provider_adapter_config(
+    store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]
+) -> None:
+    checked_paths.append("provider_adapter_config")
+    config = read_json_file(store.config_path, checked_paths=checked_paths, findings=findings)
+    roles = config.get("model_roles") if isinstance(config, dict) and isinstance(config.get("model_roles"), dict) else {}
+    secrets = store.read_secrets() if store.secrets_path.exists() else {}
+    for role, raw_role_config in roles.items():
+        if not isinstance(raw_role_config, dict):
+            continue
+        if "api_key" in raw_role_config:
+            findings.append(
+                AuditFinding(
+                    code="raw_provider_api_key_in_config",
+                    path=str(store.config_path),
+                    message=f"Role {role} stores raw api_key in config.",
+                )
+            )
+        settings = raw_role_config.get("settings")
+        if isinstance(settings, dict) and "api_key" in settings:
+            findings.append(
+                AuditFinding(
+                    code="raw_provider_api_key_in_config",
+                    path=str(store.config_path),
+                    message=f"Role {role} stores raw api_key in settings.",
+                )
+            )
+        try:
+            role_config = ModelRoleConfig.from_mapping(str(role), raw_role_config)
+        except ValueError:
+            findings.append(
+                AuditFinding(
+                    code="provider_invalid_role_config",
+                    path=str(store.config_path),
+                    message=f"Role {role} has invalid provider configuration.",
+                )
+            )
+            continue
+        if not role_config.provider:
+            continue
+        adapter = get_provider_adapter(role_config.provider)
+        if adapter is None:
+            findings.append(
+                AuditFinding(
+                    code="provider_adapter_unregistered",
+                    path=str(store.config_path),
+                    message=f"Role {role} uses unregistered provider adapter {role_config.provider!r}.",
+                )
+            )
+            continue
+        if not adapter.enabled:
+            findings.append(
+                AuditFinding(
+                    code="provider_adapter_disabled",
+                    path=str(store.config_path),
+                    message=f"Role {role} uses disabled provider adapter {role_config.provider!r}; audit did not test network.",
+                )
+            )
+        if adapter.requires_secret and not role_config.api_key_ref:
+            findings.append(
+                AuditFinding(
+                    code="provider_missing_secret_ref",
+                    path=str(store.config_path),
+                    message=f"Role {role} provider {role_config.provider!r} requires project_secret.<name>.",
+                )
+            )
+        if role_config.api_key_ref:
+            try:
+                secret_name = role_config.secret_name()
+            except ValueError:
+                findings.append(
+                    AuditFinding(
+                        code="provider_invalid_secret_ref",
+                        path=str(store.config_path),
+                        message=f"Role {role} has invalid api_key_ref.",
+                    )
+                )
+                continue
+            if secret_name not in secrets or not str(secrets.get(secret_name) or ""):
+                findings.append(
+                    AuditFinding(
+                        code="provider_missing_secret",
+                        path=str(store.config_path),
+                        message=f"Role {role} references a missing or empty project secret.",
+                    )
+                )
 
 
 def read_json_file(path: Path, *, checked_paths: list[str], findings: list[AuditFinding]) -> dict[str, Any] | None:

@@ -71,6 +71,20 @@ Configure mock writer:
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test configure-mock-writer demo_project
 ```
 
+Check Provider adapter registry:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-provider-adapters
+```
+
+Check writer Provider status:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test provider-status demo_project writer
+```
+
+This is a local config check only. It does not send network requests.
+
 Generate a draft:
 
 ```powershell
@@ -147,6 +161,31 @@ Fix:
 ```powershell
 py -3.13 -m novel_agent_workbench.cli --projects-root <root> configure-mock-writer <project_id>
 ```
+
+Disabled real Provider:
+
+```text
+adapter_disabled
+```
+
+Meaning: `openai_compatible` or `deepseek` is only reserved in this phase. It is not allowed to connect to the network yet.
+
+Missing Provider secret reference:
+
+```text
+missing_secret_ref
+```
+
+Meaning: a future real Provider role must use `api_key_ref` in the form `project_secret.<name>`.
+
+Missing or empty local secret:
+
+```text
+missing_secret
+empty_secret
+```
+
+Meaning: the referenced key is absent or empty in `data\secrets.local.json`. Do not put the key into `config.json`.
 
 Duplicate commit:
 

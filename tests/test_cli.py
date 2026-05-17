@@ -116,6 +116,56 @@ class CliTest(unittest.TestCase):
             self.assertTrue(payload["result"]["ok"], audit_stdout)
             self.assertNotIn("private audit cli prompt", audit_stdout)
 
+    def test_provider_status_reports_mock_writer_without_secret_leak(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            run_cli(["--projects-root", temp, "configure-mock-writer", "demo"])
+
+            code, stdout, stderr = run_cli(["--projects-root", temp, "provider-status", "demo", "writer"])
+            payload = json.loads(stdout)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertTrue(payload["result"]["ok"])
+            self.assertEqual(payload["result"]["provider"], "mock")
+            self.assertFalse(payload["result"]["network_allowed"])
+
+    def test_provider_status_reports_disabled_provider_no_network(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            config_path = Path(temp) / "demo" / "data" / "config.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["model_roles"]["writer"].update({"provider": "deepseek", "model": "deepseek-chat"})
+            config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            code, stdout, stderr = run_cli(["--projects-root", temp, "provider-status", "demo", "writer"])
+            payload = json.loads(stdout)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertFalse(payload["result"]["ok"])
+            self.assertEqual(payload["result"]["error_type"], "missing_secret_ref")
+            self.assertFalse(payload["result"]["network_allowed"])
+
+    def test_provider_status_with_secret_ref_does_not_print_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            data_dir = Path(temp) / "demo" / "data"
+            config_path = data_dir / "config.json"
+            secrets_path = data_dir / "secrets.local.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["model_roles"]["writer"].update(
+                {"provider": "deepseek", "model": "deepseek-chat", "api_key_ref": "project_secret.deepseek_key"}
+            )
+            config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+            secrets_path.write_text(json.dumps({"deepseek_key": "sk-cli-secret"}, ensure_ascii=False), encoding="utf-8")
+
+            code, stdout, stderr = run_cli(["--projects-root", temp, "provider-status", "demo", "writer"])
+            payload = json.loads(stdout)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertFalse(payload["result"]["ok"])
+            self.assertEqual(payload["result"]["error_type"], "adapter_disabled")
+            self.assertNotIn("sk-cli-secret", stdout)
+
 
 def run_cli(args: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()

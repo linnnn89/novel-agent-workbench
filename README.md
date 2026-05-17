@@ -63,6 +63,10 @@ MVP-0 first storage slice is implemented:
 - Backend-only CLI smoke runner for the project -> mock draft -> optional commit loop.
 - Backend-only safety audit for config, logs, checkpoints, and public state.
 - Quality hardening for safe ASCII `chapter_id` values and half-commit audit detection.
+- Provider adapter registry with `mock` enabled and `openai_compatible` / `deepseek` reserved but disabled.
+- Project secret resolver contract for `project_secret.<name>` references stored only in `data/secrets.local.json`.
+- Backend-only `provider-status` / `list-provider-adapters` CLI checks with no network calls.
+- Provider-aware audit checks for raw keys, disabled adapters, missing secret refs, and missing local secrets.
 - Unit tests.
 
 Verification command:
@@ -83,4 +87,5 @@ Operator docs:
 ```text
 codex_docs\CLI_QUICKSTART.md
 codex_docs\APPLICATION_SERVICE_CONTRACT.md
+codex_docs\PROVIDER_ADAPTER_CONTRACT.md
 ```

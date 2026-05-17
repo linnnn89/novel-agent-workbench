@@ -12,6 +12,7 @@ MODEL_ROLES = {"writer", "scorer", "reviser"}
 SECRET_REF_PREFIX = "project_secret."
 MOCK_PROVIDER_ID = "mock"
 PROVIDER_CALL_LOG_FILENAME = "provider_call_log.json"
+DISABLED_ADAPTER_IDS = ("openai_compatible", "deepseek")
 
 
 class ProviderConfigError(ValueError):
@@ -25,6 +26,18 @@ class ProviderError(RuntimeError):
         super().__init__(message)
         self.error_type = error_type
         self.message = message
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderAdapterInfo:
+    adapter_id: str
+    enabled: bool
+    network_allowed: bool
+    requires_secret: bool
+    description: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +95,9 @@ class ProviderConnectionResult:
     message: str
     has_api_key: bool
     masked_key: str
+    adapter_enabled: bool = False
+    network_allowed: bool = False
+    error_type: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -170,6 +186,31 @@ class MockProviderClient(ProviderClient):
         )
 
 
+PROVIDER_ADAPTER_REGISTRY: dict[str, ProviderAdapterInfo] = {
+    MOCK_PROVIDER_ID: ProviderAdapterInfo(
+        adapter_id=MOCK_PROVIDER_ID,
+        enabled=True,
+        network_allowed=False,
+        requires_secret=False,
+        description="Deterministic local test adapter. No network and no real LLM.",
+    ),
+    "openai_compatible": ProviderAdapterInfo(
+        adapter_id="openai_compatible",
+        enabled=False,
+        network_allowed=False,
+        requires_secret=True,
+        description="Reserved OpenAI-compatible HTTP adapter. Disabled until MVP-2 real-provider gate is approved.",
+    ),
+    "deepseek": ProviderAdapterInfo(
+        adapter_id="deepseek",
+        enabled=False,
+        network_allowed=False,
+        requires_secret=True,
+        description="Reserved DeepSeek adapter. Disabled until MVP-2 real-provider gate is approved.",
+    ),
+}
+
+
 def get_model_role_config(store: ProjectStore, role: str) -> ModelRoleConfig:
     validate_role(role)
     config = store.read_config()
@@ -192,8 +233,9 @@ def set_model_role_config(store: ProjectStore, role: str, updates: dict[str, Any
 
 def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionResult:
     role_config = get_model_role_config(store, role)
+    adapter = get_provider_adapter(role_config.provider) if role_config.provider else None
     try:
-        validate_model_role_config(role_config, store.read_secrets())
+        validate_model_role_config(role_config, store.read_secrets(), require_secret_value=False)
     except ProviderConfigError as exc:
         return ProviderConnectionResult(
             ok=False,
@@ -204,6 +246,9 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
             message=str(exc),
             has_api_key=False,
             masked_key="",
+            adapter_enabled=bool(adapter.enabled) if adapter else False,
+            network_allowed=False,
+            error_type=provider_config_error_type(str(exc)),
         )
     if not role_config.is_configured():
         return ProviderConnectionResult(
@@ -215,9 +260,71 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
             message="Model role is not configured.",
             has_api_key=False,
             masked_key="",
+            adapter_enabled=False,
+            network_allowed=False,
+            error_type="missing_provider",
+        )
+    if adapter is None:
+        return ProviderConnectionResult(
+            ok=False,
+            role=role,
+            provider=role_config.provider,
+            model=role_config.model,
+            mode="fake",
+            message=f"Provider {role_config.provider!r} is not registered.",
+            has_api_key=False,
+            masked_key="",
+            adapter_enabled=False,
+            network_allowed=False,
+            error_type="unsupported_provider",
         )
     secret_name = role_config.secret_name()
-    secret_value = str(store.read_secrets().get(secret_name) or "") if secret_name else ""
+    secret_value = ""
+    if secret_name:
+        try:
+            secret_value = resolve_project_secret(store, role_config.api_key_ref)
+        except ProviderError as exc:
+            return ProviderConnectionResult(
+                ok=False,
+                role=role,
+                provider=role_config.provider,
+                model=role_config.model,
+                mode="fake",
+                message=exc.message,
+                has_api_key=False,
+                masked_key="",
+                adapter_enabled=adapter.enabled,
+                network_allowed=adapter.network_allowed,
+                error_type=exc.error_type,
+            )
+    elif adapter.requires_secret:
+        return ProviderConnectionResult(
+            ok=False,
+            role=role,
+            provider=role_config.provider,
+            model=role_config.model,
+            mode="fake",
+            message=f"Provider {role_config.provider!r} requires api_key_ref.",
+            has_api_key=False,
+            masked_key="",
+            adapter_enabled=adapter.enabled,
+            network_allowed=adapter.network_allowed,
+            error_type="missing_secret_ref",
+        )
+    if not adapter.enabled:
+        return ProviderConnectionResult(
+            ok=False,
+            role=role,
+            provider=role_config.provider,
+            model=role_config.model,
+            mode="fake",
+            message=f"Provider adapter {role_config.provider!r} is disabled; no network request was made.",
+            has_api_key=bool(secret_value),
+            masked_key=mask_secret(secret_value),
+            adapter_enabled=False,
+            network_allowed=False,
+            error_type="adapter_disabled",
+        )
     return ProviderConnectionResult(
         ok=True,
         role=role,
@@ -227,6 +334,9 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
         message="Fake connection test passed; no network request was made.",
         has_api_key=bool(secret_value),
         masked_key=mask_secret(secret_value),
+        adapter_enabled=True,
+        network_allowed=False,
+        error_type="",
     )
 
 
@@ -234,11 +344,19 @@ def create_provider_client(store: ProjectStore, role: str) -> ProviderClient:
     role_config = get_model_role_config(store, role)
     if not role_config.provider:
         raise ProviderError("Model role has no provider configured.", error_type="missing_provider")
-    if role_config.provider != MOCK_PROVIDER_ID:
+    adapter = get_provider_adapter(role_config.provider)
+    if adapter is None:
         raise ProviderError(
-            f"Provider {role_config.provider!r} is not enabled in MVP-1 mock-only mode.",
+            f"Provider {role_config.provider!r} is not registered.",
             error_type="unsupported_provider",
         )
+    if not adapter.enabled:
+        raise ProviderError(
+            f"Provider adapter {role_config.provider!r} is disabled; no network request was made.",
+            error_type="adapter_disabled",
+        )
+    if role_config.provider != MOCK_PROVIDER_ID:
+        raise ProviderError(f"Provider {role_config.provider!r} is not available.", error_type="unsupported_provider")
     validate_mock_role_config(store, role_config)
     return MockProviderClient(role_config=role_config)
 
@@ -277,13 +395,17 @@ def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> Pro
         raise
 
 
-def validate_model_role_config(config: ModelRoleConfig, secrets: dict[str, Any]) -> None:
+def validate_model_role_config(
+    config: ModelRoleConfig, secrets: dict[str, Any], *, require_secret_value: bool = True
+) -> None:
     validate_role(config.role)
     if config.provider and not is_safe_identifier(config.provider):
         raise ProviderConfigError(f"Invalid provider id: {config.provider!r}")
+    if "api_key" in config.settings:
+        raise ProviderConfigError("Do not store raw api_key in model role settings.")
     if config.api_key_ref:
         secret_name = config.secret_name()
-        if secret_name not in secrets or not str(secrets.get(secret_name) or ""):
+        if require_secret_value and (secret_name not in secrets or not str(secrets.get(secret_name) or "")):
             raise ProviderConfigError(f"Missing project secret: {secret_name}")
 
 
@@ -297,11 +419,48 @@ def validate_mock_role_config(store: ProjectStore, config: ModelRoleConfig) -> N
     if require_secret and not config.api_key_ref:
         raise ProviderError("Mock provider config requires api_key_ref.", error_type="missing_secret_ref")
     if config.api_key_ref:
-        secret_name = config.secret_name()
-        public_secrets = store.public_state().get("secrets", {})
-        secret_state = public_secrets.get(secret_name) if isinstance(public_secrets, dict) else None
-        if not isinstance(secret_state, dict) or not secret_state.get("has_value"):
-            raise ProviderError(f"Missing project secret: {secret_name}", error_type="missing_secret")
+        resolve_project_secret(store, config.api_key_ref)
+
+
+def get_provider_adapter(provider_id: str) -> ProviderAdapterInfo | None:
+    if not provider_id:
+        return None
+    return PROVIDER_ADAPTER_REGISTRY.get(provider_id)
+
+
+def list_provider_adapters() -> list[dict[str, Any]]:
+    return [PROVIDER_ADAPTER_REGISTRY[key].to_dict() for key in sorted(PROVIDER_ADAPTER_REGISTRY)]
+
+
+def provider_status(store: ProjectStore, role: str) -> ProviderConnectionResult:
+    return fake_test_model_role(store, role)
+
+
+def resolve_project_secret(store: ProjectStore, api_key_ref: str) -> str:
+    if not api_key_ref:
+        raise ProviderError("Provider config is missing api_key_ref.", error_type="missing_secret_ref")
+    if not api_key_ref.startswith(SECRET_REF_PREFIX):
+        raise ProviderError("api_key_ref must use project_secret.<name>.", error_type="invalid_secret_ref")
+    name = api_key_ref[len(SECRET_REF_PREFIX) :].strip()
+    if not name or any(char in name for char in "/\\: "):
+        raise ProviderError("api_key_ref must use project_secret.<name>.", error_type="invalid_secret_ref")
+    secrets = store.read_secrets()
+    if name not in secrets:
+        raise ProviderError(f"Missing project secret: {name}", error_type="missing_secret")
+    value = str(secrets.get(name) or "")
+    if not value:
+        raise ProviderError(f"Project secret is empty: {name}", error_type="empty_secret")
+    return value
+
+
+def provider_config_error_type(message: str) -> str:
+    if "api_key_ref" in message or "Invalid project secret reference" in message:
+        return "invalid_secret_ref"
+    if "Missing project secret" in message:
+        return "missing_secret"
+    if "provider" in message.lower():
+        return "invalid_provider"
+    return "invalid_config"
 
 
 def simulated_provider_error(value: str) -> ProviderError:
