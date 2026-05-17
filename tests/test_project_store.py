@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from novel_agent_workbench import InvalidProjectIdError, ProjectLockError, ProjectStore, StorageError
+from novel_agent_workbench.config import CURRENT_CONFIG_SCHEMA_VERSION
 from novel_agent_workbench.storage import TRASH_SUFFIX
 
 
@@ -25,7 +26,7 @@ class ProjectStoreTest(unittest.TestCase):
             self.assertTrue(store.backups_dir.exists())
             self.assertTrue(store.locks_dir.exists())
             self.assertEqual(store.read_project_meta()["project_id"], "demo")
-            self.assertEqual(store.read_config(), {})
+            self.assertEqual(store.read_config()["schema_version"], CURRENT_CONFIG_SCHEMA_VERSION)
             self.assertEqual(store.read_secrets(), {})
 
     def test_write_and_read_json_with_backup(self) -> None:

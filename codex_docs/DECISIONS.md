@@ -95,3 +95,11 @@ Decision: Add a backend-only `ProjectRegistry` to route and index multiple local
 Reason: Multi-project isolation requires a single safe entrypoint for creating, opening, and listing projects before any UI or generation workflow exists.
 
 Impact: `ProjectRegistry` manages root-level `registry.json`, returns `ProjectStore` instances, and exposes no hard delete API.
+
+## 2026-05-17: MVP-0 Config And Migration Boundary
+
+Decision: Add default config structures and migration helpers as backend-only MVP-0 infrastructure.
+
+Reason: MVP-1 Provider work and MVP-2 context work need stable project-level configuration files before any UI or LLM integration is attempted.
+
+Impact: `config.py` owns default structures and schema version. `ProjectStore` owns safe migration orchestration, checkpoint-before-migration, placeholder data file creation, secrets isolation, and public state masking.

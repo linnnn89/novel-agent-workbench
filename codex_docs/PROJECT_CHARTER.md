@@ -62,6 +62,12 @@ Third engineering slice:
 ProjectRegistry + default workspace_projects routing + registry.json + unit tests
 ```
 
+Foundation completion slice:
+
+```text
+config schema/migration + default project structures + secrets public-state boundary + unit tests
+```
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

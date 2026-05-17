@@ -12,6 +12,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Iterator
 
+from .config import DATA_FILE_DEFAULTS, CURRENT_CONFIG_SCHEMA_VERSION, default_data_file, default_project_config, merge_project_config
+
 
 TRASH_SUFFIX = ".trash"
 REGISTRY_FILENAME = "registry.json"
@@ -70,6 +72,7 @@ class ProjectRegistry:
             }
         )
         store.write_project_meta(meta)
+        store.migrate_config()
         self._upsert_entry(
             {
                 "project_id": project_id,
@@ -191,17 +194,21 @@ class ProjectStore:
     def project_meta_path(self) -> Path:
         return self.root / "project.json"
 
+    def data_file_path(self, name: str) -> Path:
+        if name not in DATA_FILE_DEFAULTS:
+            raise StorageError(f"Unknown managed data file: {name}")
+        return self.data_dir / name
+
     def initialize(self) -> None:
         self._assert_project_root_safe()
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.backups_dir.mkdir(parents=True, exist_ok=True)
-        self.locks_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_storage_dirs()
         if not self.project_meta_path.exists():
             self.write_project_meta({"project_id": self.project_id, "schema_version": 1})
         if not self.config_path.exists():
-            self.write_config({})
+            self.write_config(default_project_config())
         if not self.secrets_path.exists():
             self.write_secrets({})
+        self.ensure_default_data_files()
 
     def read_project_meta(self) -> dict[str, Any]:
         return self.read_json(self.project_meta_path, default={})
@@ -221,6 +228,52 @@ class ProjectStore:
     def write_secrets(self, data: dict[str, Any]) -> None:
         self.write_json(self.secrets_path, data)
 
+    def update_secrets(self, updates: dict[str, Any]) -> dict[str, Any]:
+        secrets = self.read_secrets()
+        secrets.update(updates)
+        self.write_secrets(secrets)
+        return secrets
+
+    def ensure_default_data_files(self) -> list[str]:
+        created: list[str] = []
+        for name in DATA_FILE_DEFAULTS:
+            path = self.data_file_path(name)
+            if not path.exists():
+                self.write_json(path, default_data_file(name))
+                created.append(name)
+        return created
+
+    def migrate_config(self) -> dict[str, Any]:
+        self._assert_project_root_safe()
+        self._ensure_storage_dirs()
+        current = self.read_config()
+        migrated, changed = merge_project_config(current)
+        missing_files = [name for name in DATA_FILE_DEFAULTS if not self.data_file_path(name).exists()]
+        if changed or missing_files:
+            checkpoint = self.create_checkpoint(label="pre_migration")
+            self.write_config(migrated)
+            created_files = self.ensure_default_data_files()
+            return {
+                "changed": True,
+                "schema_version": CURRENT_CONFIG_SCHEMA_VERSION,
+                "checkpoint": checkpoint,
+                "created_files": created_files,
+            }
+        return {
+            "changed": False,
+            "schema_version": CURRENT_CONFIG_SCHEMA_VERSION,
+            "checkpoint": None,
+            "created_files": [],
+        }
+
+    def public_state(self) -> dict[str, Any]:
+        return {
+            "project_id": self.project_id,
+            "project_path": str(self.root),
+            "config": self.read_config(),
+            "secrets": public_secrets_state(self.read_secrets()),
+        }
+
     def read_json(self, path: str | Path, *, default: Any = None) -> Any:
         target = self._resolve_owned_path(path)
         if not target.exists():
@@ -235,7 +288,8 @@ class ProjectStore:
         self._atomic_write_json(target, data)
 
     def create_checkpoint(self, *, label: str = "", include_secrets: bool = False) -> dict[str, Any]:
-        self.initialize()
+        self._assert_project_root_safe()
+        self._ensure_storage_dirs()
         checkpoint_id = utc_stamp()
         checkpoint_dir = self.backups_dir / "checkpoints"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -399,6 +453,11 @@ class ProjectStore:
         except ValueError as exc:
             raise StorageError(f"Path escapes projects root: {path}") from exc
 
+    def _ensure_storage_dirs(self) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.backups_dir.mkdir(parents=True, exist_ok=True)
+        self.locks_dir.mkdir(parents=True, exist_ok=True)
+
 
 def validate_project_id(project_id: str) -> None:
     if not project_id or project_id in {".", ".."}:
@@ -430,6 +489,26 @@ def safe_filename(value: str) -> str:
     cleaned = "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in value)
     cleaned = cleaned.strip("._")
     return cleaned or "checkpoint"
+
+
+def public_secrets_state(secrets: dict[str, Any]) -> dict[str, Any]:
+    public: dict[str, Any] = {}
+    for key, value in secrets.items():
+        if isinstance(value, str):
+            public[key] = {"has_value": bool(value), "masked": mask_secret(value)}
+        elif isinstance(value, dict):
+            public[key] = public_secrets_state(value)
+        else:
+            public[key] = {"has_value": value is not None, "masked": ""}
+    return public
+
+
+def mask_secret(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:3]}****{value[-4:]}"
 
 
 def atomic_write_json_file(path: Path, data: Any) -> None:
