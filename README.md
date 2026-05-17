@@ -45,6 +45,8 @@ MVP-0 first storage slice is implemented:
 - Project initialization.
 - Basic project lock.
 - `config.json` and `secrets.local.json` separation.
+- Checkpoint ZIP with embedded manifest.
+- Reversible checkpoint restore using `.trash` for overwritten files.
 - Unit tests.
 
 Verification command:

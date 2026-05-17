@@ -79,3 +79,11 @@ Decision: Unit tests may create and automatically clean test-only temporary file
 Reason: Storage safety tests need isolated files to verify writes, backups, and locks. Temporary test cleanup is safe when isolated from real runtime data.
 
 Impact: Cleanup is allowed only for system temp directories or test-owned temp directories. Real project files under `workspace_projects/` still follow the no-hard-delete policy and must be retired with `.trash`.
+
+## 2026-05-17: MVP-0 Checkpoint Format
+
+Decision: ProjectStore checkpoints use ZIP archives with an embedded `checkpoint_manifest.json`.
+
+Reason: A ZIP archive is portable, inspectable, and easy to restore locally. The manifest gives future tools a deterministic file list, size, and hash inventory.
+
+Impact: Checkpoints exclude secrets by default and restore without hard deletion. Existing files overwritten during restore are first retired with `.trash`.

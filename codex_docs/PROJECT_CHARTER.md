@@ -50,6 +50,12 @@ First engineering slice:
 ProjectStore + atomic JSON persistence + backup + project lock + secrets/config separation + unit tests
 ```
 
+Second engineering slice:
+
+```text
+ProjectStore checkpoint ZIP + manifest + reversible restore
+```
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:
@@ -76,6 +82,12 @@ Testing exception:
 
 ```text
 Unit tests may create and clean isolated temporary files/directories. This exception does not apply to real runtime project data.
+```
+
+Checkpoint policy:
+
+```text
+Checkpoints exclude secrets by default. Restore must not hard delete; overwritten files are retired with .trash.
 ```
 
 ## Construction Strategy

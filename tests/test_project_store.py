@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import inspect
+import json
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from novel_agent_workbench import InvalidProjectIdError, ProjectLockError, ProjectStore
+from novel_agent_workbench import InvalidProjectIdError, ProjectLockError, ProjectStore, StorageError
 from novel_agent_workbench.storage import TRASH_SUFFIX
 
 
@@ -84,6 +86,89 @@ class ProjectStoreTest(unittest.TestCase):
         self.assertNotIn("delete", public_methods)
         self.assertNotIn("remove", public_methods)
         self.assertFalse(any(name.startswith("delete_") or name.startswith("remove_") for name in public_methods))
+
+    def test_checkpoint_excludes_secrets_by_default_and_writes_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            store.write_config({"version": 1})
+            store.write_secrets({"api_key": "sk-test-secret"})
+
+            checkpoint = store.create_checkpoint(label="before change")
+
+            checkpoint_path = Path(checkpoint["path"])
+            self.assertTrue(checkpoint_path.exists())
+            with zipfile.ZipFile(checkpoint_path, "r") as archive:
+                names = set(archive.namelist())
+                manifest = json.loads(archive.read("checkpoint_manifest.json").decode("utf-8"))
+
+            self.assertIn("checkpoint_manifest.json", names)
+            self.assertIn("data/config.json", names)
+            self.assertIn("project.json", names)
+            self.assertNotIn("data/secrets.local.json", names)
+            self.assertFalse(manifest["include_secrets"])
+            self.assertTrue(all("sha256" in item for item in manifest["files"]))
+
+    def test_checkpoint_can_include_secrets_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            store.write_secrets({"api_key": "sk-test-secret"})
+
+            checkpoint = store.create_checkpoint(label="with secrets", include_secrets=True)
+
+            with zipfile.ZipFile(Path(checkpoint["path"]), "r") as archive:
+                names = set(archive.namelist())
+
+            self.assertIn("data/secrets.local.json", names)
+
+    def test_restore_checkpoint_restores_files_and_retires_overwritten_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            store.write_config({"version": 1})
+            checkpoint = store.create_checkpoint(label="before version 2")
+
+            store.write_config({"version": 2})
+            restored = store.restore_checkpoint(checkpoint["path"])
+
+            self.assertEqual(store.read_config(), {"version": 1})
+            self.assertIn("data/config.json", restored["restored_files"])
+            retired_configs = list(store.data_dir.glob(f"config.json.*{TRASH_SUFFIX}"))
+            self.assertTrue(retired_configs)
+            self.assertTrue(any('"version": 2' in item.read_text(encoding="utf-8") for item in retired_configs))
+
+    def test_restore_rejects_project_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            first = ProjectStore.open(Path(temp), "first")
+            second = ProjectStore.open(Path(temp), "second")
+            first.initialize()
+            second.initialize()
+            checkpoint = first.create_checkpoint(label="first only")
+
+            with self.assertRaises(StorageError):
+                second.restore_checkpoint(checkpoint["path"])
+
+    def test_restore_rejects_unsafe_checkpoint_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            bad_zip = store.backups_dir / "bad.zip"
+            with zipfile.ZipFile(bad_zip, "w") as archive:
+                archive.writestr(
+                    "checkpoint_manifest.json",
+                    json.dumps(
+                        {
+                            "checkpoint_id": "bad",
+                            "project_id": "demo",
+                            "files": [{"path": "../escape.json", "size": 2, "sha256": "bad"}],
+                        }
+                    ),
+                )
+                archive.writestr("../escape.json", "{}")
+
+            with self.assertRaises(StorageError):
+                store.restore_checkpoint(bad_zip)
 
 
 if __name__ == "__main__":

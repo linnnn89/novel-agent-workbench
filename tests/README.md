@@ -18,3 +18,13 @@ py -3.13 -m unittest discover -s tests
 ```
 
 Current implemented tests cover the storage kernel only. Draft/confirmed tests belong to a later MVP slice.
+
+Checkpoint tests currently cover:
+
+- manifest creation,
+- default secret exclusion,
+- explicit secret inclusion,
+- restore to checkpoint state,
+- `.trash` retirement of overwritten files,
+- project mismatch rejection,
+- unsafe checkpoint path rejection.

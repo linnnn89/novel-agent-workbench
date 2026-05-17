@@ -4,9 +4,11 @@ import json
 import os
 import shutil
 import tempfile
+import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -112,6 +114,54 @@ class ProjectStore:
         target = self._resolve_owned_path(path)
         self._atomic_write_json(target, data)
 
+    def create_checkpoint(self, *, label: str = "", include_secrets: bool = False) -> dict[str, Any]:
+        self.initialize()
+        checkpoint_id = utc_stamp()
+        checkpoint_dir = self.backups_dir / "checkpoints"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        safe_label = safe_filename(label.strip()) if label.strip() else "checkpoint"
+        checkpoint_path = checkpoint_dir / f"{checkpoint_id}_{safe_label}.zip"
+        files = self._checkpoint_file_entries(include_secrets=include_secrets)
+        manifest = {
+            "checkpoint_id": checkpoint_id,
+            "created_at": checkpoint_id,
+            "project_id": self.project_id,
+            "label": label,
+            "include_secrets": bool(include_secrets),
+            "format": "novel_agent_workbench.project_checkpoint.v1",
+            "files": files,
+        }
+        with zipfile.ZipFile(checkpoint_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("checkpoint_manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
+            for item in files:
+                archive.write(self.root / item["path"], arcname=item["path"])
+        return {**manifest, "path": str(checkpoint_path)}
+
+    def restore_checkpoint(self, checkpoint_path: str | Path) -> dict[str, Any]:
+        source = self._resolve_owned_path(checkpoint_path)
+        with zipfile.ZipFile(source, "r") as archive:
+            manifest = self._read_checkpoint_manifest(archive)
+            if manifest.get("project_id") != self.project_id:
+                raise StorageError(
+                    f"Checkpoint project mismatch: {manifest.get('project_id')!r} != {self.project_id!r}"
+                )
+            files = manifest.get("files")
+            if not isinstance(files, list):
+                raise StorageError("Checkpoint manifest has no file list.")
+            restored: list[str] = []
+            for item in files:
+                if not isinstance(item, dict):
+                    raise StorageError("Checkpoint manifest contains an invalid file entry.")
+                relative = self._safe_checkpoint_relative_path(str(item.get("path") or ""))
+                data = archive.read(relative.as_posix())
+                expected_sha = str(item.get("sha256") or "")
+                if sha256(data).hexdigest() != expected_sha:
+                    raise StorageError(f"Checkpoint file hash mismatch: {relative.as_posix()}")
+                target = self._resolve_owned_path(relative)
+                self._atomic_write_bytes(target, data, retire_existing=True)
+                restored.append(relative.as_posix())
+        return {"checkpoint_id": manifest.get("checkpoint_id"), "project_id": self.project_id, "restored_files": restored}
+
     @contextmanager
     def lock(self) -> Iterator[None]:
         self.initialize()
@@ -153,6 +203,23 @@ class ProjectStore:
                 retire_path(temp_path)
             raise
 
+    def _atomic_write_bytes(self, path: Path, data: bytes, *, retire_existing: bool = False) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(fd, "wb") as file:
+                file.write(data)
+                file.flush()
+                os.fsync(file.fileno())
+            if path.exists() and retire_existing:
+                retire_path(path)
+            os.replace(temp_path, path)
+        except Exception:
+            if temp_path.exists():
+                retire_path(temp_path)
+            raise
+
     def _backup_path_for(self, path: Path) -> Path:
         relative = path.relative_to(self.root)
         safe_name = "__".join(relative.parts)
@@ -164,6 +231,57 @@ class ProjectStore:
         target = target.resolve()
         self._assert_path_inside_root(target)
         return target
+
+    def _checkpoint_file_entries(self, *, include_secrets: bool) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        for path in sorted(self.root.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(self.root)
+            if self._should_exclude_from_checkpoint(relative, include_secrets=include_secrets):
+                continue
+            data = path.read_bytes()
+            entries.append(
+                {
+                    "path": relative.as_posix(),
+                    "size": len(data),
+                    "sha256": sha256(data).hexdigest(),
+                }
+            )
+        return entries
+
+    def _should_exclude_from_checkpoint(self, relative: Path, *, include_secrets: bool) -> bool:
+        parts = relative.parts
+        if not parts:
+            return True
+        if parts[0] in {"backups", "locks"}:
+            return True
+        if relative.name.endswith(TRASH_SUFFIX):
+            return True
+        if not include_secrets and relative.as_posix() == "data/secrets.local.json":
+            return True
+        return False
+
+    def _read_checkpoint_manifest(self, archive: zipfile.ZipFile) -> dict[str, Any]:
+        names = set(archive.namelist())
+        if "checkpoint_manifest.json" not in names:
+            raise StorageError("Checkpoint has no checkpoint_manifest.json.")
+        manifest = json.loads(archive.read("checkpoint_manifest.json").decode("utf-8"))
+        if not isinstance(manifest, dict):
+            raise StorageError("Checkpoint manifest is not an object.")
+        for name in names:
+            if name == "checkpoint_manifest.json":
+                continue
+            self._safe_checkpoint_relative_path(name)
+        return manifest
+
+    def _safe_checkpoint_relative_path(self, value: str) -> Path:
+        if not value or value.startswith("/") or value.startswith("\\") or ":" in value:
+            raise StorageError(f"Unsafe checkpoint path: {value!r}")
+        relative = Path(value)
+        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+            raise StorageError(f"Unsafe checkpoint path: {value!r}")
+        return relative
 
     def _assert_project_root_safe(self) -> None:
         self._assert_path_inside_root(self.root.resolve())
@@ -200,3 +318,9 @@ def trash_path_for(path: str | Path) -> Path:
 
 def utc_stamp() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def safe_filename(value: str) -> str:
+    cleaned = "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in value)
+    cleaned = cleaned.strip("._")
+    return cleaned or "checkpoint"
