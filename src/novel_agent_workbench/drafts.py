@@ -31,8 +31,7 @@ class DraftGenerationRequest:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.chapter_id.strip():
-            raise DraftGenerationError("chapter_id cannot be empty.")
+        validate_chapter_id(self.chapter_id)
         if not self.prompt.strip():
             raise DraftGenerationError("prompt cannot be empty.")
 
@@ -195,8 +194,7 @@ class DraftGenerationService:
             if draft.get("status") != "draft" or draft_entry.get("status") != "draft":
                 raise DraftGenerationError(f"Draft is not committable: {draft_id}")
             chapter_id = str(draft.get("chapter_id") or "").strip()
-            if not chapter_id:
-                raise DraftGenerationError(f"Draft has no chapter_id: {draft_id}")
+            validate_chapter_id(chapter_id)
             confirmed_index = self._read_confirmed_index()
             if any(item.get("chapter_id") == chapter_id for item in confirmed_index):
                 raise DraftGenerationError(f"Confirmed chapter already exists: {chapter_id}")
@@ -263,6 +261,7 @@ class DraftGenerationService:
         return self._read_confirmed_index()
 
     def read_confirmed_chapter(self, chapter_id: str) -> dict[str, Any]:
+        validate_chapter_id(chapter_id)
         for item in self._read_confirmed_index():
             if item.get("chapter_id") != chapter_id:
                 continue
@@ -334,3 +333,13 @@ class DraftGenerationService:
 
 def new_draft_id() -> str:
     return f"{utc_stamp()}_{uuid4().hex[:12]}"
+
+
+def validate_chapter_id(chapter_id: str) -> None:
+    value = chapter_id.strip()
+    if not value or value in {".", ".."}:
+        raise DraftGenerationError("chapter_id cannot be empty, '.' or '..'.")
+    if any(separator in value for separator in ("/", "\\", ":", " ")):
+        raise DraftGenerationError(f"Unsafe chapter_id: {chapter_id!r}")
+    if not all(character.isascii() and (character.isalnum() or character in {"_", "-"}) for character in value):
+        raise DraftGenerationError(f"Unsafe chapter_id: {chapter_id!r}")

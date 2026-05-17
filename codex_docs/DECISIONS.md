@@ -175,3 +175,19 @@ Decision: Document Provider request/response and error contracts before implemen
 Reason: Real Provider integration is a higher-risk step because it introduces network side effects, API keys, and cost. The contract must require `project_secret.*` references, `secrets.local.json` storage, no plaintext keys in config, and no prompt/secrets in logs.
 
 Impact: `codex_docs\APPLICATION_SERVICE_CONTRACT.md` records current Provider fields and error types. No real Provider has been added.
+
+## 2026-05-17: MVP-1 Chapter ID Safety
+
+Decision: Restrict `chapter_id` to ASCII letters, numbers, `_`, and `-`.
+
+Reason: Confirmed chapter artifacts are stored by chapter id. Allowing spaces, path separators, colons, Unicode ids, or values that require filename cleaning can create path ambiguity or file collisions.
+
+Impact: Human-readable chapter names should use title fields. Storage ids remain simple and stable.
+
+## 2026-05-17: MVP-1 Audit Consistency Checks
+
+Decision: Extend `audit-project` to check confirmed chapter consistency and keep audit read-only.
+
+Reason: Explicit commit writes multiple files. Per-file atomic writes plus pre-commit checkpoint are useful, but a crash or future bug can still leave an artifact/index/status mismatch.
+
+Impact: Audit now checks orphan confirmed artifacts, missing confirmed artifacts, source draft commit status, missing commit log entries, unsafe confirmed artifact paths, default checkpoint secret inclusion, and public-state leaks. Audit uses a no-initialize public state path so uninitialized projects are not modified during audit.

@@ -120,6 +120,14 @@ CLI Quickstart + Application Service contract + read-only safety audit + provide
 
 Real Provider integration must not start until the mock project path and `audit-project` pass.
 
+MVP-1 quality hardening slice:
+
+```text
+safe ASCII chapter_id validation + read-only audit + half-commit consistency checks.
+```
+
+Audit must not write project files. It should detect obvious confirmed chapter inconsistencies before later UI or real Provider work.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

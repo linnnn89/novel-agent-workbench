@@ -94,6 +94,8 @@ max_tokens
 metadata
 ```
 
+`chapter_id` must use ASCII letters, numbers, `_`, or `-`.
+
 Returns draft metadata:
 
 ```text

@@ -35,7 +35,7 @@ src/          future application source code
 tests/        future tests
 ```
 
-## Current Status
+## Current Backend Status
 
 MVP-0 first storage slice is implemented:
 
@@ -62,6 +62,7 @@ MVP-0 first storage slice is implemented:
 - Minimal backend application service facade for project creation, state, drafts, and explicit commit.
 - Backend-only CLI smoke runner for the project -> mock draft -> optional commit loop.
 - Backend-only safety audit for config, logs, checkpoints, and public state.
+- Quality hardening for safe ASCII `chapter_id` values and half-commit audit detection.
 - Unit tests.
 
 Verification command:

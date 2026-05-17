@@ -164,3 +164,10 @@ InvalidProjectIdError
 
 Use only letters, numbers, `_`, and `-`. Do not use slashes, colons, spaces, `.` or `..`.
 
+Unsafe chapter id:
+
+```text
+DraftGenerationError: Unsafe chapter_id
+```
+
+Use ASCII letters, numbers, `_`, and `-` for `chapter_id`. Put Chinese or long human-readable names in `--title` / `--chapter-title`.

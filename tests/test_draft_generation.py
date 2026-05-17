@@ -104,6 +104,9 @@ class DraftGenerationServiceTest(unittest.TestCase):
             DraftGenerationRequest(chapter_id="", prompt="draft")
         with self.assertRaises(DraftGenerationError):
             DraftGenerationRequest(chapter_id="chapter_001", prompt=" ")
+        for chapter_id in ("../chapter", "chapter 001", "chapter:001", "章节001"):
+            with self.assertRaises(DraftGenerationError):
+                DraftGenerationRequest(chapter_id=chapter_id, prompt="draft")
 
     def test_checkpoint_includes_draft_without_prompt_or_secret(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

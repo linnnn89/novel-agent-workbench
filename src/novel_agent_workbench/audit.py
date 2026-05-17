@@ -67,6 +67,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
         ],
     )
     audit_checkpoints(store, checked_paths=checked_paths, findings=findings)
+    audit_draft_confirmed_consistency(store, checked_paths=checked_paths, findings=findings)
     audit_public_state(store, checked_paths=checked_paths, findings=findings)
     return {
         "ok": not findings,
@@ -134,9 +135,146 @@ def read_checkpoint_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def audit_draft_confirmed_consistency(
+    store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]
+) -> None:
+    drafts_index_path = store.data_dir / "drafts_index.json"
+    confirmed_index_path = store.data_dir / "confirmed_chapters.json"
+    confirmed_dir = store.data_dir / "confirmed_chapters"
+    commit_log_path = store.data_dir / "commit_log.json"
+    drafts_index = read_json_file(drafts_index_path, checked_paths=checked_paths, findings=findings)
+    confirmed_index = read_json_file(confirmed_index_path, checked_paths=checked_paths, findings=findings)
+    commit_log = read_json_file(commit_log_path, checked_paths=checked_paths, findings=findings)
+    draft_entries = list_items(drafts_index, "drafts")
+    confirmed_entries = list_items(confirmed_index, "chapters")
+    commit_entries = list_items(commit_log, "commits")
+    draft_by_id = {str(item.get("draft_id")): item for item in draft_entries if item.get("draft_id")}
+    confirmed_by_draft = {str(item.get("source_draft_id")): item for item in confirmed_entries if item.get("source_draft_id")}
+    committed_log_draft_ids = {str(item.get("draft_id")) for item in commit_entries if item.get("draft_id")}
+    confirmed_paths = {normalize_project_path(str(item.get("path"))) for item in confirmed_entries if item.get("path")}
+
+    checked_paths.append(str(confirmed_dir))
+    if confirmed_dir.exists():
+        for artifact_path in sorted(confirmed_dir.glob("*.json")):
+            relative = artifact_path.relative_to(store.root).as_posix()
+            checked_paths.append(str(artifact_path))
+            if relative not in confirmed_paths:
+                findings.append(
+                    AuditFinding(
+                        code="orphan_confirmed_artifact",
+                        path=str(artifact_path),
+                        message="Confirmed artifact is not referenced by data/confirmed_chapters.json.",
+                    )
+                )
+
+    for draft_id, draft_entry in draft_by_id.items():
+        status = str(draft_entry.get("status") or "")
+        if status == "committed" and draft_id not in confirmed_by_draft:
+            findings.append(
+                AuditFinding(
+                    code="committed_draft_without_confirmed_chapter",
+                    path=str(drafts_index_path),
+                    message=f"Draft {draft_id} is marked committed but has no confirmed chapter index entry.",
+                )
+            )
+
+    for entry in confirmed_entries:
+        chapter_id = str(entry.get("chapter_id") or "")
+        source_draft_id = str(entry.get("source_draft_id") or "")
+        path_value = entry.get("path")
+        if not isinstance(path_value, str) or not path_value:
+            findings.append(
+                AuditFinding(
+                    code="invalid_confirmed_index_entry",
+                    path=str(confirmed_index_path),
+                    message=f"Confirmed chapter {chapter_id or '<unknown>'} has no artifact path.",
+                )
+            )
+            continue
+        artifact_path = (store.root / path_value).resolve()
+        try:
+            artifact_path.relative_to(store.root.resolve())
+        except ValueError:
+            findings.append(
+                AuditFinding(
+                    code="unsafe_confirmed_artifact_path",
+                    path=str(confirmed_index_path),
+                    message=f"Confirmed chapter {chapter_id or '<unknown>'} artifact path escapes project root.",
+                )
+            )
+            continue
+        artifact = read_json_file(artifact_path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            findings.append(
+                AuditFinding(
+                    code="missing_confirmed_artifact",
+                    path=str(artifact_path),
+                    message=f"Confirmed chapter {chapter_id or '<unknown>'} artifact is missing.",
+                )
+            )
+            continue
+        if str(artifact.get("chapter_id") or "") != chapter_id:
+            findings.append(
+                AuditFinding(
+                    code="confirmed_chapter_id_mismatch",
+                    path=str(artifact_path),
+                    message="Confirmed artifact chapter_id does not match index entry.",
+                )
+            )
+        if source_draft_id not in draft_by_id:
+            findings.append(
+                AuditFinding(
+                    code="confirmed_source_draft_missing",
+                    path=str(confirmed_index_path),
+                    message=f"Confirmed chapter {chapter_id} references missing draft {source_draft_id}.",
+                )
+            )
+        elif str(draft_by_id[source_draft_id].get("status") or "") != "committed":
+            findings.append(
+                AuditFinding(
+                    code="confirmed_source_draft_not_committed",
+                    path=str(confirmed_index_path),
+                    message=f"Confirmed chapter {chapter_id} source draft is not marked committed.",
+                )
+            )
+        if source_draft_id and source_draft_id not in committed_log_draft_ids:
+            findings.append(
+                AuditFinding(
+                    code="confirmed_without_commit_log",
+                    path=str(commit_log_path),
+                    message=f"Confirmed chapter {chapter_id} has no commit log entry for draft {source_draft_id}.",
+                )
+            )
+
+
+def read_json_file(path: Path, *, checked_paths: list[str], findings: list[AuditFinding]) -> dict[str, Any] | None:
+    checked_paths.append(str(path))
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        findings.append(AuditFinding(code="invalid_json", path=str(path), message="JSON file cannot be parsed."))
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def list_items(source: dict[str, Any] | None, key: str) -> list[dict[str, Any]]:
+    if not isinstance(source, dict):
+        return []
+    value = source.get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def normalize_project_path(value: str) -> str:
+    return value.replace("\\", "/")
+
+
 def audit_public_state(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
     checked_paths.append("public_project_state")
-    text = json.dumps(public_project_state(store), ensure_ascii=False, sort_keys=True)
+    text = json.dumps(public_project_state(store, initialize=False), ensure_ascii=False, sort_keys=True)
     for pattern in SECRET_PATTERNS:
         if pattern.search(text):
             findings.append(

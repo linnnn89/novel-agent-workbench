@@ -73,6 +73,7 @@ Draft generation tests currently cover:
 
 - mock writer output written to `data/drafts/*.json`,
 - draft index creation at `data/drafts_index.json`,
+- unsafe `chapter_id` rejection,
 - no creation of confirmed chapter files or export folders,
 - no mutation of Memory Bank or export settings,
 - draft artifact/index exclusion of prompt text and plaintext secrets,
@@ -113,4 +114,7 @@ Audit tests currently cover:
 - clean smoke project passes audit,
 - plaintext `sk-...` / `api_key` in config fails audit,
 - prompt text in provider log fails audit,
-- content in commit log fails audit.
+- content in commit log fails audit,
+- orphan confirmed artifact detection,
+- confirmed index entry with uncommitted source draft detection,
+- audit read-only behavior on uninitialized projects.

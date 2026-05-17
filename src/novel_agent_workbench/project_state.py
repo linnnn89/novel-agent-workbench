@@ -7,10 +7,11 @@ from .providers import MODEL_ROLES, ProviderConfigError, get_model_role_config
 from .storage import ProjectStore
 
 
-def public_project_state(store: ProjectStore) -> dict[str, Any]:
+def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dict[str, Any]:
     """Return a UI-safe project summary without prompt, content, or plaintext secrets."""
 
-    store.initialize()
+    if initialize:
+        store.initialize()
     draft_service = DraftGenerationService(store)
     drafts = draft_service.list_drafts()
     confirmed = draft_service.list_confirmed_chapters()

@@ -9,6 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from novel_agent_workbench import WorkbenchApplicationService, audit_project
+from novel_agent_workbench.drafts import DraftGenerationRequest, DraftGenerationService
+from novel_agent_workbench.providers import set_model_role_config
 from novel_agent_workbench.storage import ProjectStore
 
 
@@ -67,6 +69,78 @@ class ProjectAuditTest(unittest.TestCase):
 
             self.assertFalse(result["ok"])
             self.assertIn("possible_content_in_commit_log", {item["code"] for item in result["findings"]})
+
+    def test_audit_fails_on_orphan_confirmed_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store(temp)
+            service = DraftGenerationService(store)
+            draft = service.generate_draft(DraftGenerationRequest(chapter_id="chapter_001", prompt="draft"))
+            store.write_json(
+                store.data_dir / "confirmed_chapters" / "chapter_001.json",
+                {
+                    "schema_version": 1,
+                    "chapter_id": "chapter_001",
+                    "content": "orphan content",
+                    "source_draft_id": draft.draft_id,
+                },
+            )
+
+            result = audit_project(store)
+
+            self.assertFalse(result["ok"])
+            self.assertIn("orphan_confirmed_artifact", {item["code"] for item in result["findings"]})
+
+    def test_audit_fails_on_confirmed_index_when_source_draft_not_committed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store(temp)
+            service = DraftGenerationService(store)
+            draft = service.generate_draft(DraftGenerationRequest(chapter_id="chapter_001", prompt="draft"))
+            artifact_path = store.data_dir / "confirmed_chapters" / "chapter_001.json"
+            store.write_json(
+                artifact_path,
+                {
+                    "schema_version": 1,
+                    "chapter_id": "chapter_001",
+                    "content": "half commit content",
+                    "source_draft_id": draft.draft_id,
+                },
+            )
+            store.write_json(
+                store.data_dir / "confirmed_chapters.json",
+                {
+                    "schema_version": 1,
+                    "chapters": [
+                        {
+                            "chapter_id": "chapter_001",
+                            "source_draft_id": draft.draft_id,
+                            "path": "data/confirmed_chapters/chapter_001.json",
+                        }
+                    ],
+                },
+            )
+
+            result = audit_project(store)
+            codes = {item["code"] for item in result["findings"]}
+
+            self.assertFalse(result["ok"])
+            self.assertIn("confirmed_source_draft_not_committed", codes)
+            self.assertIn("confirmed_without_commit_log", codes)
+
+    def test_audit_is_read_only_for_uninitialized_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+
+            result = audit_project(store)
+
+            self.assertTrue(result["ok"], json.dumps(result, ensure_ascii=False))
+            self.assertFalse(store.root.exists())
+
+
+def configured_store(temp: str) -> ProjectStore:
+    store = ProjectStore.open(Path(temp), "demo")
+    store.initialize()
+    set_model_role_config(store, "writer", {"provider": "mock", "model": "mock-writer"})
+    return store
 
 
 if __name__ == "__main__":
