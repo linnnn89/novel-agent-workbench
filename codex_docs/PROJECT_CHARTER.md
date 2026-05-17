@@ -96,6 +96,14 @@ Draft review/status + explicit draft commit -> confirmed chapter artifact/index 
 
 Confirmed chapters are now the only stored candidate for future formal context. Memory Bank, RAG, and export auto-updates remain intentionally unimplemented.
 
+MVP-1 application service facade slice:
+
+```text
+Stable backend facade for project creation, safe state, mock draft generation, draft read/list, explicit commit, and confirmed chapter read/list.
+```
+
+This is an application boundary for future CLI/HTTP/UI. It must stay thin and delegate to storage, provider, draft, and state modules.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

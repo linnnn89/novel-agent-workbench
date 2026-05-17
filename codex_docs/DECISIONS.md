@@ -143,3 +143,11 @@ Decision: Add `public_project_state(...)` as the backend state surface for futur
 Reason: UI-facing state should be available without exposing prompt text, generated chapter content, or plaintext secrets.
 
 Impact: The state summary reports counts, latest draft metadata, latest confirmed chapter metadata, role configuration summaries, and masked secrets only.
+
+## 2026-05-17: MVP-1 Backend Application Service Facade
+
+Decision: Add `WorkbenchApplicationService` as the stable backend facade for future CLI, HTTP, or UI layers.
+
+Reason: The UI should not directly orchestrate registry, provider config, draft generation, commit, and state modules. A thin facade keeps workflows discoverable and testable without adding a frontend yet.
+
+Impact: The facade exposes project creation/listing, safe state, mock writer configuration, draft generation/list/read, explicit commit, and confirmed chapter read/list. It does not implement network APIs, UI routing, real Provider calls, Memory Bank/RAG/export updates, or DOCX.

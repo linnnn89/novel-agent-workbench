@@ -59,6 +59,7 @@ MVP-0 first storage slice is implemented:
 - Draft Generation Service skeleton that writes mock writer output to draft artifacts only.
 - Explicit draft commit boundary that promotes drafts to confirmed chapter artifacts only when called.
 - Safe project state summary for future UI use, excluding prompt text, chapter content, and plaintext secrets.
+- Minimal backend application service facade for project creation, state, drafts, and explicit commit.
 - Unit tests.
 
 Verification command:

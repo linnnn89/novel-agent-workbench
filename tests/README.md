@@ -90,3 +90,12 @@ Draft commit and project state tests currently cover:
 - checkpoint-after-commit exclusion of prompt text and plaintext secrets,
 - no Memory Bank, RAG, or export side effects,
 - public project state exclusion of prompt text, chapter content, and plaintext secrets.
+
+Application service facade tests currently cover:
+
+- project creation and project listing,
+- mock writer configuration through the backend facade,
+- draft generation/list/read through the backend facade,
+- explicit commit and confirmed chapter read through the backend facade,
+- facade state exclusion of prompt text, chapter content, and plaintext secrets,
+- failed generation leaving no draft behind.
