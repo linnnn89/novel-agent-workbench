@@ -19,6 +19,18 @@ MOCK_PROVIDER_ID = "mock"
 CHUTES_PROVIDER_ID = "chutes_openai"
 PROVIDER_CALL_LOG_FILENAME = "provider_call_log.json"
 DISABLED_ADAPTER_IDS = ("openai_compatible", "deepseek", CHUTES_PROVIDER_ID)
+REAL_GENERATION_FLAG = "real_generation_enabled"
+REAL_GENERATION_BLOCKING_AUDIT_CODES = {
+    "possible_secret_in_config",
+    "raw_provider_api_key_in_config",
+    "possible_prompt_in_provider_log",
+    "possible_secret_in_provider_log",
+    "possible_content_in_commit_log",
+    "possible_secret_in_commit_log",
+    "secrets_in_checkpoint",
+    "possible_secret_in_public_state",
+    "possible_prompt_or_content_in_public_state",
+}
 
 
 class ProviderConfigError(ValueError):
@@ -104,6 +116,7 @@ class ProviderConnectionResult:
     adapter_enabled: bool = False
     network_allowed: bool = False
     error_type: str = ""
+    real_generation_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -121,6 +134,7 @@ class ProviderDryRunResult:
     network_allowed: bool
     error_type: str
     request_summary: dict[str, Any]
+    real_generation_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -254,6 +268,55 @@ class MockProviderClient(ProviderClient):
         )
 
 
+@dataclass(slots=True)
+class ChutesOpenAIProviderClient(ProviderClient):
+    role_config: ModelRoleConfig
+    api_key: str
+    timeout_seconds: float = 60.0
+
+    def generate(self, request: ProviderRequest) -> ProviderResponse:
+        if request.role != self.role_config.role:
+            raise ProviderError(
+                f"Request role {request.role!r} does not match client role {self.role_config.role!r}.",
+                error_type="invalid_request",
+            )
+        if not self.role_config.model:
+            raise ProviderError("Chutes provider requires a model id.", error_type="missing_model")
+        if not self.role_config.base_url:
+            raise ProviderError("Chutes provider requires base_url.", error_type="missing_base_url")
+        try:
+            status_code, data = send_openai_compatible_chat_completion(
+                role_config=self.role_config,
+                request=request,
+                api_key=self.api_key,
+                timeout_seconds=self.timeout_seconds,
+            )
+        except urllib.error.HTTPError as exc:
+            raise ProviderError(f"HTTP error {int(exc.code)} from provider.", error_type="http_error") from exc
+        except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
+            raise ProviderError("Network error during provider generation.", error_type="network_error") from exc
+        if not 200 <= status_code < 300:
+            raise ProviderError(f"HTTP error {status_code} from provider.", error_type="http_error")
+        first_choice = first_response_choice(data)
+        text = choice_text(first_choice)
+        if not text:
+            raise ProviderError("Provider response did not contain assistant content.", error_type="empty_response")
+        usage = data.get("usage") if isinstance(data, dict) and isinstance(data.get("usage"), dict) else {}
+        return ProviderResponse(
+            text=text,
+            usage=safe_usage(usage),
+            model=self.role_config.model,
+            provider=CHUTES_PROVIDER_ID,
+            finish_reason=str(first_choice.get("finish_reason") or "") if isinstance(first_choice, dict) else "",
+            raw_metadata={
+                "mode": "real_generation",
+                "status_code": status_code,
+                "base_url_host": safe_url_host(self.role_config.base_url),
+                "response_text_chars": len(text),
+            },
+        )
+
+
 PROVIDER_ADAPTER_REGISTRY: dict[str, ProviderAdapterInfo] = {
     MOCK_PROVIDER_ID: ProviderAdapterInfo(
         adapter_id=MOCK_PROVIDER_ID,
@@ -337,6 +400,34 @@ def configure_provider_role(
     return set_model_role_config_without_secret_value_requirement(store, role, role_config)
 
 
+def set_real_generation_enabled(store: ProjectStore, role: str, *, provider: str, enabled: bool) -> ModelRoleConfig:
+    role_config = get_model_role_config(store, role)
+    provider = str(provider or "").strip()
+    if role != "writer":
+        raise ProviderConfigError("Real generation can only be enabled for writer in this phase.")
+    if provider != CHUTES_PROVIDER_ID:
+        raise ProviderConfigError("Only chutes_openai can be explicitly enabled for real generation in this phase.")
+    if role_config.provider != provider:
+        raise ProviderConfigError(f"Role {role!r} is not configured for provider {provider!r}.")
+    if not role_config.model:
+        raise ProviderConfigError("Real generation requires a model id.")
+    if not role_config.base_url:
+        raise ProviderConfigError("Real generation requires base_url.")
+    if not role_config.api_key_ref:
+        raise ProviderConfigError("Real generation requires api_key_ref.")
+    settings = {**role_config.settings, REAL_GENERATION_FLAG: bool(enabled)}
+    updated = ModelRoleConfig(
+        role=role_config.role,
+        provider=role_config.provider,
+        model=role_config.model,
+        base_url=role_config.base_url,
+        api_key_ref=role_config.api_key_ref,
+        settings=settings,
+    )
+    validate_model_role_config(updated, store.read_secrets(), require_secret_value=False)
+    return set_model_role_config_without_secret_value_requirement(store, role, updated)
+
+
 def set_model_role_config_without_secret_value_requirement(
     store: ProjectStore, role: str, role_config: ModelRoleConfig
 ) -> ModelRoleConfig:
@@ -373,6 +464,7 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
             adapter_enabled=bool(adapter.enabled) if adapter else False,
             network_allowed=False,
             error_type=provider_config_error_type(str(exc)),
+            real_generation_enabled=is_real_generation_enabled(role_config),
         )
     if not role_config.is_configured():
         return ProviderConnectionResult(
@@ -387,6 +479,7 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
             adapter_enabled=False,
             network_allowed=False,
             error_type="missing_provider",
+            real_generation_enabled=False,
         )
     if adapter is None:
         return ProviderConnectionResult(
@@ -401,6 +494,7 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
             adapter_enabled=False,
             network_allowed=False,
             error_type="unsupported_provider",
+            real_generation_enabled=is_real_generation_enabled(role_config),
         )
     secret_name = role_config.secret_name()
     secret_value = ""
@@ -420,6 +514,7 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
                 adapter_enabled=adapter.enabled,
                 network_allowed=adapter.network_allowed,
                 error_type=exc.error_type,
+                real_generation_enabled=is_real_generation_enabled(role_config),
             )
     elif adapter.requires_secret:
         return ProviderConnectionResult(
@@ -434,6 +529,7 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
             adapter_enabled=adapter.enabled,
             network_allowed=adapter.network_allowed,
             error_type="missing_secret_ref",
+            real_generation_enabled=is_real_generation_enabled(role_config),
         )
     if not adapter.enabled:
         return ProviderConnectionResult(
@@ -448,6 +544,7 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
             adapter_enabled=False,
             network_allowed=False,
             error_type="adapter_disabled",
+            real_generation_enabled=is_real_generation_enabled(role_config),
         )
     return ProviderConnectionResult(
         ok=True,
@@ -461,6 +558,7 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
         adapter_enabled=True,
         network_allowed=False,
         error_type="",
+        real_generation_enabled=is_real_generation_enabled(role_config),
     )
 
 
@@ -474,6 +572,9 @@ def create_provider_client(store: ProjectStore, role: str) -> ProviderClient:
             f"Provider {role_config.provider!r} is not registered.",
             error_type="unsupported_provider",
         )
+    if role_config.provider == CHUTES_PROVIDER_ID:
+        secret_value = validate_chutes_real_generation_gate(store, role_config)
+        return ChutesOpenAIProviderClient(role_config=role_config, api_key=secret_value)
     if not adapter.enabled:
         raise ProviderError(
             f"Provider adapter {role_config.provider!r} is disabled; no network request was made.",
@@ -483,6 +584,45 @@ def create_provider_client(store: ProjectStore, role: str) -> ProviderClient:
         raise ProviderError(f"Provider {role_config.provider!r} is not available.", error_type="unsupported_provider")
     validate_mock_role_config(store, role_config)
     return MockProviderClient(role_config=role_config)
+
+
+def validate_chutes_real_generation_gate(store: ProjectStore, role_config: ModelRoleConfig) -> str:
+    if role_config.role != "writer":
+        raise ProviderError("Real generation is only allowed for writer in this phase.", error_type="unsupported_real_provider")
+    if role_config.provider != CHUTES_PROVIDER_ID:
+        raise ProviderError("Only chutes_openai is allowed for real generation in this phase.", error_type="unsupported_real_provider")
+    if not is_real_generation_enabled(role_config):
+        raise ProviderError("Real generation is disabled for this model role.", error_type="real_generation_disabled")
+    if not role_config.model:
+        raise ProviderError("Chutes provider requires a model id.", error_type="missing_model")
+    if not role_config.base_url:
+        raise ProviderError("Chutes provider requires base_url.", error_type="missing_base_url")
+    secret_value = resolve_project_secret(store, role_config.api_key_ref)
+    blocking_codes = real_generation_blocking_audit_codes(store)
+    if blocking_codes:
+        raise ProviderError(
+            f"Audit gate failed before real generation: {', '.join(blocking_codes)}",
+            error_type="audit_gate_failed",
+        )
+    return secret_value
+
+
+def is_real_generation_enabled(role_config: ModelRoleConfig) -> bool:
+    return bool(role_config.settings.get(REAL_GENERATION_FLAG))
+
+
+def real_generation_blocking_audit_codes(store: ProjectStore) -> list[str]:
+    from .audit import audit_project
+
+    result = audit_project(store)
+    codes = sorted(
+        {
+            str(item.get("code"))
+            for item in result.get("findings", [])
+            if isinstance(item, dict) and str(item.get("code")) in REAL_GENERATION_BLOCKING_AUDIT_CODES
+        }
+    )
+    return codes
 
 
 def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> ProviderResponse:
@@ -575,6 +715,7 @@ def provider_dry_run(store: ProjectStore, request: ProviderRequest) -> ProviderD
             network_allowed=False,
             error_type="missing_provider",
             request_summary={},
+            real_generation_enabled=False,
         )
     if adapter is None:
         return ProviderDryRunResult(
@@ -588,6 +729,7 @@ def provider_dry_run(store: ProjectStore, request: ProviderRequest) -> ProviderD
             network_allowed=False,
             error_type="unsupported_provider",
             request_summary={},
+            real_generation_enabled=is_real_generation_enabled(role_config),
         )
     if adapter.requires_secret and not role_config.api_key_ref:
         return ProviderDryRunResult(
@@ -601,6 +743,7 @@ def provider_dry_run(store: ProjectStore, request: ProviderRequest) -> ProviderD
             network_allowed=adapter.network_allowed,
             error_type="missing_secret_ref",
             request_summary={},
+            real_generation_enabled=is_real_generation_enabled(role_config),
         )
     if role_config.api_key_ref:
         try:
@@ -617,6 +760,7 @@ def provider_dry_run(store: ProjectStore, request: ProviderRequest) -> ProviderD
                 network_allowed=adapter.network_allowed,
                 error_type=exc.error_type,
                 request_summary={},
+                real_generation_enabled=is_real_generation_enabled(role_config),
             )
     if role_config.provider == MOCK_PROVIDER_ID:
         return ProviderDryRunResult(
@@ -630,8 +774,22 @@ def provider_dry_run(store: ProjectStore, request: ProviderRequest) -> ProviderD
             network_allowed=False,
             error_type="",
             request_summary=openai_compatible_request_summary(request, role_config),
+            real_generation_enabled=is_real_generation_enabled(role_config),
         )
-    return DisabledProviderDryRunAdapter(role_config=role_config, adapter_info=adapter).dry_run(request)
+    result = DisabledProviderDryRunAdapter(role_config=role_config, adapter_info=adapter).dry_run(request)
+    return ProviderDryRunResult(
+        ok=result.ok,
+        role=result.role,
+        provider=result.provider,
+        model=result.model,
+        mode=result.mode,
+        message=result.message,
+        adapter_enabled=result.adapter_enabled,
+        network_allowed=result.network_allowed,
+        error_type=result.error_type,
+        request_summary=result.request_summary,
+        real_generation_enabled=is_real_generation_enabled(role_config),
+    )
 
 
 def provider_real_test(store: ProjectStore, request: ProviderRequest, *, timeout_seconds: float = 30.0) -> ProviderRealTestResult:
@@ -643,28 +801,13 @@ def provider_real_test(store: ProjectStore, request: ProviderRequest, *, timeout
     if not role_config.base_url:
         raise ProviderError("Provider real test requires base_url.", error_type="missing_base_url")
     secret_value = resolve_project_secret(store, role_config.api_key_ref)
-    endpoint = chat_completions_url(role_config.base_url)
-    payload = {
-        "model": role_config.model,
-        "messages": openai_compatible_messages(request),
-        "stream": False,
-        "max_tokens": request.max_tokens or 16,
-        "temperature": 0 if request.temperature is None else request.temperature,
-    }
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    http_request = urllib.request.Request(
-        endpoint,
-        data=body,
-        headers={
-            "Authorization": f"Bearer {secret_value}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(http_request, timeout=timeout_seconds) as response:
-            status_code = int(getattr(response, "status", 200))
-            response_body = response.read()
+        status_code, data = send_openai_compatible_chat_completion(
+            role_config=role_config,
+            request=request,
+            api_key=secret_value,
+            timeout_seconds=timeout_seconds,
+        )
     except urllib.error.HTTPError as exc:
         return provider_real_test_error_result(
             request=request,
@@ -681,15 +824,13 @@ def provider_real_test(store: ProjectStore, request: ProviderRequest, *, timeout
             error_type="network_error",
             message="Network error during provider real test.",
         )
-    try:
-        data = json.loads(response_body.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    except ProviderError as exc:
         return provider_real_test_error_result(
             request=request,
             role_config=role_config,
-            status_code=status_code,
-            error_type="invalid_response",
-            message="Provider response was not valid JSON.",
+            status_code=None,
+            error_type=exc.error_type,
+            message=exc.message,
         )
     usage = data.get("usage") if isinstance(data, dict) and isinstance(data.get("usage"), dict) else {}
     first_choice = first_response_choice(data)
@@ -759,6 +900,43 @@ def safe_url_host(value: str) -> str:
 
 def chat_completions_url(base_url: str) -> str:
     return f"{base_url.rstrip('/')}/chat/completions"
+
+
+def send_openai_compatible_chat_completion(
+    *,
+    role_config: ModelRoleConfig,
+    request: ProviderRequest,
+    api_key: str,
+    timeout_seconds: float,
+) -> tuple[int, dict[str, Any]]:
+    endpoint = chat_completions_url(role_config.base_url)
+    payload = {
+        "model": role_config.model,
+        "messages": openai_compatible_messages(request),
+        "stream": False,
+        "max_tokens": request.max_tokens or 16,
+        "temperature": 0 if request.temperature is None else request.temperature,
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    http_request = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(http_request, timeout=timeout_seconds) as response:
+        status_code = int(getattr(response, "status", 200))
+        response_body = response.read()
+    try:
+        data = json.loads(response_body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ProviderError("Provider response was not valid JSON.", error_type="invalid_response") from exc
+    if not isinstance(data, dict):
+        raise ProviderError("Provider response was not a JSON object.", error_type="invalid_response")
+    return status_code, data
 
 
 def openai_compatible_messages(request: ProviderRequest) -> list[dict[str, str]]:

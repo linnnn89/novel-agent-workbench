@@ -71,6 +71,7 @@ MVP-0 first storage slice is implemented:
 - No-network Provider dry-run command for disabled `deepseek` / `openai_compatible` adapters, returning safe request summaries only.
 - Chutes OpenAI-compatible adapter id `chutes_openai` reserved as disabled/no-network dry-run only.
 - Explicit `provider-real-test` command for one approved Chutes connection test, separate from draft generation and without returning response text.
+- Controlled Chutes real draft generation gate: `chutes_openai` can generate a writer draft only after `enable-real-provider` sets `settings.real_generation_enabled=true`, the project secret exists, and audit leak checks pass.
 - Unit tests.
 
 Verification command:

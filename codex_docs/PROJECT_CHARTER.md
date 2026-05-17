@@ -168,6 +168,14 @@ provider-real-test for chutes_openai + safe metadata-only result + no draft/conf
 
 This path may send a real request only after explicit user approval. It must remain separate from normal draft generation.
 
+MVP-2 Chutes controlled real generation gate slice:
+
+```text
+enable-real-provider / disable-real-provider + chutes_openai writer-only real draft generation + audit leak gate.
+```
+
+`chutes_openai` remains disabled in the adapter registry and is not generally enabled. Normal draft generation may use it only when the writer role is configured for Chutes, `settings.real_generation_enabled=true`, the local project secret resolves, and audit has no key/prompt/content leak findings. Real output is written only as a draft artifact and must not auto-commit or update Memory Bank, RAG, or exports.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

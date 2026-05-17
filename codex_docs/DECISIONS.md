@@ -247,3 +247,11 @@ Decision: Add and run a single explicit `provider-real-test` path for `chutes_op
 Reason: The user explicitly allowed a network test. The test must validate real connectivity without turning real Providers into normal generation adapters.
 
 Impact: `provider-real-test` sends one non-streaming Chutes request and returns only metadata: status code, finish reason, token usage, response text length, and host. It does not return generated text, write provider logs, create drafts, or update confirmed chapters, Memory Bank, RAG, or exports. The first real test returned HTTP 200 with 28 total tokens.
+
+## 2026-05-17: MVP-2 Chutes Controlled Real Draft Gate
+
+Decision: Allow `chutes_openai` to generate writer drafts only through an explicit project-level gate.
+
+Reason: The workbench needs one real Provider path for end-to-end draft testing, but it must stay auditable, reversible, and unable to silently become normal generation for every role or Provider.
+
+Impact: `enable-real-provider <project_id> writer --provider chutes_openai` writes `settings.real_generation_enabled=true`; `disable-real-provider` turns it off. `generate-draft` only reaches Chutes when the role is writer, the Provider is `chutes_openai`, the secret resolves from `secrets.local.json`, and audit has no key/prompt/content leak finding. Generated content is stored only in draft artifacts; provider logs, CLI output, and audit output remain metadata-only. No automatic commit, Memory Bank, RAG, export, UI, DOCX, or scoring work was added.

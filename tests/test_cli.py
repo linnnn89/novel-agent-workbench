@@ -402,6 +402,125 @@ class CliTest(unittest.TestCase):
             self.assertNotIn("cpk-cli-secret", stdout)
             self.assertNotIn("OK", stdout)
 
+    def test_enable_disable_real_provider_cli_only_changes_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            run_cli(["--projects-root", temp, "set-project-secret", "demo", "chutes_key", "--value", "cpk-cli-secret"])
+            run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "configure-provider-role",
+                    "demo",
+                    "writer",
+                    "--provider",
+                    "chutes_openai",
+                    "--model",
+                    "Qwen/Qwen3-32B-TEE",
+                    "--api-key-ref",
+                    "project_secret.chutes_key",
+                    "--base-url",
+                    "https://llm.chutes.ai/v1",
+                ]
+            )
+
+            with patch("novel_agent_workbench.providers.urllib.request.urlopen") as urlopen:
+                enable_code, enable_stdout, enable_stderr = run_cli(
+                    [
+                        "--projects-root",
+                        temp,
+                        "enable-real-provider",
+                        "demo",
+                        "writer",
+                        "--provider",
+                        "chutes_openai",
+                    ]
+                )
+                status_code, status_stdout, status_stderr = run_cli(
+                    ["--projects-root", temp, "provider-status", "demo", "writer"]
+                )
+                disable_code, disable_stdout, disable_stderr = run_cli(
+                    ["--projects-root", temp, "disable-real-provider", "demo", "writer"]
+                )
+            enable_payload = json.loads(enable_stdout)
+            status_payload = json.loads(status_stdout)
+            disable_payload = json.loads(disable_stdout)
+
+            self.assertEqual(enable_code, 0, enable_stderr)
+            self.assertEqual(status_code, 0, status_stderr)
+            self.assertEqual(disable_code, 0, disable_stderr)
+            urlopen.assert_not_called()
+            self.assertTrue(enable_payload["result"]["settings"]["real_generation_enabled"])
+            self.assertTrue(status_payload["result"]["real_generation_enabled"])
+            self.assertFalse(disable_payload["result"]["settings"]["real_generation_enabled"])
+            self.assertNotIn("cpk-cli-secret", enable_stdout + status_stdout + disable_stdout)
+
+    def test_chutes_generate_draft_cli_real_output_is_metadata_only_with_mocked_http(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            run_cli(["--projects-root", temp, "set-project-secret", "demo", "chutes_key", "--value", "cpk-cli-secret"])
+            run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "configure-provider-role",
+                    "demo",
+                    "writer",
+                    "--provider",
+                    "chutes_openai",
+                    "--model",
+                    "Qwen/Qwen3-32B-TEE",
+                    "--api-key-ref",
+                    "project_secret.chutes_key",
+                    "--base-url",
+                    "https://llm.chutes.ai/v1",
+                ]
+            )
+            run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "enable-real-provider",
+                    "demo",
+                    "writer",
+                    "--provider",
+                    "chutes_openai",
+                ]
+            )
+
+            with patch(
+                "novel_agent_workbench.providers.urllib.request.urlopen",
+                return_value=FakeHttpResponse(
+                    200,
+                    {
+                        "choices": [{"message": {"content": "CLI REAL DRAFT CONTENT"}, "finish_reason": "stop"}],
+                        "usage": {"prompt_tokens": 4, "completion_tokens": 4, "total_tokens": 8},
+                    },
+                ),
+            ):
+                code, stdout, stderr = run_cli(
+                    [
+                        "--projects-root",
+                        temp,
+                        "generate-draft",
+                        "demo",
+                        "--chapter-id",
+                        "chapter_001",
+                        "--prompt",
+                        "private cli real generate prompt",
+                        "--max-tokens",
+                        "32",
+                    ]
+                )
+            payload = json.loads(stdout)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(payload["result"]["provider"], "chutes_openai")
+            self.assertEqual(payload["result"]["usage"]["total_tokens"], 8)
+            self.assertNotIn("private cli real generate prompt", stdout)
+            self.assertNotIn("cpk-cli-secret", stdout)
+            self.assertNotIn("CLI REAL DRAFT CONTENT", stdout)
+
 
 def run_cli(args: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()

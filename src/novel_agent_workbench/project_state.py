@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .drafts import DraftGenerationService
-from .providers import MODEL_ROLES, ProviderConfigError, get_model_role_config
+from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
 from .storage import ProjectStore
 
 
@@ -51,6 +51,7 @@ def provider_roles_summary(store: ProjectStore) -> dict[str, dict[str, Any]]:
             "model": role_config.model,
             "has_api_key": bool(secret_state.get("has_value")) if isinstance(secret_state, dict) else False,
             "masked_key": str(secret_state.get("masked") or "") if isinstance(secret_state, dict) else "",
+            "real_generation_enabled": bool(role_config.settings.get(REAL_GENERATION_FLAG)),
             "config_error": config_error,
         }
     return summary

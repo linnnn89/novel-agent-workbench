@@ -160,6 +160,20 @@ This command sends a real non-streaming request. Use it only after explicit user
 
 Output returns metadata only, not generated text.
 
+Controlled Chutes real draft generation:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test enable-real-provider demo_project writer --provider chutes_openai
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test generate-draft demo_project --chapter-id chapter_001 --title "Opening" --prompt "Write a short test draft." --temperature 0.2 --max-tokens 128
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test disable-real-provider demo_project writer
+```
+
+Use this only after explicit user approval. It sends a real non-streaming Chutes request and writes the generated text as a draft artifact only.
+
+The `generate-draft` command returns metadata only. To inspect the generated content, use `read-draft <draft_id>`.
+
+The real draft path still does not auto-commit, update Memory Bank, update RAG, create exports, or create DOCX.
+
 Generate a draft:
 
 ```powershell

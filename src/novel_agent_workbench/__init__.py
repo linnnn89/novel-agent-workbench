@@ -33,6 +33,7 @@ from .providers import (
     provider_status,
     read_provider_call_log,
     resolve_project_secret,
+    set_real_generation_enabled,
     set_project_secret,
     set_model_role_config,
 )
@@ -77,6 +78,7 @@ __all__ = [
     "read_provider_call_log",
     "resolve_project_secret",
     "public_project_state",
+    "set_real_generation_enabled",
     "set_project_secret",
     "set_model_role_config",
 ]

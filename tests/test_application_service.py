@@ -155,6 +155,30 @@ class WorkbenchApplicationServiceTest(unittest.TestCase):
             self.assertNotIn("private facade dry run system", result_text)
             self.assertNotIn("sk-facade-secret", result_text)
 
+    def test_facade_enable_disable_real_provider_exposes_flag_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_project("demo")
+            app.set_project_secret("demo", "chutes_key", "cpk-facade-secret")
+            app.configure_provider_role(
+                "demo",
+                "writer",
+                provider="chutes_openai",
+                model="Qwen/Qwen3-32B-TEE",
+                api_key_ref="project_secret.chutes_key",
+                base_url="https://llm.chutes.ai/v1",
+            )
+
+            enabled = app.enable_real_provider("demo", "writer", provider="chutes_openai")
+            state = app.project_state("demo")
+            disabled = app.disable_real_provider("demo", "writer")
+            result_text = json.dumps({"enabled": enabled, "state": state, "disabled": disabled}, ensure_ascii=False)
+
+            self.assertTrue(enabled["settings"]["real_generation_enabled"])
+            self.assertTrue(state["provider_roles"]["writer"]["real_generation_enabled"])
+            self.assertFalse(disabled["settings"]["real_generation_enabled"])
+            self.assertNotIn("cpk-facade-secret", result_text)
+
 
 if __name__ == "__main__":
     unittest.main()

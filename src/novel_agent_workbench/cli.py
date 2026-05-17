@@ -59,6 +59,16 @@ def build_parser() -> argparse.ArgumentParser:
     value_group.add_argument("--value")
     value_group.add_argument("--value-stdin", action="store_true")
 
+    enable_real = subparsers.add_parser("enable-real-provider")
+    enable_real.add_argument("project_id")
+    enable_real.add_argument("role", choices=["writer"])
+    enable_real.add_argument("--provider", required=True)
+
+    disable_real = subparsers.add_parser("disable-real-provider")
+    disable_real.add_argument("project_id")
+    disable_real.add_argument("role", choices=["writer"])
+    disable_real.add_argument("--provider", default="chutes_openai")
+
     generate = subparsers.add_parser("generate-draft")
     generate.add_argument("project_id")
     generate.add_argument("--chapter-id", required=True)
@@ -145,6 +155,10 @@ def run_command(args: argparse.Namespace) -> Any:
     if command == "set-project-secret":
         value = sys.stdin.read().strip() if args.value_stdin else args.value
         return app.set_project_secret(args.project_id, args.name, value)
+    if command == "enable-real-provider":
+        return app.enable_real_provider(args.project_id, args.role, provider=args.provider)
+    if command == "disable-real-provider":
+        return app.disable_real_provider(args.project_id, args.role, provider=args.provider)
     if command == "generate-draft":
         return app.generate_draft(
             args.project_id,

@@ -10,7 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from novel_agent_workbench import WorkbenchApplicationService, audit_project
 from novel_agent_workbench.drafts import DraftGenerationRequest, DraftGenerationService
-from novel_agent_workbench.providers import configure_provider_role, set_model_role_config, set_project_secret
+from novel_agent_workbench.providers import (
+    configure_provider_role,
+    set_model_role_config,
+    set_project_secret,
+    set_real_generation_enabled,
+)
 from novel_agent_workbench.storage import ProjectStore
 
 
@@ -113,6 +118,52 @@ class ProjectAuditTest(unittest.TestCase):
             self.assertIn("provider_adapter_disabled", {item["code"] for item in result["findings"]})
             self.assertNotIn("private audit dry run prompt", text)
             self.assertNotIn("sk-audit-secret", text)
+
+    def test_audit_real_generation_enabled_chutes_has_expected_disabled_finding_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_project_secret(store, "chutes_key", "cpk-audit-secret")
+            configure_provider_role(
+                store,
+                "writer",
+                provider="chutes_openai",
+                model="Qwen/Qwen3-32B-TEE",
+                api_key_ref="project_secret.chutes_key",
+                base_url="https://llm.chutes.ai/v1",
+            )
+            set_real_generation_enabled(store, "writer", provider="chutes_openai", enabled=True)
+
+            result = audit_project(store)
+            codes = {item["code"] for item in result["findings"]}
+            text = json.dumps(result, ensure_ascii=False)
+
+            self.assertFalse(result["ok"])
+            self.assertIn("provider_adapter_disabled", codes)
+            self.assertNotIn("real_generation_enabled_missing_secret", codes)
+            self.assertNotIn("cpk-audit-secret", text)
+
+    def test_audit_flags_real_generation_enabled_missing_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            config = store.read_config()
+            config["model_roles"]["writer"].update(
+                {
+                    "provider": "chutes_openai",
+                    "model": "Qwen/Qwen3-32B-TEE",
+                    "api_key_ref": "project_secret.missing_chutes_key",
+                    "base_url": "https://llm.chutes.ai/v1",
+                    "settings": {"real_generation_enabled": True},
+                }
+            )
+            store.write_config(config)
+
+            result = audit_project(store)
+            codes = {item["code"] for item in result["findings"]}
+
+            self.assertFalse(result["ok"])
+            self.assertIn("real_generation_enabled_missing_secret", codes)
 
     def test_audit_fails_on_prompt_text_in_provider_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

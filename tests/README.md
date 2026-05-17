@@ -67,6 +67,9 @@ Provider config tests currently cover:
 - disabled Provider dry-run summaries for `deepseek` and `openai_compatible`,
 - disabled Chutes OpenAI-compatible dry-run summary,
 - mocked Chutes real-test metadata path without log/draft side effects,
+- Chutes `generate-draft` blocked until `settings.real_generation_enabled=true`,
+- mocked Chutes real draft generation writing draft content only to `data/drafts/*.json`,
+- Chutes real generation audit gate blocking prompt/key/content leak findings,
 - dry-run secret error handling without request summaries,
 - invalid role rejection.
 
@@ -110,7 +113,8 @@ Application service facade tests currently cover:
 - draft generation/list/read through the backend facade,
 - explicit commit and confirmed chapter read through the backend facade,
 - facade state exclusion of prompt text, chapter content, and plaintext secrets,
-- failed generation leaving no draft behind.
+- failed generation leaving no draft behind,
+- facade enable/disable real-provider flag updates without plaintext secret exposure.
 
 CLI tests currently cover:
 
@@ -127,6 +131,8 @@ CLI tests currently cover:
 - `provider-dry-run` output excluding prompt text, system prompt text, and plaintext secrets.
 - Chutes `provider-dry-run` CLI output with `llm.chutes.ai` host and no prompt/key leak.
 - Chutes `provider-real-test` CLI output with mocked HTTP and no prompt/key/response-text leak.
+- `enable-real-provider` / `disable-real-provider` only changing config and making no network call.
+- Chutes real `generate-draft` CLI output with mocked HTTP excluding prompt/key/generated content.
 
 Audit tests currently cover:
 
@@ -141,3 +147,5 @@ Audit tests currently cover:
 - disabled Provider adapter findings,
 - missing Provider secret refs and local secrets.
 - audit after provider dry-run excluding prompt text and plaintext secrets.
+- Chutes real-generation-enabled config with the expected disabled-adapter finding but no secret leak.
+- real-generation-enabled missing secret findings.

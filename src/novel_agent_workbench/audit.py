@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from .providers import ModelRoleConfig, get_provider_adapter
+from .providers import CHUTES_PROVIDER_ID, REAL_GENERATION_FLAG, ModelRoleConfig, get_provider_adapter
 from .project_state import public_project_state
 from .storage import ProjectStore
 
@@ -307,6 +307,15 @@ def audit_provider_adapter_config(
                     message=f"Role {role} uses disabled provider adapter {role_config.provider!r}; audit did not test network.",
                 )
             )
+        real_generation_enabled = bool(role_config.settings.get(REAL_GENERATION_FLAG))
+        if real_generation_enabled and (str(role) != "writer" or role_config.provider != CHUTES_PROVIDER_ID):
+            findings.append(
+                AuditFinding(
+                    code="real_generation_unsupported",
+                    path=str(store.config_path),
+                    message="Real generation is only allowed for writer with chutes_openai in this phase.",
+                )
+            )
         if adapter.requires_secret and not role_config.api_key_ref:
             findings.append(
                 AuditFinding(
@@ -315,6 +324,14 @@ def audit_provider_adapter_config(
                     message=f"Role {role} provider {role_config.provider!r} requires project_secret.<name>.",
                 )
             )
+            if real_generation_enabled:
+                findings.append(
+                    AuditFinding(
+                        code="real_generation_enabled_missing_secret",
+                        path=str(store.config_path),
+                        message=f"Role {role} has real generation enabled but no api_key_ref.",
+                    )
+                )
         if role_config.api_key_ref:
             try:
                 secret_name = role_config.secret_name()
@@ -335,6 +352,14 @@ def audit_provider_adapter_config(
                         message=f"Role {role} references a missing or empty project secret.",
                     )
                 )
+                if real_generation_enabled:
+                    findings.append(
+                        AuditFinding(
+                            code="real_generation_enabled_missing_secret",
+                            path=str(store.config_path),
+                            message=f"Role {role} has real generation enabled but the referenced secret is missing or empty.",
+                        )
+                    )
 
 
 def read_json_file(path: Path, *, checked_paths: list[str], findings: list[AuditFinding]) -> dict[str, Any] | None:

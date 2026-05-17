@@ -4,7 +4,7 @@ Date: 2026-05-17, Asia/Shanghai.
 
 ## Scope
 
-This document defines the Provider boundary before real LLM access is allowed.
+This document defines the Provider boundary for mock, dry-run, explicit real test, and the controlled Chutes draft-generation gate.
 
 Current enabled adapter:
 
@@ -43,6 +43,8 @@ description
 `mock` is enabled and has `network_allowed=false`.
 
 `openai_compatible`, `deepseek`, and `chutes_openai` are registered only as future placeholders. They have `enabled=false` and `network_allowed=false`.
+
+`chutes_openai` has one narrow exception: normal `generate-draft` may use it for the writer role only when the project explicitly sets `settings.real_generation_enabled=true`, the local secret resolves, and the audit leak gate passes. The adapter registry entry remains disabled so status/dry-run tools still report the higher-risk boundary.
 
 ## Secret Lookup
 
@@ -189,6 +191,49 @@ raw response text
 
 Real test must not create drafts, confirmed chapters, Memory Bank updates, RAG updates, exports, or provider call logs.
 
+## Controlled Chutes Real Draft Generation
+
+`generate-draft` may send a real Chutes request only when all conditions are true:
+
+```text
+role: writer
+provider: chutes_openai
+settings.real_generation_enabled: true
+api_key_ref: project_secret.<name>
+local secret: present and non-empty in data/secrets.local.json
+audit leak gate: no key/prompt/content leak findings
+```
+
+Stable blocking errors include:
+
+```text
+real_generation_disabled
+unsupported_real_provider
+missing_secret
+empty_secret
+audit_gate_failed
+```
+
+The Chutes client sends a non-streaming OpenAI-compatible request to `/chat/completions` with:
+
+```text
+model
+messages
+temperature
+max_tokens
+stream=false
+```
+
+It extracts only assistant content, usage, and finish reason. It must not write raw response JSON, request bodies, prompts, system prompts, or API keys into logs or draft metadata.
+
+Real generated content is allowed only in:
+
+```text
+data/drafts/*.json
+```
+
+because `read-draft` is the human review surface. It must not be copied into provider logs, CLI `generate-draft` output, audit output, `data/drafts_index.json`, confirmed chapters, Memory Bank, RAG, or exports unless a later explicit commit/update feature is implemented.
+
 ## Logs
 
 Provider call logs may record:
@@ -220,7 +265,7 @@ secrets.local.json content
 
 ## Audit Gate
 
-Before any real Provider adapter is enabled, the project must pass:
+Before any real Provider adapter is generally enabled, the project must pass:
 
 ```powershell
 py -3.13 -m novel_agent_workbench.cli --projects-root <root> audit-project <project_id>
@@ -228,16 +273,18 @@ py -3.13 -m novel_agent_workbench.cli --projects-root <root> audit-project <proj
 
 `audit-project` is read-only. It checks for obvious raw API keys in config, disabled provider adapter usage, missing secret refs, missing local secrets, prompt/key leaks in logs, unsafe checkpoints, and confirmed chapter consistency.
 
+For the controlled Chutes draft gate, `provider_adapter_disabled` is an expected non-blocking finding because the registry remains disabled. The gate blocks only key/prompt/content leak findings and missing or empty secrets.
+
 ## Current Non-Goals
 
 This contract does not implement:
 
 ```text
-real LLM HTTP calls
 streaming
 retry policy
 rate limit backoff
 cost accounting
-provider-specific request translation
 UI configuration
+automatic real Provider enablement
+automatic commit of real drafts
 ```

@@ -27,9 +27,11 @@ from novel_agent_workbench import (
     provider_real_test,
     read_provider_call_log,
     resolve_project_secret,
+    set_real_generation_enabled,
     set_project_secret,
     set_model_role_config,
 )
+from novel_agent_workbench.audit import audit_project
 from novel_agent_workbench.drafts import DraftGenerationRequest, DraftGenerationService
 
 
@@ -351,6 +353,116 @@ class ProviderConfigTest(unittest.TestCase):
                 provider_real_test(store, ProviderRequest(role="writer", prompt="no network"))
 
             self.assertEqual(context.exception.error_type, "unsupported_provider")
+
+    def test_chutes_generate_requires_explicit_real_generation_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_project_secret(store, "chutes_key", "cpk-test-secret")
+            configure_provider_role(
+                store,
+                "writer",
+                provider="chutes_openai",
+                model="Qwen/Qwen3-32B-TEE",
+                api_key_ref="project_secret.chutes_key",
+                base_url="https://llm.chutes.ai/v1",
+            )
+            service = DraftGenerationService(store)
+
+            with patch("novel_agent_workbench.providers.urllib.request.urlopen") as urlopen:
+                with self.assertRaises(ProviderError) as context:
+                    service.generate_draft(
+                        DraftGenerationRequest(chapter_id="chapter_001", prompt="private disabled chutes prompt")
+                    )
+
+            self.assertEqual(context.exception.error_type, "real_generation_disabled")
+            urlopen.assert_not_called()
+            self.assertFalse((store.data_dir / "drafts").exists())
+            self.assertFalse((store.data_dir / "confirmed_chapters").exists())
+            self.assertFalse((store.root / "exports").exists())
+            self.assertFalse((store.data_dir / "rag").exists())
+
+    def test_chutes_real_generation_writes_draft_only_with_mocked_http(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_project_secret(store, "chutes_key", "cpk-test-secret")
+            configure_provider_role(
+                store,
+                "writer",
+                provider="chutes_openai",
+                model="Qwen/Qwen3-32B-TEE",
+                api_key_ref="project_secret.chutes_key",
+                base_url="https://llm.chutes.ai/v1",
+            )
+            set_real_generation_enabled(store, "writer", provider="chutes_openai", enabled=True)
+            response_body = {
+                "choices": [{"message": {"content": "REAL DRAFT CONTENT"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+            }
+            service = DraftGenerationService(store)
+
+            with patch(
+                "novel_agent_workbench.providers.urllib.request.urlopen",
+                return_value=FakeHttpResponse(200, response_body),
+            ):
+                result = service.generate_draft(
+                    DraftGenerationRequest(
+                        chapter_id="chapter_001",
+                        prompt="private real generation prompt",
+                        system_prompt="private real generation system",
+                        max_tokens=32,
+                        temperature=0.2,
+                    )
+                )
+            draft = service.read_draft(result.draft_id)
+            log_text = json.dumps(read_provider_call_log(store), ensure_ascii=False)
+            draft_text = json.dumps(draft, ensure_ascii=False)
+
+            self.assertEqual(result.provider, "chutes_openai")
+            self.assertEqual(draft["content"], "REAL DRAFT CONTENT")
+            self.assertEqual(draft["provider"]["usage"]["total_tokens"], 10)
+            self.assertIn("REAL DRAFT CONTENT", draft_text)
+            self.assertNotIn("private real generation prompt", draft_text)
+            self.assertNotIn("private real generation system", draft_text)
+            self.assertNotIn("cpk-test-secret", draft_text)
+            self.assertNotIn("choices", draft_text)
+            self.assertNotIn("REAL DRAFT CONTENT", log_text)
+            self.assertNotIn("private real generation prompt", log_text)
+            self.assertNotIn("cpk-test-secret", log_text)
+            self.assertFalse((store.data_dir / "confirmed_chapters").exists())
+            self.assertFalse((store.root / "exports").exists())
+            self.assertFalse((store.data_dir / "rag").exists())
+
+    def test_chutes_real_generation_audit_gate_blocks_leaky_provider_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_project_secret(store, "chutes_key", "cpk-test-secret")
+            configure_provider_role(
+                store,
+                "writer",
+                provider="chutes_openai",
+                model="Qwen/Qwen3-32B-TEE",
+                api_key_ref="project_secret.chutes_key",
+                base_url="https://llm.chutes.ai/v1",
+            )
+            set_real_generation_enabled(store, "writer", provider="chutes_openai", enabled=True)
+            store.write_json(
+                store.data_dir / "provider_call_log.json",
+                {"schema_version": 1, "calls": [{"prompt": "private leaked prompt"}]},
+            )
+            service = DraftGenerationService(store)
+
+            with patch("novel_agent_workbench.providers.urllib.request.urlopen") as urlopen:
+                with self.assertRaises(ProviderError) as context:
+                    service.generate_draft(
+                        DraftGenerationRequest(chapter_id="chapter_001", prompt="private blocked prompt")
+                    )
+
+            self.assertEqual(context.exception.error_type, "audit_gate_failed")
+            urlopen.assert_not_called()
+            self.assertIn("possible_prompt_in_provider_log", {item["code"] for item in audit_project(store)["findings"]})
 
     def test_provider_dry_run_reports_secret_errors_without_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

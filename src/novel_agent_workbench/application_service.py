@@ -14,6 +14,7 @@ from .providers import (
     provider_dry_run,
     provider_real_test,
     provider_status,
+    set_real_generation_enabled,
     set_model_role_config,
     set_project_secret,
 )
@@ -77,6 +78,14 @@ class WorkbenchApplicationService:
 
     def set_project_secret(self, project_id: str, name: str, value: str) -> dict[str, Any]:
         return set_project_secret(self._open_store(project_id), name, value)
+
+    def enable_real_provider(self, project_id: str, role: str, *, provider: str) -> dict[str, Any]:
+        role_config = set_real_generation_enabled(self._open_store(project_id), role, provider=provider, enabled=True)
+        return role_config.to_dict()
+
+    def disable_real_provider(self, project_id: str, role: str, *, provider: str = "chutes_openai") -> dict[str, Any]:
+        role_config = set_real_generation_enabled(self._open_store(project_id), role, provider=provider, enabled=False)
+        return role_config.to_dict()
 
     def generate_draft(
         self,

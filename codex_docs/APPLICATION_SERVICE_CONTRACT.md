@@ -111,6 +111,41 @@ masked
 
 Must not return plaintext secret values.
 
+### enable_real_provider(project_id, role, provider)
+
+Enables the controlled real-generation flag for one supported role/provider pair.
+
+Current supported pair:
+
+```text
+role=writer
+provider=chutes_openai
+```
+
+Writes only Provider role config:
+
+```text
+settings.real_generation_enabled=true
+```
+
+Must not send network requests, generate drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
+
+Must not return plaintext secrets.
+
+### disable_real_provider(project_id, role, provider="chutes_openai")
+
+Disables the controlled real-generation flag for one supported role/provider pair.
+
+Writes only Provider role config:
+
+```text
+settings.real_generation_enabled=false
+```
+
+Must not send network requests, generate drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
+
+Must not return plaintext secrets.
+
 ### generate_draft(...)
 
 Inputs:
@@ -141,6 +176,8 @@ usage
 ```
 
 Must not auto-commit.
+
+When the writer role uses `chutes_openai`, real generation is allowed only after `enable_real_provider(...)`, local secret resolution, and audit leak-gate success. CLI/facade output remains metadata-only; generated content is visible through `read_draft(...)`.
 
 ### list_drafts(project_id)
 
@@ -224,6 +261,7 @@ masked_key
 adapter_enabled
 network_allowed
 error_type
+real_generation_enabled
 ```
 
 Must not send network requests.
@@ -249,6 +287,7 @@ adapter_enabled
 network_allowed
 error_type
 request_summary
+real_generation_enabled
 ```
 
 `request_summary` may include only:
@@ -341,6 +380,14 @@ Future real Providers must:
 - never log prompt text or plaintext secrets in provider logs,
 - pass `audit-project` before being considered safe for normal use.
 
+Current controlled real-generation Provider:
+
+```text
+chutes_openai writer only, gated by settings.real_generation_enabled=true
+```
+
+The Chutes gate keeps the adapter registry disabled, ignores the expected `provider_adapter_disabled` audit finding, and blocks only key/prompt/content leak findings plus secret resolution failures.
+
 Provider error types currently used:
 
 ```text
@@ -355,4 +402,11 @@ invalid_secret_ref
 invalid_request
 rate_limit
 timeout
+real_generation_disabled
+unsupported_real_provider
+audit_gate_failed
+http_error
+network_error
+invalid_response
+empty_response
 ```
