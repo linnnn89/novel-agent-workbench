@@ -104,6 +104,14 @@ Stable backend facade for project creation, safe state, mock draft generation, d
 
 This is an application boundary for future CLI/HTTP/UI. It must stay thin and delegate to storage, provider, draft, and state modules.
 
+MVP-1 CLI smoke runner slice:
+
+```text
+Backend-only command runner for project creation, mock writer configuration, draft generation, state inspection, and explicit commit.
+```
+
+This is not a frontend and not an HTTP API. It is a local verification and operator convenience layer over `WorkbenchApplicationService`.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

@@ -99,3 +99,10 @@ Application service facade tests currently cover:
 - explicit commit and confirmed chapter read through the backend facade,
 - facade state exclusion of prompt text, chapter content, and plaintext secrets,
 - failed generation leaving no draft behind.
+
+CLI tests currently cover:
+
+- one-command smoke flow with mock writer and explicit commit,
+- split create/configure/generate/commit/list commands,
+- JSON error output on failed generation,
+- no prompt text in smoke JSON output.

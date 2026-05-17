@@ -151,3 +151,11 @@ Decision: Add `WorkbenchApplicationService` as the stable backend facade for fut
 Reason: The UI should not directly orchestrate registry, provider config, draft generation, commit, and state modules. A thin facade keeps workflows discoverable and testable without adding a frontend yet.
 
 Impact: The facade exposes project creation/listing, safe state, mock writer configuration, draft generation/list/read, explicit commit, and confirmed chapter read/list. It does not implement network APIs, UI routing, real Provider calls, Memory Bank/RAG/export updates, or DOCX.
+
+## 2026-05-17: MVP-1 Backend-Only CLI Smoke Runner
+
+Decision: Add `novel_agent_workbench.cli` as a backend-only command runner.
+
+Reason: The user needs a way to run the local backend loop without writing Python code, while still avoiding UI and HTTP complexity.
+
+Impact: The CLI delegates to `WorkbenchApplicationService`, outputs JSON, and supports `smoke`, project creation/listing, safe state, mock writer config, draft generation/list/read, explicit commit, and confirmed chapter list/read. It does not call real Providers or start a server.

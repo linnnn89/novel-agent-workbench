@@ -5,5 +5,8 @@ description = "Local recoverable long-form novel writing workbench."
 requires-python = ">=3.13"
 dependencies = []
 
+[project.scripts]
+novel-agent-workbench = "novel_agent_workbench.cli:main"
+
 [tool.unittest]
 testpaths = ["tests"]
