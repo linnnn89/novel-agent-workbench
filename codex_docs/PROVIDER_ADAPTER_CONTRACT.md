@@ -156,6 +156,39 @@ Qwen/Qwen3-32B-TEE
 
 Dry-run does not write preflight logs by default. If a later phase adds preflight logs, they must follow the same no prompt, no body, no key rule.
 
+## Explicit Real Test
+
+`provider-real-test` is the only current command allowed to send a real Provider HTTP request.
+
+Current supported adapter:
+
+```text
+chutes_openai
+```
+
+Real test output may include:
+
+```text
+status_code
+finish_reason
+usage
+response_text_chars
+base_url_host
+```
+
+Real test output must not include:
+
+```text
+prompt text
+system prompt text
+full request body
+Authorization header
+API key
+raw response text
+```
+
+Real test must not create drafts, confirmed chapters, Memory Bank updates, RAG updates, exports, or provider call logs.
+
 ## Logs
 
 Provider call logs may record:

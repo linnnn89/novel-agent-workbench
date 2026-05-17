@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -348,6 +349,59 @@ class CliTest(unittest.TestCase):
             self.assertNotIn("private chutes cli prompt", stdout)
             self.assertNotIn("cpk-cli-secret", stdout)
 
+    def test_chutes_provider_real_test_cli_is_safe_with_mocked_http(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            run_cli(["--projects-root", temp, "set-project-secret", "demo", "chutes_key", "--value", "cpk-cli-secret"])
+            run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "configure-provider-role",
+                    "demo",
+                    "writer",
+                    "--provider",
+                    "chutes_openai",
+                    "--model",
+                    "Qwen/Qwen3-32B-TEE",
+                    "--api-key-ref",
+                    "project_secret.chutes_key",
+                    "--base-url",
+                    "https://llm.chutes.ai/v1",
+                ]
+            )
+
+            with patch(
+                "novel_agent_workbench.providers.urllib.request.urlopen",
+                return_value=FakeHttpResponse(
+                    200,
+                    {
+                        "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+                        "usage": {"prompt_tokens": 4, "completion_tokens": 1, "total_tokens": 5},
+                    },
+                ),
+            ):
+                code, stdout, stderr = run_cli(
+                    [
+                        "--projects-root",
+                        temp,
+                        "provider-real-test",
+                        "demo",
+                        "writer",
+                        "--prompt",
+                        "private real cli prompt",
+                    ]
+                )
+            payload = json.loads(stdout)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertTrue(payload["result"]["ok"])
+            self.assertEqual(payload["result"]["status_code"], 200)
+            self.assertEqual(payload["result"]["response_text_chars"], 2)
+            self.assertNotIn("private real cli prompt", stdout)
+            self.assertNotIn("cpk-cli-secret", stdout)
+            self.assertNotIn("OK", stdout)
+
 
 def run_cli(args: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()
@@ -355,6 +409,21 @@ def run_cli(args: list[str]) -> tuple[int, str, str]:
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
         code = main(args)
     return code, stdout.getvalue(), stderr.getvalue()
+
+
+class FakeHttpResponse:
+    def __init__(self, status: int, payload: dict[str, object]) -> None:
+        self.status = status
+        self.payload = payload
+
+    def __enter__(self) -> "FakeHttpResponse":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
 
 
 if __name__ == "__main__":

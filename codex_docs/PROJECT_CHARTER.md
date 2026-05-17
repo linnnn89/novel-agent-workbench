@@ -160,6 +160,14 @@ reserved chutes_openai adapter + Chutes OpenAI-compatible base URL/model dry-run
 
 Chutes remains disabled and no-network until the user explicitly authorizes a real connection test.
 
+MVP-2 Chutes explicit real test slice:
+
+```text
+provider-real-test for chutes_openai + safe metadata-only result + no draft/confirmed/context side effects.
+```
+
+This path may send a real request only after explicit user approval. It must remain separate from normal draft generation.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

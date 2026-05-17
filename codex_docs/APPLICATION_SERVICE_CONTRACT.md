@@ -271,6 +271,38 @@ Must not create drafts, create confirmed chapters, update Memory Bank, update RA
 
 Must not return prompt text, system prompt text, full request bodies, raw response content, or plaintext secrets.
 
+### provider_real_test(project_id, role, prompt="Return exactly OK.", system_prompt="", temperature=0, max_tokens=16, metadata=None)
+
+Runs one explicitly approved real network test for a supported Provider.
+
+Current supported Provider:
+
+```text
+chutes_openai
+```
+
+Returns:
+
+```text
+ok
+role
+provider
+model
+mode
+message
+network_attempted
+status_code
+error_type
+base_url_host
+finish_reason
+usage
+response_text_chars
+```
+
+Must not create drafts, create confirmed chapters, update Memory Bank, update RAG, create exports, or write provider call logs.
+
+Must not return prompt text, system prompt text, full request bodies, raw response content, or plaintext secrets.
+
 ### list_provider_adapters()
 
 Returns registered Provider adapter metadata:

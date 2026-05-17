@@ -239,3 +239,11 @@ Decision: Register `chutes_openai` as a disabled OpenAI-compatible Provider adap
 Reason: The user supplied Chutes endpoint/model details. The workbench can capture the public Provider shape now while keeping real network calls behind a later explicit approval gate.
 
 Impact: `chutes_openai` supports config and dry-run summaries with `base_url=https://llm.chutes.ai/v1` and model examples such as `Qwen/Qwen3-32B-TEE`. It remains disabled, no-network, and cannot generate drafts.
+
+## 2026-05-17: MVP-2 Chutes Explicit Real Test
+
+Decision: Add and run a single explicit `provider-real-test` path for `chutes_openai`.
+
+Reason: The user explicitly allowed a network test. The test must validate real connectivity without turning real Providers into normal generation adapters.
+
+Impact: `provider-real-test` sends one non-streaming Chutes request and returns only metadata: status code, finish reason, token usage, response text length, and host. It does not return generated text, write provider logs, create drafts, or update confirmed chapters, Memory Bank, RAG, or exports. The first real test returned HTTP 200 with 28 total tokens.

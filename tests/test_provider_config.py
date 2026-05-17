@@ -24,6 +24,7 @@ from novel_agent_workbench import (
     get_model_role_config,
     list_provider_adapters,
     provider_dry_run,
+    provider_real_test,
     read_provider_call_log,
     resolve_project_secret,
     set_project_secret,
@@ -299,6 +300,58 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertNotIn("private chutes prompt", result_text)
             self.assertNotIn("cpk-test-secret", result_text)
 
+    def test_chutes_real_test_returns_safe_metadata_without_writing_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_project_secret(store, "chutes_key", "cpk-test-secret")
+            configure_provider_role(
+                store,
+                "writer",
+                provider="chutes_openai",
+                model="Qwen/Qwen3-32B-TEE",
+                api_key_ref="project_secret.chutes_key",
+                base_url="https://llm.chutes.ai/v1",
+            )
+            response_body = {
+                "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 1, "total_tokens": 5},
+            }
+
+            with patch(
+                "novel_agent_workbench.providers.urllib.request.urlopen",
+                return_value=FakeHttpResponse(200, response_body),
+            ):
+                result = provider_real_test(
+                    store,
+                    ProviderRequest(role="writer", prompt="private real test prompt", max_tokens=16, temperature=0),
+                )
+            result_text = json.dumps(result.to_dict(), ensure_ascii=False)
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.provider, "chutes_openai")
+            self.assertEqual(result.base_url_host, "llm.chutes.ai")
+            self.assertEqual(result.finish_reason, "stop")
+            self.assertEqual(result.response_text_chars, 2)
+            self.assertEqual(result.usage["total_tokens"], 5)
+            self.assertFalse((store.data_dir / "provider_call_log.json").exists())
+            self.assertFalse((store.data_dir / "drafts").exists())
+            self.assertNotIn("private real test prompt", result_text)
+            self.assertNotIn("cpk-test-secret", result_text)
+            self.assertNotIn("OK", result_text)
+
+    def test_chutes_real_test_rejects_non_chutes_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_model_role_config(store, "writer", {"provider": "mock", "model": "mock-writer"})
+
+            with self.assertRaises(ProviderError) as context:
+                provider_real_test(store, ProviderRequest(role="writer", prompt="no network"))
+
+            self.assertEqual(context.exception.error_type, "unsupported_provider")
+
     def test_provider_dry_run_reports_secret_errors_without_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = ProjectStore.open(Path(temp), "demo")
@@ -476,6 +529,20 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertNotIn("data/secrets.local.json", names)
             self.assertNotIn("sk-test-secret", content)
             self.assertNotIn("checkpoint prompt", content)
+
+class FakeHttpResponse:
+    def __init__(self, status: int, payload: dict[str, object]) -> None:
+        self.status = status
+        self.payload = payload
+
+    def __enter__(self) -> "FakeHttpResponse":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
 
 
 if __name__ == "__main__":

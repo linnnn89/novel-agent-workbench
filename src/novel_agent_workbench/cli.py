@@ -101,6 +101,14 @@ def build_parser() -> argparse.ArgumentParser:
     provider_dry_run.add_argument("--max-tokens", type=int, default=None)
     provider_dry_run.add_argument("--temperature", type=float, default=None)
 
+    provider_real_test = subparsers.add_parser("provider-real-test")
+    provider_real_test.add_argument("project_id")
+    provider_real_test.add_argument("role", choices=["writer", "scorer", "reviser"])
+    provider_real_test.add_argument("--prompt", default="Return exactly OK.")
+    provider_real_test.add_argument("--system-prompt", default="")
+    provider_real_test.add_argument("--max-tokens", type=int, default=16)
+    provider_real_test.add_argument("--temperature", type=float, default=0)
+
     subparsers.add_parser("list-provider-adapters")
 
     smoke = subparsers.add_parser("smoke")
@@ -163,6 +171,15 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.provider_status(args.project_id, args.role)
     if command == "provider-dry-run":
         return app.provider_dry_run(
+            args.project_id,
+            args.role,
+            prompt=args.prompt,
+            system_prompt=args.system_prompt,
+            max_tokens=args.max_tokens,
+            temperature=args.temperature,
+        )
+    if command == "provider-real-test":
+        return app.provider_real_test(
             args.project_id,
             args.role,
             prompt=args.prompt,

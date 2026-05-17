@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import socket
+import urllib.error
+import urllib.request
 from dataclasses import asdict, dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -117,6 +121,26 @@ class ProviderDryRunResult:
     network_allowed: bool
     error_type: str
     request_summary: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderRealTestResult:
+    ok: bool
+    role: str
+    provider: str
+    model: str
+    mode: str
+    message: str
+    network_attempted: bool
+    status_code: int | None
+    error_type: str
+    base_url_host: str
+    finish_reason: str
+    usage: dict[str, int]
+    response_text_chars: int
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -610,6 +634,108 @@ def provider_dry_run(store: ProjectStore, request: ProviderRequest) -> ProviderD
     return DisabledProviderDryRunAdapter(role_config=role_config, adapter_info=adapter).dry_run(request)
 
 
+def provider_real_test(store: ProjectStore, request: ProviderRequest, *, timeout_seconds: float = 30.0) -> ProviderRealTestResult:
+    role_config = get_model_role_config(store, request.role)
+    if role_config.provider != CHUTES_PROVIDER_ID:
+        raise ProviderError("Only chutes_openai supports explicit real test in this phase.", error_type="unsupported_provider")
+    if not role_config.model:
+        raise ProviderError("Provider real test requires a model id.", error_type="missing_model")
+    if not role_config.base_url:
+        raise ProviderError("Provider real test requires base_url.", error_type="missing_base_url")
+    secret_value = resolve_project_secret(store, role_config.api_key_ref)
+    endpoint = chat_completions_url(role_config.base_url)
+    payload = {
+        "model": role_config.model,
+        "messages": openai_compatible_messages(request),
+        "stream": False,
+        "max_tokens": request.max_tokens or 16,
+        "temperature": 0 if request.temperature is None else request.temperature,
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    http_request = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={
+            "Authorization": f"Bearer {secret_value}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=timeout_seconds) as response:
+            status_code = int(getattr(response, "status", 200))
+            response_body = response.read()
+    except urllib.error.HTTPError as exc:
+        return provider_real_test_error_result(
+            request=request,
+            role_config=role_config,
+            status_code=int(exc.code),
+            error_type="http_error",
+            message=f"HTTP error {int(exc.code)} from provider.",
+        )
+    except (urllib.error.URLError, TimeoutError, socket.timeout, OSError):
+        return provider_real_test_error_result(
+            request=request,
+            role_config=role_config,
+            status_code=None,
+            error_type="network_error",
+            message="Network error during provider real test.",
+        )
+    try:
+        data = json.loads(response_body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return provider_real_test_error_result(
+            request=request,
+            role_config=role_config,
+            status_code=status_code,
+            error_type="invalid_response",
+            message="Provider response was not valid JSON.",
+        )
+    usage = data.get("usage") if isinstance(data, dict) and isinstance(data.get("usage"), dict) else {}
+    first_choice = first_response_choice(data)
+    text = choice_text(first_choice)
+    return ProviderRealTestResult(
+        ok=200 <= status_code < 300,
+        role=request.role,
+        provider=role_config.provider,
+        model=role_config.model,
+        mode="real_test",
+        message="Provider real test completed; response text was not returned.",
+        network_attempted=True,
+        status_code=status_code,
+        error_type="" if 200 <= status_code < 300 else "http_error",
+        base_url_host=safe_url_host(role_config.base_url),
+        finish_reason=str(first_choice.get("finish_reason") or "") if isinstance(first_choice, dict) else "",
+        usage=safe_usage(usage),
+        response_text_chars=len(text),
+    )
+
+
+def provider_real_test_error_result(
+    *,
+    request: ProviderRequest,
+    role_config: ModelRoleConfig,
+    status_code: int | None,
+    error_type: str,
+    message: str,
+) -> ProviderRealTestResult:
+    return ProviderRealTestResult(
+        ok=False,
+        role=request.role,
+        provider=role_config.provider,
+        model=role_config.model,
+        mode="real_test",
+        message=message,
+        network_attempted=True,
+        status_code=status_code,
+        error_type=error_type,
+        base_url_host=safe_url_host(role_config.base_url),
+        finish_reason="",
+        usage={},
+        response_text_chars=0,
+    )
+
+
 def openai_compatible_request_summary(request: ProviderRequest, role_config: ModelRoleConfig) -> dict[str, Any]:
     return {
         "provider": role_config.provider,
@@ -629,6 +755,43 @@ def safe_url_host(value: str) -> str:
         return ""
     parsed = urlparse(value if "://" in value else f"https://{value}")
     return parsed.netloc.split("@")[-1]
+
+
+def chat_completions_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/chat/completions"
+
+
+def openai_compatible_messages(request: ProviderRequest) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    if request.system_prompt:
+        messages.append({"role": "system", "content": request.system_prompt})
+    messages.append({"role": "user", "content": request.prompt})
+    return messages
+
+
+def first_response_choice(data: object) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return {}
+    first = choices[0]
+    return first if isinstance(first, dict) else {}
+
+
+def choice_text(choice: dict[str, Any]) -> str:
+    message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+    content = message.get("content") if isinstance(message, dict) else ""
+    return str(content or "")
+
+
+def safe_usage(value: dict[str, Any]) -> dict[str, int]:
+    safe: dict[str, int] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        item = value.get(key)
+        if isinstance(item, int):
+            safe[key] = item
+    return safe
 
 
 def resolve_project_secret(store: ProjectStore, api_key_ref: str) -> str:

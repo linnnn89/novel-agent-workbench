@@ -70,6 +70,7 @@ MVP-0 first storage slice is implemented:
 - Safe Provider config preflight commands for writing disabled adapter configs and project-local secrets without printing plaintext keys.
 - No-network Provider dry-run command for disabled `deepseek` / `openai_compatible` adapters, returning safe request summaries only.
 - Chutes OpenAI-compatible adapter id `chutes_openai` reserved as disabled/no-network dry-run only.
+- Explicit `provider-real-test` command for one approved Chutes connection test, separate from draft generation and without returning response text.
 - Unit tests.
 
 Verification command:

@@ -12,6 +12,7 @@ from .providers import (
     configure_provider_role,
     list_provider_adapters,
     provider_dry_run,
+    provider_real_test,
     provider_status,
     set_model_role_config,
     set_project_secret,
@@ -138,6 +139,29 @@ class WorkbenchApplicationService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return provider_dry_run(
+            self._open_store(project_id),
+            ProviderRequest(
+                role=role,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                metadata=metadata or {},
+            ),
+        ).to_dict()
+
+    def provider_real_test(
+        self,
+        project_id: str,
+        role: str,
+        *,
+        prompt: str = "Return exactly OK.",
+        system_prompt: str = "",
+        temperature: float | None = 0,
+        max_tokens: int | None = 16,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return provider_real_test(
             self._open_store(project_id),
             ProviderRequest(
                 role=role,

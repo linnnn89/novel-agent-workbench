@@ -150,6 +150,16 @@ request_summary.base_url_host: llm.chutes.ai
 
 This is a dry-run only. It does not call Chutes.
 
+Explicit Chutes real connection test:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test provider-real-test demo_project writer --prompt "Return exactly OK." --temperature 0 --max-tokens 16
+```
+
+This command sends a real non-streaming request. Use it only after explicit user approval.
+
+Output returns metadata only, not generated text.
+
 Generate a draft:
 
 ```powershell

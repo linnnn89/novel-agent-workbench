@@ -66,6 +66,7 @@ Provider config tests currently cover:
 - rejection of missing real-provider secret refs and raw key settings,
 - disabled Provider dry-run summaries for `deepseek` and `openai_compatible`,
 - disabled Chutes OpenAI-compatible dry-run summary,
+- mocked Chutes real-test metadata path without log/draft side effects,
 - dry-run secret error handling without request summaries,
 - invalid role rejection.
 
@@ -125,6 +126,7 @@ CLI tests currently cover:
 - missing secret ref rejection in CLI config write.
 - `provider-dry-run` output excluding prompt text, system prompt text, and plaintext secrets.
 - Chutes `provider-dry-run` CLI output with `llm.chutes.ai` host and no prompt/key leak.
+- Chutes `provider-real-test` CLI output with mocked HTTP and no prompt/key/response-text leak.
 
 Audit tests currently cover:
 
