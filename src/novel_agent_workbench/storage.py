@@ -249,8 +249,11 @@ class ProjectStore:
         current = self.read_config()
         migrated, changed = merge_project_config(current)
         missing_files = [name for name in DATA_FILE_DEFAULTS if not self.data_file_path(name).exists()]
-        if changed or missing_files:
+        missing_meta = not self.project_meta_path.exists()
+        if changed or missing_files or missing_meta:
             checkpoint = self.create_checkpoint(label="pre_migration")
+            if missing_meta:
+                self.write_project_meta({"project_id": self.project_id, "schema_version": 1})
             self.write_config(migrated)
             created_files = self.ensure_default_data_files()
             return {
@@ -258,12 +261,14 @@ class ProjectStore:
                 "schema_version": CURRENT_CONFIG_SCHEMA_VERSION,
                 "checkpoint": checkpoint,
                 "created_files": created_files,
+                "created_project_meta": missing_meta,
             }
         return {
             "changed": False,
             "schema_version": CURRENT_CONFIG_SCHEMA_VERSION,
             "checkpoint": None,
             "created_files": [],
+            "created_project_meta": False,
         }
 
     def public_state(self) -> dict[str, Any]:

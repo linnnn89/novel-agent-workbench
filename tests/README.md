@@ -38,3 +38,13 @@ Registry tests currently cover:
 - discovery of valid unindexed projects,
 - unsafe project id rejection,
 - no hard delete API.
+
+Foundation tests currently cover:
+
+- default config schema and placeholder data files,
+- legacy config migration,
+- migration idempotence,
+- checkpoint-before-migration behavior,
+- missing project metadata repair,
+- secrets isolation and masked public state,
+- checkpoint exclusion of secrets, backups, and `.trash` files.

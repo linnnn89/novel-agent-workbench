@@ -99,6 +99,20 @@ class ProjectFoundationTest(unittest.TestCase):
             self.assertNotIn("data/planning_library.json", names)
             self.assertTrue(store.data_file_path("planning_library.json").exists())
 
+    def test_migration_creates_missing_project_meta_after_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "legacy")
+            store.data_dir.mkdir(parents=True)
+            store.config_path.write_text('{"schema_version": 0}\n', encoding="utf-8")
+
+            result = store.migrate_config()
+
+            self.assertTrue(result["created_project_meta"])
+            self.assertEqual(store.read_project_meta()["project_id"], "legacy")
+            with zipfile.ZipFile(Path(result["checkpoint"]["path"]), "r") as archive:
+                names = set(archive.namelist())
+            self.assertNotIn("project.json", names)
+
     def test_update_secrets_and_public_state_never_return_plain_secret(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = ProjectStore.open(Path(temp), "demo")
@@ -114,6 +128,23 @@ class ProjectFoundationTest(unittest.TestCase):
             self.assertEqual(state["secrets"]["api_key"]["masked"], "sk-****cret")
             self.assertEqual(state["secrets"]["short"]["masked"], "****")
             self.assertNotIn("sk-test-secret", store.config_path.read_text(encoding="utf-8"))
+
+    def test_checkpoint_excludes_backups_and_trash_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            store.write_config({"schema_version": CURRENT_CONFIG_SCHEMA_VERSION, "marker": "first"})
+            store.write_config({"schema_version": CURRENT_CONFIG_SCHEMA_VERSION, "marker": "second"})
+            trash_file = store.data_dir / "old_note.txt.trash"
+            trash_file.write_text("discarded but recoverable", encoding="utf-8")
+
+            checkpoint = store.create_checkpoint(label="clean")
+
+            with zipfile.ZipFile(Path(checkpoint["path"]), "r") as archive:
+                names = set(archive.namelist())
+
+            self.assertFalse(any(name.startswith("backups/") for name in names))
+            self.assertNotIn("data/old_note.txt.trash", names)
 
 
 if __name__ == "__main__":

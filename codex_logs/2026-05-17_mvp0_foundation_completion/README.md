@@ -55,6 +55,13 @@ Ran 24 tests in 0.474s
 OK
 ```
 
+After recovery-boundary checks:
+
+```text
+Ran 26 tests in 0.521s
+OK
+```
+
 ## Implemented So Far
 
 - `config.py` with schema version and default project structures.
@@ -70,3 +77,20 @@ OK
 - `ProjectStore.update_secrets()`.
 - `ProjectStore.public_state()` with masked secret output.
 - Tests for migration idempotence, checkpoint behavior, and secret non-leakage.
+- Tests for missing project metadata repair.
+- Tests that checkpoint packages exclude backups and `.trash` files.
+
+## Files Changed
+
+```text
+README.md
+codex_docs\DECISIONS.md
+codex_docs\PROJECT_CHARTER.md
+codex_logs\2026-05-17_mvp0_foundation_completion\README.md
+src\novel_agent_workbench\config.py
+src\novel_agent_workbench\storage.py
+src\novel_agent_workbench\README.md
+tests\README.md
+tests\test_project_foundation.py
+tests\test_project_store.py
+```

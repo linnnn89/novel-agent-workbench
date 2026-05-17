@@ -49,6 +49,9 @@ MVP-0 first storage slice is implemented:
 - Reversible checkpoint restore using `.trash` for overwritten files.
 - `ProjectRegistry` for creating, opening, and listing multiple projects.
 - Default runtime routing to `workspace_projects/`.
+- Project config schema defaults and migration.
+- Placeholder files for Planning Library, Memory Bank, scoring/revision policy, and export settings.
+- Public state with masked secrets only.
 - Unit tests.
 
 Verification command:
