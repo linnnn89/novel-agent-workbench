@@ -270,6 +270,15 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This only creates metadata. It does not call an LLM, edit the draft, create a confirmed chapter, or update Memory Bank/RAG/export.
 
+Generate a mock revision draft candidate:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test configure-provider-role demo_project reviser --provider mock --model mock-reviser
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test generate-revision-draft demo_project <revision_request_id>
+```
+
+This creates a new draft candidate in `data/drafts/`. It does not overwrite the source draft and does not create a confirmed chapter. Use `read-draft <new_draft_id>` to inspect the mock candidate content.
+
 Explicitly commit a draft:
 
 ```powershell
@@ -387,6 +396,26 @@ RevisionRequestError: Review already has a revision request
 ```
 
 Meaning: this phase stores one revision request per review.
+
+Revision draft before request is draftable:
+
+```text
+RevisionRequestError: Revision request is not draftable
+```
+
+Meaning: the request is missing, already consumed, or no longer in `requested` state.
+
+Missing reviser role:
+
+```text
+ProviderError: Model role has no provider configured.
+```
+
+Fix:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> configure-provider-role <project_id> reviser --provider mock --model mock-reviser
+```
 
 Unsafe project id:
 

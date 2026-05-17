@@ -129,6 +129,10 @@ def build_parser() -> argparse.ArgumentParser:
     read_revision_request.add_argument("project_id")
     read_revision_request.add_argument("revision_request_id")
 
+    generate_revision_draft = subparsers.add_parser("generate-revision-draft")
+    generate_revision_draft.add_argument("project_id")
+    generate_revision_draft.add_argument("revision_request_id")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -259,6 +263,8 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_revision_requests(args.project_id)
     if command == "read-revision-request":
         return app.read_revision_request(args.project_id, args.revision_request_id)
+    if command == "generate-revision-draft":
+        return app.generate_revision_draft(args.project_id, args.revision_request_id)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

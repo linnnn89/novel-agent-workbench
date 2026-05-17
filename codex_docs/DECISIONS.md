@@ -295,3 +295,11 @@ Decision: Add a metadata-only Revision Request layer after `needs_revision`.
 Reason: A draft that needs revision should be represented as a durable request before any future revision generator exists. This keeps the workflow inspectable without mutating drafts or confirmed chapters.
 
 Impact: `RevisionRequestService.create_revision_request(...)` creates `data/revision_requests/*.json` and `data/revision_requests_index.json` only when the source review decision is `needs_revision`. It rejects pending, accepted, blocked, missing, and duplicate requests. Chapter workflow may move to `revision_requested` with `latest_revision_request_id`. The operation does not call Providers, generate text, edit drafts, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or store prompt/content/secrets.
+
+## 2026-05-17: MVP-5 Mock Revision Draft Service
+
+Decision: Add a mock-only revision draft candidate generator from revision requests.
+
+Reason: The workflow now needs a concrete way to create a new candidate draft after `needs_revision`, but still must avoid overwriting source drafts, auto-committing, or introducing real Provider risk.
+
+Impact: `RevisionRequestService.generate_revision_draft(...)` accepts only `requested` revision requests, calls the configured `reviser` role through the local `mock` Provider, writes a new `data/drafts/*.json` artifact, appends `data/drafts_index.json`, and updates the revision request to `draft_created` with `generated_draft_id`. The new draft contains `revision` metadata pointing to the source draft, review, and revision request. The operation does not overwrite source drafts, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, call real Providers, or store source prompt/content/secrets in metadata surfaces.

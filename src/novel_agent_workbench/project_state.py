@@ -152,6 +152,7 @@ def safe_chapter_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
         if isinstance(item.get("latest_review_decision"), dict)
         else {},
         "latest_revision_request_id": item.get("latest_revision_request_id"),
+        "latest_revision_draft_id": item.get("latest_revision_draft_id"),
         "confirmed_chapter_id": item.get("confirmed_chapter_id"),
         "updated_at": item.get("updated_at"),
         "error_summary": item.get("error_summary") if isinstance(item.get("error_summary"), dict) else {},

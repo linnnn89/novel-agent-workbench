@@ -6,7 +6,8 @@ from typing import Any
 from uuid import uuid4
 
 from .chapters import ChapterWorkflowService
-from .drafts import DraftGenerationService, validate_chapter_id
+from .drafts import DraftGenerationResult, DraftGenerationService, new_draft_id, validate_chapter_id
+from .providers import ProviderRequest, generate_with_provider
 from .reviews import DraftReviewService
 from .storage import ProjectStore, safe_filename, utc_stamp
 
@@ -123,6 +124,115 @@ class RevisionRequestService:
                 created_at=created_at,
             )
 
+    def generate_revision_draft(self, revision_request_id: str) -> DraftGenerationResult:
+        self.store.initialize()
+        with self.store.lock():
+            request_entry = self._request_index_entry(revision_request_id)
+            request_artifact = self.read_revision_request(revision_request_id)
+            if str(request_artifact.get("status") or "") != "requested":
+                raise RevisionRequestError(f"Revision request is not draftable: {revision_request_id}")
+            generated_draft_id = str(request_artifact.get("generated_draft_id") or "")
+            if generated_draft_id:
+                raise RevisionRequestError(f"Revision request already has a draft candidate: {revision_request_id}")
+            draft_id = str(request_artifact.get("draft_id") or request_entry.get("draft_id") or "")
+            review_id = str(request_artifact.get("review_id") or request_entry.get("review_id") or "")
+            chapter_id = str(request_artifact.get("chapter_id") or request_entry.get("chapter_id") or "")
+            validate_chapter_id(chapter_id)
+            source_draft = DraftGenerationService(self.store).read_draft(draft_id)
+            source_content = str(source_draft.get("content") or "")
+            title = str(source_draft.get("title") or "")
+            response = generate_with_provider(
+                self.store,
+                ProviderRequest(
+                    role="reviser",
+                    prompt=f"Create mock revision draft candidate. source_draft_chars={len(source_content)}",
+                    max_tokens=64,
+                    metadata={
+                        "revision_draft": True,
+                        "chapter_id": chapter_id,
+                        "source_draft_id": draft_id,
+                        "review_id": review_id,
+                        "revision_request_id": revision_request_id,
+                    },
+                ),
+            )
+            new_id = new_draft_id()
+            created_at = utc_stamp()
+            draft_path = self.store.data_dir / "drafts" / f"{safe_filename(chapter_id)}__{new_id}.json"
+            artifact = {
+                "schema_version": 1,
+                "status": "draft",
+                "draft_id": new_id,
+                "chapter_id": chapter_id,
+                "title": title,
+                "created_at": created_at,
+                "content": response.text,
+                "provider": {
+                    "role": "reviser",
+                    "provider": response.provider,
+                    "model": response.model,
+                    "finish_reason": response.finish_reason,
+                    "usage": response.usage,
+                },
+                "revision": {
+                    "source_draft_id": draft_id,
+                    "source_review_id": review_id,
+                    "revision_request_id": revision_request_id,
+                    "mode": "mock_revision_candidate",
+                },
+                "request_summary": {
+                    "source_draft_chars": len(source_content),
+                    "metadata_keys": ["chapter_id", "revision_draft", "revision_request_id", "review_id", "source_draft_id"],
+                },
+            }
+            self.store.write_json(draft_path, artifact)
+            self._append_draft_index_entry(
+                {
+                    "draft_id": new_id,
+                    "chapter_id": chapter_id,
+                    "title": title,
+                    "created_at": created_at,
+                    "status": "draft",
+                    "path": str(draft_path.relative_to(self.store.root)),
+                    "provider": response.provider,
+                    "model": response.model,
+                    "usage": response.usage,
+                    "revision": {
+                        "source_draft_id": draft_id,
+                        "source_review_id": review_id,
+                        "revision_request_id": revision_request_id,
+                    },
+                }
+            )
+            request_artifact["status"] = "draft_created"
+            request_artifact["generated_draft_id"] = new_id
+            request_artifact["updated_at"] = created_at
+            self.store.write_json(str(request_entry["path"]), request_artifact)
+            self._update_request_index_entry(
+                revision_request_id,
+                {
+                    "status": "draft_created",
+                    "generated_draft_id": new_id,
+                    "updated_at": created_at,
+                },
+            )
+            ChapterWorkflowService(self.store).mark_revision_draft_ready(
+                chapter_id,
+                title=title,
+                draft_id=new_id,
+                review_id=review_id,
+                revision_request_id=revision_request_id,
+            )
+            return DraftGenerationResult(
+                draft_id=new_id,
+                chapter_id=chapter_id,
+                title=title,
+                path=str(draft_path),
+                provider=response.provider,
+                model=response.model,
+                usage=response.usage,
+            )
+
     def list_revision_requests(self) -> list[dict[str, Any]]:
         index = self.store.read_json(self.index_path, default={"schema_version": 1, "revision_requests": []})
         if not isinstance(index, dict):
@@ -152,6 +262,32 @@ class RevisionRequestService:
         items = index.get("revision_requests") if isinstance(index.get("revision_requests"), list) else []
         items.append(entry)
         self.store.write_json(self.index_path, {"schema_version": 1, "revision_requests": items})
+
+    def _request_index_entry(self, revision_request_id: str) -> dict[str, Any]:
+        for item in self.list_revision_requests():
+            if item.get("revision_request_id") == revision_request_id:
+                return item
+        raise RevisionRequestError(f"Revision request not found: {revision_request_id}")
+
+    def _update_request_index_entry(self, revision_request_id: str, updates: dict[str, Any]) -> None:
+        index = self.store.read_json(self.index_path, default={"schema_version": 1, "revision_requests": []})
+        items = index.get("revision_requests") if isinstance(index, dict) and isinstance(index.get("revision_requests"), list) else []
+        updated: list[dict[str, Any]] = []
+        for item in items:
+            if isinstance(item, dict) and item.get("revision_request_id") == revision_request_id:
+                item = {**item, **updates}
+            if isinstance(item, dict):
+                updated.append(item)
+        self.store.write_json(self.index_path, {"schema_version": 1, "revision_requests": updated})
+
+    def _append_draft_index_entry(self, entry: dict[str, Any]) -> None:
+        path = self.store.data_dir / "drafts_index.json"
+        index = self.store.read_json(path, default={"schema_version": 1, "drafts": []})
+        if not isinstance(index, dict):
+            index = {"schema_version": 1, "drafts": []}
+        drafts = index.get("drafts") if isinstance(index.get("drafts"), list) else []
+        drafts.append(entry)
+        self.store.write_json(path, {"schema_version": 1, "drafts": drafts})
 
     def _review_index_entry(self, review_id: str) -> dict[str, Any]:
         for item in DraftReviewService(self.store).list_reviews():

@@ -216,6 +216,14 @@ revision_requests/*.json + revision_requests_index.json + revision_requested wor
 
 Revision requests may be created only from `needs_revision` review decisions. They are metadata-only and must not call LLMs, mutate drafts, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or store prompt text, draft content, raw Provider responses, plaintext secrets, or free-text notes.
 
+MVP-5 mock revision draft slice:
+
+```text
+generate-revision-draft + mock reviser output -> new draft candidate.
+```
+
+Mock revision draft generation may create a new draft artifact and draft index entry only. It must preserve the source draft unchanged, keep explicit commit as the only confirmed-chapter path, use only the local mock Provider, and avoid Memory Bank/RAG/export/DOCX side effects.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

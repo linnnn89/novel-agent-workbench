@@ -96,6 +96,7 @@ latest_draft_id
 latest_review_id
 latest_review_decision
 latest_revision_request_id
+latest_revision_draft_id
 confirmed_chapter_id
 error_summary
 ```
@@ -457,6 +458,56 @@ Metadata-only. Must not return draft content, prompt text, raw Provider response
 Returns one revision request artifact from `data/revision_requests/*.json`.
 
 Metadata-only. Must not return draft content, prompt text, raw Provider responses, or plaintext secrets.
+
+### generate_revision_draft(project_id, revision_request_id)
+
+Creates a new mock revision draft candidate from one revision request.
+
+Required source state:
+
+```text
+revision_request.status == requested
+```
+
+Returns draft metadata:
+
+```text
+draft_id
+chapter_id
+title
+path
+provider
+model
+usage
+```
+
+Writes:
+
+```text
+data/drafts/*.json
+data/drafts_index.json
+```
+
+Updates the revision request:
+
+```text
+status=draft_created
+generated_draft_id=<new draft id>
+```
+
+The new draft artifact may contain mock generated content for human review. It must include revision metadata linking:
+
+```text
+source_draft_id
+source_review_id
+revision_request_id
+```
+
+Must use only the configured `reviser` role with the local `mock` Provider in this phase.
+
+Must not overwrite or mutate the source draft, create confirmed chapters, auto-commit, update Memory Bank, update RAG, create exports, create DOCX, call real Providers, or enable real Providers.
+
+CLI/facade output, indexes, logs, public state, and audit output must not return source draft content, candidate draft content, original prompt text, raw Provider responses, request bodies, or plaintext secrets.
 
 ### list_confirmed_chapters(project_id)
 

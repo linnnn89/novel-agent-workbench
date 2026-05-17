@@ -165,6 +165,10 @@ class WorkbenchApplicationService:
     def read_revision_request(self, project_id: str, revision_request_id: str) -> dict[str, Any]:
         return RevisionRequestService(self._open_store(project_id)).read_revision_request(revision_request_id)
 
+    def generate_revision_draft(self, project_id: str, revision_request_id: str) -> dict[str, Any]:
+        result = RevisionRequestService(self._open_store(project_id)).generate_revision_draft(revision_request_id)
+        return result.to_dict()
+
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()
 

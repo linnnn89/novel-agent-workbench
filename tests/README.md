@@ -17,7 +17,7 @@ Current backend verification command:
 py -3.13 -m unittest discover -s tests
 ```
 
-Current implemented tests cover storage, registry, foundation config, Provider config/interface, draft generation, draft review, manual review decisions, revision requests, explicit draft commit, and safe project state summaries.
+Current implemented tests cover storage, registry, foundation config, Provider config/interface, draft generation, draft review, manual review decisions, revision requests, mock revision draft candidates, explicit draft commit, and safe project state summaries.
 
 Chapter workflow tests currently cover:
 
@@ -55,6 +55,18 @@ Revision request tests currently cover:
 - no Provider call, draft mutation, confirmed chapter, Memory Bank, RAG, or export side effects,
 - revision request artifact, index, public state, audit output, facade output, and CLI output excluding draft content, prompt text, and plaintext secrets,
 - CLI commands `create-revision-request`, `list-revision-requests`, and `read-revision-request`.
+
+Mock revision draft tests currently cover:
+
+- generating a new draft candidate from a `requested` revision request,
+- source draft preservation and no overwrite,
+- revision metadata linking source draft, review, and revision request,
+- revision request status moving to `draft_created`,
+- chapter state moving to `revision_draft_ready`,
+- rejection of missing, non-requested, duplicate, and missing-reviser cases,
+- no automatic confirmed chapter, Memory Bank, RAG, export, or Provider real-network side effects,
+- safe facade/CLI output excluding prompt text, source draft content, candidate content, and plaintext secrets,
+- CLI command `generate-revision-draft`.
 
 Checkpoint tests currently cover:
 

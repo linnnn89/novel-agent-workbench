@@ -16,6 +16,7 @@ CHAPTER_STATUSES = {
     "review_accepted",
     "needs_revision",
     "revision_requested",
+    "revision_draft_ready",
     "committed",
     "blocked",
 }
@@ -36,6 +37,7 @@ class ChapterWorkflowEntry:
     latest_review_id: str = ""
     latest_review_decision: dict[str, Any] | None = None
     latest_revision_request_id: str = ""
+    latest_revision_draft_id: str = ""
     confirmed_chapter_id: str = ""
     error_summary: dict[str, Any] | None = None
 
@@ -165,6 +167,28 @@ class ChapterWorkflowService:
             error_summary={},
         )
 
+    def mark_revision_draft_ready(
+        self,
+        chapter_id: str,
+        *,
+        title: str = "",
+        draft_id: str,
+        review_id: str,
+        revision_request_id: str,
+    ) -> dict[str, Any]:
+        current = self._find(chapter_id)
+        status = "committed" if current and current.get("status") == "committed" else "revision_draft_ready"
+        return self._upsert(
+            chapter_id,
+            title=title,
+            status=status,
+            latest_draft_id=draft_id,
+            latest_review_id=review_id,
+            latest_revision_request_id=revision_request_id,
+            latest_revision_draft_id=draft_id,
+            error_summary={},
+        )
+
     def mark_committed(
         self,
         chapter_id: str,
@@ -229,6 +253,7 @@ class ChapterWorkflowService:
         latest_review_id: str | None = None,
         latest_review_decision: dict[str, Any] | None = None,
         latest_revision_request_id: str | None = None,
+        latest_revision_draft_id: str | None = None,
         confirmed_chapter_id: str | None = None,
         error_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -259,6 +284,9 @@ class ChapterWorkflowService:
                 "latest_revision_request_id": latest_revision_request_id
                 if latest_revision_request_id is not None
                 else str(item.get("latest_revision_request_id") or ""),
+                "latest_revision_draft_id": latest_revision_draft_id
+                if latest_revision_draft_id is not None
+                else str(item.get("latest_revision_draft_id") or ""),
                 "confirmed_chapter_id": confirmed_chapter_id
                 if confirmed_chapter_id is not None
                 else str(item.get("confirmed_chapter_id") or ""),
@@ -274,6 +302,7 @@ class ChapterWorkflowService:
                 "latest_review_id": latest_review_id or "",
                 "latest_review_decision": latest_review_decision or {},
                 "latest_revision_request_id": latest_revision_request_id or "",
+                "latest_revision_draft_id": latest_revision_draft_id or "",
                 "confirmed_chapter_id": confirmed_chapter_id or "",
                 "error_summary": error_summary or {},
             }
@@ -293,6 +322,7 @@ def default_entry(chapter_id: str, timestamp: str) -> dict[str, Any]:
         "latest_review_id": "",
         "latest_review_decision": {},
         "latest_revision_request_id": "",
+        "latest_revision_draft_id": "",
         "confirmed_chapter_id": "",
         "error_summary": {},
     }
