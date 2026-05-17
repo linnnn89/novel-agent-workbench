@@ -224,6 +224,83 @@ class CliTest(unittest.TestCase):
             self.assertEqual(stdout, "")
             self.assertEqual(payload["error_type"], "ProviderConfigError")
 
+    def test_provider_dry_run_cli_returns_safe_summary_without_prompt_or_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            run_cli(["--projects-root", temp, "set-project-secret", "demo", "deepseek_key", "--value", "sk-cli-secret"])
+            run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "configure-provider-role",
+                    "demo",
+                    "writer",
+                    "--provider",
+                    "deepseek",
+                    "--model",
+                    "deepseek-chat",
+                    "--api-key-ref",
+                    "project_secret.deepseek_key",
+                    "--base-url",
+                    "https://api.deepseek.example/v1",
+                ]
+            )
+
+            code, stdout, stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "provider-dry-run",
+                    "demo",
+                    "writer",
+                    "--prompt",
+                    "private cli dry run prompt",
+                    "--system-prompt",
+                    "private cli dry run system",
+                    "--temperature",
+                    "0.25",
+                    "--max-tokens",
+                    "200",
+                ]
+            )
+            payload = json.loads(stdout)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(payload["result"]["error_type"], "adapter_disabled")
+            self.assertEqual(payload["result"]["request_summary"]["base_url_host"], "api.deepseek.example")
+            self.assertEqual(payload["result"]["request_summary"]["prompt_chars"], len("private cli dry run prompt"))
+            self.assertNotIn("private cli dry run prompt", stdout)
+            self.assertNotIn("private cli dry run system", stdout)
+            self.assertNotIn("sk-cli-secret", stdout)
+
+    def test_provider_dry_run_cli_reports_missing_secret_without_prompt_leak(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            config_path = Path(temp) / "demo" / "data" / "config.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["model_roles"]["writer"].update(
+                {"provider": "deepseek", "model": "deepseek-chat", "api_key_ref": "project_secret.missing_key"}
+            )
+            config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            code, stdout, stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "provider-dry-run",
+                    "demo",
+                    "writer",
+                    "--prompt",
+                    "private missing secret prompt",
+                ]
+            )
+            payload = json.loads(stdout)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(payload["result"]["error_type"], "missing_secret")
+            self.assertEqual(payload["result"]["request_summary"], {})
+            self.assertNotIn("private missing secret prompt", stdout)
+
 
 def run_cli(args: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()

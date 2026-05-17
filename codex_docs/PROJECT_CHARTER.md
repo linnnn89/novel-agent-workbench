@@ -144,6 +144,14 @@ safe Provider config write path + project-local secret write path + masked CLI/s
 
 This allows rehearsal of real Provider setup while adapters remain disabled. It must not turn on HTTP calls or allow generation through real Provider ids.
 
+MVP-2 provider dry-run adapter slice:
+
+```text
+disabled real-provider dry-run adapter + OpenAI-compatible safe request summary + provider-dry-run CLI.
+```
+
+Dry-run may expose only safe counts and config metadata. It must not expose prompt text, request bodies, API keys, or raw responses, and it must not write preflight logs by default.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

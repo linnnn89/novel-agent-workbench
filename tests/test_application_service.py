@@ -125,6 +125,36 @@ class WorkbenchApplicationServiceTest(unittest.TestCase):
             self.assertEqual(status["error_type"], "adapter_disabled")
             self.assertNotIn("sk-facade-secret", result_text)
 
+    def test_facade_provider_dry_run_is_safe_summary_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_project("demo")
+            app.set_project_secret("demo", "deepseek_key", "sk-facade-secret")
+            app.configure_provider_role(
+                "demo",
+                "writer",
+                provider="deepseek",
+                model="deepseek-chat",
+                api_key_ref="project_secret.deepseek_key",
+                base_url="https://api.deepseek.example/v1",
+            )
+
+            result = app.provider_dry_run(
+                "demo",
+                "writer",
+                prompt="private facade dry run prompt",
+                system_prompt="private facade dry run system",
+                metadata={"secret_note": "hidden"},
+            )
+            result_text = json.dumps(result, ensure_ascii=False)
+
+            self.assertEqual(result["error_type"], "adapter_disabled")
+            self.assertEqual(result["request_summary"]["base_url_host"], "api.deepseek.example")
+            self.assertEqual(result["request_summary"]["metadata_keys"], ["secret_note"])
+            self.assertNotIn("private facade dry run prompt", result_text)
+            self.assertNotIn("private facade dry run system", result_text)
+            self.assertNotIn("sk-facade-secret", result_text)
+
 
 if __name__ == "__main__":
     unittest.main()

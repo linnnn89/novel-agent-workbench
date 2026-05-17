@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from novel_agent_workbench import WorkbenchApplicationService, audit_project
 from novel_agent_workbench.drafts import DraftGenerationRequest, DraftGenerationService
-from novel_agent_workbench.providers import set_model_role_config
+from novel_agent_workbench.providers import configure_provider_role, set_model_role_config, set_project_secret
 from novel_agent_workbench.storage import ProjectStore
 
 
@@ -89,6 +89,30 @@ class ProjectAuditTest(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertIn("provider_missing_secret", {item["code"] for item in result["findings"]})
             self.assertNotIn("sk-", text)
+
+    def test_audit_after_provider_dry_run_has_disabled_finding_without_prompt_or_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_project("demo")
+            store = ProjectStore.open(Path(temp), "demo")
+            set_project_secret(store, "deepseek_key", "sk-audit-secret")
+            configure_provider_role(
+                store,
+                "writer",
+                provider="deepseek",
+                model="deepseek-chat",
+                api_key_ref="project_secret.deepseek_key",
+                base_url="https://api.deepseek.example/v1",
+            )
+            app.provider_dry_run("demo", "writer", prompt="private audit dry run prompt")
+
+            result = app.audit_project("demo")
+            text = json.dumps(result, ensure_ascii=False)
+
+            self.assertFalse(result["ok"])
+            self.assertIn("provider_adapter_disabled", {item["code"] for item in result["findings"]})
+            self.assertNotIn("private audit dry run prompt", text)
+            self.assertNotIn("sk-audit-secret", text)
 
     def test_audit_fails_on_prompt_text_in_provider_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

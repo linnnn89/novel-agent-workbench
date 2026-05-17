@@ -64,6 +64,8 @@ Provider config tests currently cover:
 - safe disabled Provider config writes with `project_secret.*` refs,
 - project-local secret writes returning masked metadata only,
 - rejection of missing real-provider secret refs and raw key settings,
+- disabled Provider dry-run summaries for `deepseek` and `openai_compatible`,
+- dry-run secret error handling without request summaries,
 - invalid role rejection.
 
 Provider interface tests currently cover:
@@ -120,6 +122,7 @@ CLI tests currently cover:
 - Provider status output excluding plaintext secrets.
 - `configure-provider-role` and `set-project-secret` output excluding plaintext secrets,
 - missing secret ref rejection in CLI config write.
+- `provider-dry-run` output excluding prompt text, system prompt text, and plaintext secrets.
 
 Audit tests currently cover:
 
@@ -133,3 +136,4 @@ Audit tests currently cover:
 - raw Provider API keys in config/settings,
 - disabled Provider adapter findings,
 - missing Provider secret refs and local secrets.
+- audit after provider dry-run excluding prompt text and plaintext secrets.

@@ -7,7 +7,15 @@ from typing import Any
 from .audit import audit_project
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .project_state import public_project_state
-from .providers import configure_provider_role, list_provider_adapters, provider_status, set_model_role_config, set_project_secret
+from .providers import (
+    ProviderRequest,
+    configure_provider_role,
+    list_provider_adapters,
+    provider_dry_run,
+    provider_status,
+    set_model_role_config,
+    set_project_secret,
+)
 from .storage import ProjectRegistry, ProjectStore
 
 
@@ -117,6 +125,29 @@ class WorkbenchApplicationService:
 
     def provider_status(self, project_id: str, role: str) -> dict[str, Any]:
         return provider_status(self._open_store(project_id), role).to_dict()
+
+    def provider_dry_run(
+        self,
+        project_id: str,
+        role: str,
+        *,
+        prompt: str,
+        system_prompt: str = "",
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return provider_dry_run(
+            self._open_store(project_id),
+            ProviderRequest(
+                role=role,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                metadata=metadata or {},
+            ),
+        ).to_dict()
 
     def list_provider_adapters(self) -> list[dict[str, Any]]:
         return list_provider_adapters()

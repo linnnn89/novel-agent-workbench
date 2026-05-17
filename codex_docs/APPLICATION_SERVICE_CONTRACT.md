@@ -232,6 +232,45 @@ Must not create drafts, create confirmed chapters, update Memory Bank, update RA
 
 Must not return plaintext secrets.
 
+### provider_dry_run(project_id, role, prompt, system_prompt="", temperature=None, max_tokens=None, metadata=None)
+
+Builds a no-network Provider request summary for one role.
+
+Returns:
+
+```text
+ok
+role
+provider
+model
+mode
+message
+adapter_enabled
+network_allowed
+error_type
+request_summary
+```
+
+`request_summary` may include only:
+
+```text
+provider
+model
+base_url_host
+message_count
+prompt_chars
+system_prompt_chars
+temperature
+max_tokens
+metadata_keys
+```
+
+Must not send network requests.
+
+Must not create drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
+
+Must not return prompt text, system prompt text, full request bodies, raw response content, or plaintext secrets.
+
 ### list_provider_adapters()
 
 Returns registered Provider adapter metadata:

@@ -93,6 +93,14 @@ def build_parser() -> argparse.ArgumentParser:
     provider_status.add_argument("project_id")
     provider_status.add_argument("role", choices=["writer", "scorer", "reviser"])
 
+    provider_dry_run = subparsers.add_parser("provider-dry-run")
+    provider_dry_run.add_argument("project_id")
+    provider_dry_run.add_argument("role", choices=["writer", "scorer", "reviser"])
+    provider_dry_run.add_argument("--prompt", required=True)
+    provider_dry_run.add_argument("--system-prompt", default="")
+    provider_dry_run.add_argument("--max-tokens", type=int, default=None)
+    provider_dry_run.add_argument("--temperature", type=float, default=None)
+
     subparsers.add_parser("list-provider-adapters")
 
     smoke = subparsers.add_parser("smoke")
@@ -153,6 +161,15 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.audit_project(args.project_id)
     if command == "provider-status":
         return app.provider_status(args.project_id, args.role)
+    if command == "provider-dry-run":
+        return app.provider_dry_run(
+            args.project_id,
+            args.role,
+            prompt=args.prompt,
+            system_prompt=args.system_prompt,
+            max_tokens=args.max_tokens,
+            temperature=args.temperature,
+        )
     if command == "list-provider-adapters":
         return app.list_provider_adapters()
     if command == "smoke":

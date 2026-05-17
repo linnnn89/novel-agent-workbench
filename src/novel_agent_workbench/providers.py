@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from .config import default_model_role
@@ -104,6 +105,23 @@ class ProviderConnectionResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderDryRunResult:
+    ok: bool
+    role: str
+    provider: str
+    model: str
+    mode: str
+    message: str
+    adapter_enabled: bool
+    network_allowed: bool
+    error_type: str
+    request_summary: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderRequest:
     role: str
     prompt: str
@@ -147,6 +165,31 @@ class ProviderClient:
 
     def generate(self, request: ProviderRequest) -> ProviderResponse:
         raise NotImplementedError
+
+
+@dataclass(slots=True)
+class DisabledProviderDryRunAdapter:
+    role_config: ModelRoleConfig
+    adapter_info: ProviderAdapterInfo
+
+    def dry_run(self, request: ProviderRequest) -> ProviderDryRunResult:
+        if request.role != self.role_config.role:
+            raise ProviderError(
+                f"Request role {request.role!r} does not match adapter role {self.role_config.role!r}.",
+                error_type="invalid_request",
+            )
+        return ProviderDryRunResult(
+            ok=False,
+            role=request.role,
+            provider=self.role_config.provider,
+            model=self.role_config.model,
+            mode="dry_run",
+            message=f"Provider adapter {self.role_config.provider!r} is disabled; dry-run summary only.",
+            adapter_enabled=False,
+            network_allowed=False,
+            error_type="adapter_disabled",
+            request_summary=openai_compatible_request_summary(request, self.role_config),
+        )
 
 
 @dataclass(slots=True)
@@ -483,6 +526,101 @@ def list_provider_adapters() -> list[dict[str, Any]]:
 
 def provider_status(store: ProjectStore, role: str) -> ProviderConnectionResult:
     return fake_test_model_role(store, role)
+
+
+def provider_dry_run(store: ProjectStore, request: ProviderRequest) -> ProviderDryRunResult:
+    role_config = get_model_role_config(store, request.role)
+    adapter = get_provider_adapter(role_config.provider) if role_config.provider else None
+    if not role_config.is_configured():
+        return ProviderDryRunResult(
+            ok=False,
+            role=request.role,
+            provider=role_config.provider,
+            model=role_config.model,
+            mode="dry_run",
+            message="Model role is not configured.",
+            adapter_enabled=False,
+            network_allowed=False,
+            error_type="missing_provider",
+            request_summary={},
+        )
+    if adapter is None:
+        return ProviderDryRunResult(
+            ok=False,
+            role=request.role,
+            provider=role_config.provider,
+            model=role_config.model,
+            mode="dry_run",
+            message=f"Provider {role_config.provider!r} is not registered.",
+            adapter_enabled=False,
+            network_allowed=False,
+            error_type="unsupported_provider",
+            request_summary={},
+        )
+    if adapter.requires_secret and not role_config.api_key_ref:
+        return ProviderDryRunResult(
+            ok=False,
+            role=request.role,
+            provider=role_config.provider,
+            model=role_config.model,
+            mode="dry_run",
+            message=f"Provider {role_config.provider!r} requires api_key_ref.",
+            adapter_enabled=adapter.enabled,
+            network_allowed=adapter.network_allowed,
+            error_type="missing_secret_ref",
+            request_summary={},
+        )
+    if role_config.api_key_ref:
+        try:
+            resolve_project_secret(store, role_config.api_key_ref)
+        except ProviderError as exc:
+            return ProviderDryRunResult(
+                ok=False,
+                role=request.role,
+                provider=role_config.provider,
+                model=role_config.model,
+                mode="dry_run",
+                message=exc.message,
+                adapter_enabled=adapter.enabled,
+                network_allowed=adapter.network_allowed,
+                error_type=exc.error_type,
+                request_summary={},
+            )
+    if role_config.provider == MOCK_PROVIDER_ID:
+        return ProviderDryRunResult(
+            ok=True,
+            role=request.role,
+            provider=role_config.provider,
+            model=role_config.model,
+            mode="dry_run",
+            message="Mock provider dry-run summary only; no network request was made.",
+            adapter_enabled=True,
+            network_allowed=False,
+            error_type="",
+            request_summary=openai_compatible_request_summary(request, role_config),
+        )
+    return DisabledProviderDryRunAdapter(role_config=role_config, adapter_info=adapter).dry_run(request)
+
+
+def openai_compatible_request_summary(request: ProviderRequest, role_config: ModelRoleConfig) -> dict[str, Any]:
+    return {
+        "provider": role_config.provider,
+        "model": role_config.model,
+        "base_url_host": safe_url_host(role_config.base_url),
+        "message_count": 2 if request.system_prompt else 1,
+        "prompt_chars": len(request.prompt),
+        "system_prompt_chars": len(request.system_prompt or ""),
+        "temperature": request.temperature,
+        "max_tokens": request.max_tokens,
+        "metadata_keys": sorted(str(key) for key in request.metadata),
+    }
+
+
+def safe_url_host(value: str) -> str:
+    if not value:
+        return ""
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    return parsed.netloc.split("@")[-1]
 
 
 def resolve_project_secret(store: ProjectStore, api_key_ref: str) -> str:

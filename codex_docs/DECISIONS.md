@@ -223,3 +223,11 @@ Decision: Add safe write paths for disabled Provider role config and project-loc
 Reason: Before enabling a real Provider, the system needs to rehearse configuration, secret storage, status checks, and audit without network side effects.
 
 Impact: `configure-provider-role` writes registered adapter config and `project_secret.<name>` refs only. `set-project-secret` writes `data/secrets.local.json` and returns masked metadata only. Disabled adapters still return `adapter_disabled` and cannot generate drafts.
+
+## 2026-05-17: MVP-2 Provider Dry-Run Adapter
+
+Decision: Add disabled dry-run adapter behavior for `deepseek` and `openai_compatible`.
+
+Reason: Before enabling real HTTP calls, Provider request translation must be testable without exposing prompt text, request bodies, or API keys.
+
+Impact: `provider-dry-run` returns a safe OpenAI-compatible summary containing provider, model, base_url_host, message_count, prompt/system prompt character counts, temperature, max_tokens, and metadata key names. It sends no network requests, writes no preflight log by default, and keeps real adapters disabled.

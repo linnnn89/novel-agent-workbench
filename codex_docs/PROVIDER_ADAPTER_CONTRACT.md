@@ -107,6 +107,40 @@ It must not accept or write plaintext API keys.
 
 It must return only masked metadata and should prefer `--value-stdin` for manual use.
 
+## Dry-Run Request Translation
+
+`provider-dry-run` builds a future request summary without sending it.
+
+Allowed summary fields:
+
+```text
+provider
+model
+base_url_host
+message_count
+prompt_chars
+system_prompt_chars
+temperature
+max_tokens
+metadata_keys
+```
+
+Forbidden dry-run output:
+
+```text
+prompt text
+system prompt text
+full request body
+Authorization header
+API key
+secrets.local.json content
+raw response content
+```
+
+`deepseek` uses the same OpenAI-compatible summary shape while preserving `provider=deepseek`.
+
+Dry-run does not write preflight logs by default. If a later phase adds preflight logs, they must follow the same no prompt, no body, no key rule.
+
 ## Logs
 
 Provider call logs may record:

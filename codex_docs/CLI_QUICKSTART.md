@@ -115,6 +115,22 @@ network_allowed: false
 
 This is correct in the current phase. The config is ready for audit, but the adapter is still disabled.
 
+Dry-run the future Provider request summary:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test provider-dry-run demo_project writer --prompt "Write a short mock opening." --system-prompt "You are a careful novelist." --temperature 0.3 --max-tokens 1000
+```
+
+Expected current result:
+
+```text
+error_type: adapter_disabled
+request_summary.prompt_chars: <length only>
+request_summary.system_prompt_chars: <length only>
+```
+
+The output must not contain prompt text, system prompt text, request body, or API key.
+
 Generate a draft:
 
 ```powershell

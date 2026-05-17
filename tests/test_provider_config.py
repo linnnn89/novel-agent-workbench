@@ -23,6 +23,7 @@ from novel_agent_workbench import (
     generate_with_provider,
     get_model_role_config,
     list_provider_adapters,
+    provider_dry_run,
     read_provider_call_log,
     resolve_project_secret,
     set_project_secret,
@@ -209,6 +210,90 @@ class ProviderConfigTest(unittest.TestCase):
                     model="mock-writer",
                     settings={"api_key": "sk-raw-secret"},
                 )
+
+    def test_disabled_provider_dry_run_returns_safe_openai_summary_without_network(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_project_secret(store, "deepseek_key", "sk-local-secret")
+            configure_provider_role(
+                store,
+                "writer",
+                provider="deepseek",
+                model="deepseek-chat",
+                api_key_ref="project_secret.deepseek_key",
+                base_url="https://api.deepseek.example/v1",
+            )
+
+            with patch("socket.create_connection", side_effect=AssertionError("network attempted")):
+                result = provider_dry_run(
+                    store,
+                    ProviderRequest(
+                        role="writer",
+                        prompt="private dry run prompt",
+                        system_prompt="private dry run system",
+                        temperature=0.3,
+                        max_tokens=123,
+                        metadata={"private_note": "hidden", "chapter": 1},
+                    ),
+                )
+            result_text = json.dumps(result.to_dict(), ensure_ascii=False)
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.error_type, "adapter_disabled")
+            self.assertEqual(result.request_summary["provider"], "deepseek")
+            self.assertEqual(result.request_summary["model"], "deepseek-chat")
+            self.assertEqual(result.request_summary["base_url_host"], "api.deepseek.example")
+            self.assertEqual(result.request_summary["message_count"], 2)
+            self.assertEqual(result.request_summary["prompt_chars"], len("private dry run prompt"))
+            self.assertEqual(result.request_summary["system_prompt_chars"], len("private dry run system"))
+            self.assertEqual(result.request_summary["metadata_keys"], ["chapter", "private_note"])
+            self.assertNotIn("private dry run prompt", result_text)
+            self.assertNotIn("private dry run system", result_text)
+            self.assertNotIn("sk-local-secret", result_text)
+
+    def test_openai_compatible_dry_run_adapter_id_is_distinct(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_project_secret(store, "openai_key", "sk-openai-secret")
+            configure_provider_role(
+                store,
+                "writer",
+                provider="openai_compatible",
+                model="gpt-compatible-test",
+                api_key_ref="project_secret.openai_key",
+                base_url="https://gateway.example.test/v1",
+            )
+
+            result = provider_dry_run(store, ProviderRequest(role="writer", prompt="safe length only"))
+
+            self.assertEqual(result.error_type, "adapter_disabled")
+            self.assertEqual(result.request_summary["provider"], "openai_compatible")
+            self.assertEqual(result.request_summary["base_url_host"], "gateway.example.test")
+
+    def test_provider_dry_run_reports_secret_errors_without_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            config = store.read_config()
+            config["model_roles"]["writer"].update(
+                {"provider": "deepseek", "model": "deepseek-chat", "api_key_ref": "project_secret.missing_key"}
+            )
+            config["model_roles"]["scorer"].update(
+                {"provider": "deepseek", "model": "deepseek-chat", "api_key_ref": "project_secret.empty_key"}
+            )
+            config["model_roles"]["reviser"].update(
+                {"provider": "deepseek", "model": "deepseek-chat", "api_key_ref": "sk-raw"}
+            )
+            store.write_config(config)
+            store.update_secrets({"empty_key": ""})
+
+            cases = [("writer", "missing_secret"), ("scorer", "empty_secret"), ("reviser", "invalid_secret_ref")]
+            for role, error_type in cases:
+                result = provider_dry_run(store, ProviderRequest(role=role, prompt="safe length only"))
+                self.assertEqual(result.error_type, error_type)
+                self.assertEqual(result.request_summary, {})
 
     def test_invalid_role_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
