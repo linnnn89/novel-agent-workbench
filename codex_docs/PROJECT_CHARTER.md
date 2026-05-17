@@ -51,6 +51,12 @@ ProjectStore + atomic JSON persistence + backup + project lock + secrets/config 
 
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
+MVP-0 verification mode:
+
+```text
+unit tests and minimal commands only; no frontend required
+```
+
 ## Construction Strategy
 
 Start from a clean skeleton. Use the reference project as a design and behavior sample only.

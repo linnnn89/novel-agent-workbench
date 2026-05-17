@@ -39,3 +39,11 @@ Decision: Initialize a local Git repository in `novel_agent_workbench`.
 Reason: Local version control gives clear change snapshots, diffs, and rollback points during AI-led development. This is local only and does not imply GitHub or any network push.
 
 Impact: All future implementation changes should be reviewable through Git status/diff. Secrets and generated runtime outputs are excluded by `.gitignore`.
+
+## 2026-05-17: MVP-0 Verification Mode
+
+Decision: MVP-0 may be backend/test-only with no UI.
+
+Reason: The first phase is about storage safety, project locking, backup behavior, and secrets isolation. These are best verified with deterministic unit tests and small command-line checks before adding a frontend surface.
+
+Impact: Do not build UI for MVP-0. Use tests and minimal commands to verify the storage kernel first.
