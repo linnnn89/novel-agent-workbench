@@ -166,6 +166,64 @@ class CliTest(unittest.TestCase):
             self.assertEqual(payload["result"]["error_type"], "adapter_disabled")
             self.assertNotIn("sk-cli-secret", stdout)
 
+    def test_configure_provider_role_and_set_secret_cli_do_not_print_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            secret_code, secret_stdout, secret_stderr = run_cli(
+                ["--projects-root", temp, "set-project-secret", "demo", "deepseek_key", "--value", "sk-cli-secret"]
+            )
+            config_code, config_stdout, config_stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "configure-provider-role",
+                    "demo",
+                    "writer",
+                    "--provider",
+                    "deepseek",
+                    "--model",
+                    "deepseek-chat",
+                    "--api-key-ref",
+                    "project_secret.deepseek_key",
+                ]
+            )
+            status_code, status_stdout, status_stderr = run_cli(
+                ["--projects-root", temp, "provider-status", "demo", "writer"]
+            )
+            config_path = Path(temp) / "demo" / "data" / "config.json"
+
+            self.assertEqual(secret_code, 0, secret_stderr)
+            self.assertEqual(config_code, 0, config_stderr)
+            self.assertEqual(status_code, 0, status_stderr)
+            self.assertNotIn("sk-cli-secret", secret_stdout)
+            self.assertNotIn("sk-cli-secret", config_stdout)
+            self.assertNotIn("sk-cli-secret", status_stdout)
+            self.assertNotIn("sk-cli-secret", config_path.read_text(encoding="utf-8"))
+            self.assertEqual(json.loads(status_stdout)["result"]["error_type"], "adapter_disabled")
+
+    def test_configure_provider_role_cli_rejects_missing_secret_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+
+            code, stdout, stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "configure-provider-role",
+                    "demo",
+                    "writer",
+                    "--provider",
+                    "deepseek",
+                    "--model",
+                    "deepseek-chat",
+                ]
+            )
+            payload = json.loads(stderr)
+
+            self.assertEqual(code, 1)
+            self.assertEqual(stdout, "")
+            self.assertEqual(payload["error_type"], "ProviderConfigError")
+
 
 def run_cli(args: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()

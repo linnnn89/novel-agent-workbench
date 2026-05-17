@@ -17,6 +17,7 @@ from novel_agent_workbench import (
     ProviderRequest,
     ProviderResponse,
     ProjectStore,
+    configure_provider_role,
     create_provider_client,
     fake_test_model_role,
     generate_with_provider,
@@ -24,6 +25,7 @@ from novel_agent_workbench import (
     list_provider_adapters,
     read_provider_call_log,
     resolve_project_secret,
+    set_project_secret,
     set_model_role_config,
 )
 from novel_agent_workbench.drafts import DraftGenerationRequest, DraftGenerationService
@@ -161,6 +163,52 @@ class ProviderConfigTest(unittest.TestCase):
                 with self.assertRaises(ProviderError) as context:
                     resolve_project_secret(store, api_key_ref)
                 self.assertEqual(context.exception.error_type, error_type)
+
+    def test_configure_disabled_provider_role_writes_ref_not_plain_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            secret_state = set_project_secret(store, "deepseek_key", "sk-local-secret")
+
+            role_config = configure_provider_role(
+                store,
+                "writer",
+                provider="deepseek",
+                model="deepseek-chat",
+                api_key_ref="project_secret.deepseek_key",
+                base_url="https://api.deepseek.example/v1",
+            )
+            result = fake_test_model_role(store, "writer")
+            config_text = store.config_path.read_text(encoding="utf-8")
+
+            self.assertEqual(role_config.provider, "deepseek")
+            self.assertEqual(role_config.api_key_ref, "project_secret.deepseek_key")
+            self.assertEqual(secret_state["masked"], "sk-****cret")
+            self.assertEqual(result.error_type, "adapter_disabled")
+            self.assertNotIn("sk-local-secret", config_text)
+            self.assertIn("sk-local-secret", store.secrets_path.read_text(encoding="utf-8"))
+
+    def test_configure_provider_role_rejects_missing_ref_for_secret_required_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+
+            with self.assertRaises(ProviderConfigError):
+                configure_provider_role(store, "writer", provider="deepseek", model="deepseek-chat")
+
+    def test_configure_provider_role_rejects_raw_key_in_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+
+            with self.assertRaises(ProviderConfigError):
+                configure_provider_role(
+                    store,
+                    "writer",
+                    provider="mock",
+                    model="mock-writer",
+                    settings={"api_key": "sk-raw-secret"},
+                )
 
     def test_invalid_role_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

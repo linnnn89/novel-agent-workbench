@@ -19,6 +19,7 @@ from .providers import (
     ProviderError,
     ProviderRequest,
     ProviderResponse,
+    configure_provider_role,
     create_provider_client,
     fake_test_model_role,
     generate_with_provider,
@@ -27,6 +28,7 @@ from .providers import (
     provider_status,
     read_provider_call_log,
     resolve_project_secret,
+    set_project_secret,
     set_model_role_config,
 )
 from .project_state import public_project_state
@@ -50,6 +52,7 @@ __all__ = [
     "WorkbenchApplicationService",
     "AuditFinding",
     "audit_project",
+    "configure_provider_role",
     "create_provider_client",
     "DraftCommitResult",
     "DraftGenerationError",
@@ -64,5 +67,6 @@ __all__ = [
     "read_provider_call_log",
     "resolve_project_secret",
     "public_project_state",
+    "set_project_secret",
     "set_model_role_config",
 ]

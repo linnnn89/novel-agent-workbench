@@ -85,6 +85,36 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This is a local config check only. It does not send network requests.
 
+Preflight a disabled real Provider config:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test set-project-secret demo_project deepseek_key --value-stdin
+```
+
+Then type or paste the key and press `Ctrl+Z`, then `Enter` in PowerShell.
+
+Write the Provider role config with a secret reference:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test configure-provider-role demo_project writer --provider deepseek --model deepseek-chat --api-key-ref project_secret.deepseek_key
+```
+
+Check status:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test provider-status demo_project writer
+```
+
+Expected current result:
+
+```text
+ok: false
+error_type: adapter_disabled
+network_allowed: false
+```
+
+This is correct in the current phase. The config is ready for audit, but the adapter is still disabled.
+
 Generate a draft:
 
 ```powershell

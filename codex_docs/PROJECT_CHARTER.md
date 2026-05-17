@@ -136,6 +136,14 @@ Provider adapter registry + project_secret resolver + disabled real-provider pla
 
 `mock` remains the only enabled adapter. `openai_compatible` and `deepseek` are reserved but disabled and must not send network requests. Real Provider work requires a passing `audit-project` gate and an explicit later decision.
 
+MVP-2 provider config preflight slice:
+
+```text
+safe Provider config write path + project-local secret write path + masked CLI/status output.
+```
+
+This allows rehearsal of real Provider setup while adapters remain disabled. It must not turn on HTTP calls or allow generation through real Provider ids.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

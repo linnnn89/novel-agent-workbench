@@ -67,6 +67,7 @@ MVP-0 first storage slice is implemented:
 - Project secret resolver contract for `project_secret.<name>` references stored only in `data/secrets.local.json`.
 - Backend-only `provider-status` / `list-provider-adapters` CLI checks with no network calls.
 - Provider-aware audit checks for raw keys, disabled adapters, missing secret refs, and missing local secrets.
+- Safe Provider config preflight commands for writing disabled adapter configs and project-local secrets without printing plaintext keys.
 - Unit tests.
 
 Verification command:

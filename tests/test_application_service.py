@@ -104,6 +104,27 @@ class WorkbenchApplicationServiceTest(unittest.TestCase):
             self.assertFalse(result["network_allowed"])
             self.assertIn("mock", {item["adapter_id"] for item in adapters})
 
+    def test_facade_configures_disabled_provider_with_masked_secret_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_project("demo")
+
+            secret = app.set_project_secret("demo", "deepseek_key", "sk-facade-secret")
+            role = app.configure_provider_role(
+                "demo",
+                "writer",
+                provider="deepseek",
+                model="deepseek-chat",
+                api_key_ref="project_secret.deepseek_key",
+            )
+            status = app.provider_status("demo", "writer")
+            result_text = json.dumps({"secret": secret, "role": role, "status": status}, ensure_ascii=False)
+
+            self.assertEqual(secret["masked"], "sk-****cret")
+            self.assertEqual(role["provider"], "deepseek")
+            self.assertEqual(status["error_type"], "adapter_disabled")
+            self.assertNotIn("sk-facade-secret", result_text)
+
 
 if __name__ == "__main__":
     unittest.main()

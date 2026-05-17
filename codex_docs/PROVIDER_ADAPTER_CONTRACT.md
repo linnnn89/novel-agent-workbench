@@ -93,6 +93,20 @@ It must not:
 - create exports,
 - return plaintext secrets.
 
+`configure-provider-role` may write Provider role config for registered adapters.
+
+For secret-requiring adapters, it must require:
+
+```text
+--api-key-ref project_secret.<name>
+```
+
+It must not accept or write plaintext API keys.
+
+`set-project-secret` may write a value into `data\secrets.local.json`.
+
+It must return only masked metadata and should prefer `--value-stdin` for manual use.
+
 ## Logs
 
 Provider call logs may record:

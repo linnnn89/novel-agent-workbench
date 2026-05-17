@@ -231,6 +231,55 @@ def set_model_role_config(store: ProjectStore, role: str, updates: dict[str, Any
     return role_config
 
 
+def configure_provider_role(
+    store: ProjectStore,
+    role: str,
+    *,
+    provider: str,
+    model: str,
+    api_key_ref: str = "",
+    base_url: str = "",
+    settings: dict[str, Any] | None = None,
+) -> ModelRoleConfig:
+    provider = str(provider or "").strip()
+    model = str(model or "").strip()
+    if not provider:
+        raise ProviderConfigError("provider is required.")
+    if not model:
+        raise ProviderConfigError("model is required.")
+    adapter = get_provider_adapter(provider)
+    if adapter is None:
+        raise ProviderConfigError(f"Provider adapter is not registered: {provider!r}")
+    updates: dict[str, Any] = {"provider": provider, "model": model, "base_url": str(base_url or "").strip()}
+    if api_key_ref:
+        updates["api_key_ref"] = str(api_key_ref).strip()
+    if settings:
+        updates["settings"] = dict(settings)
+    role_config = ModelRoleConfig.from_mapping(role, {**default_model_role(role), **updates})
+    if adapter.requires_secret and not role_config.api_key_ref:
+        raise ProviderConfigError(f"Provider {provider!r} requires api_key_ref.")
+    validate_model_role_config(role_config, store.read_secrets(), require_secret_value=False)
+    return set_model_role_config_without_secret_value_requirement(store, role, role_config)
+
+
+def set_model_role_config_without_secret_value_requirement(
+    store: ProjectStore, role: str, role_config: ModelRoleConfig
+) -> ModelRoleConfig:
+    current = store.read_config()
+    roles = current.get("model_roles") if isinstance(current.get("model_roles"), dict) else {}
+    current["model_roles"] = {**roles, role: role_config.to_dict()}
+    store.write_config(current)
+    return role_config
+
+
+def set_project_secret(store: ProjectStore, name: str, value: str) -> dict[str, Any]:
+    secret_name = validate_secret_name(name)
+    if not isinstance(value, str) or not value:
+        raise ProviderConfigError("secret value cannot be empty.")
+    store.update_secrets({secret_name: value})
+    return {"name": secret_name, "has_value": True, "masked": mask_secret(value)}
+
+
 def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionResult:
     role_config = get_model_role_config(store, role)
     adapter = get_provider_adapter(role_config.provider) if role_config.provider else None
@@ -442,7 +491,7 @@ def resolve_project_secret(store: ProjectStore, api_key_ref: str) -> str:
     if not api_key_ref.startswith(SECRET_REF_PREFIX):
         raise ProviderError("api_key_ref must use project_secret.<name>.", error_type="invalid_secret_ref")
     name = api_key_ref[len(SECRET_REF_PREFIX) :].strip()
-    if not name or any(char in name for char in "/\\: "):
+    if not is_safe_secret_name(name):
         raise ProviderError("api_key_ref must use project_secret.<name>.", error_type="invalid_secret_ref")
     secrets = store.read_secrets()
     if name not in secrets:
@@ -451,6 +500,17 @@ def resolve_project_secret(store: ProjectStore, api_key_ref: str) -> str:
     if not value:
         raise ProviderError(f"Project secret is empty: {name}", error_type="empty_secret")
     return value
+
+
+def validate_secret_name(name: str) -> str:
+    secret_name = str(name or "").strip()
+    if not is_safe_secret_name(secret_name):
+        raise ProviderConfigError("secret name must use letters, numbers, '_', '-', or '.'.")
+    return secret_name
+
+
+def is_safe_secret_name(name: str) -> bool:
+    return bool(name) and all(char.isalnum() or char in {"_", "-", "."} for char in name)
 
 
 def provider_config_error_type(message: str) -> str:

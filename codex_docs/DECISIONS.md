@@ -215,3 +215,11 @@ Decision: Add backend-only Provider preflight commands and Provider-aware audit 
 Reason: The user needs a local way to inspect Provider readiness before any UI or real HTTP integration exists.
 
 Impact: `provider-status` and `list-provider-adapters` return JSON and do not send network requests. `audit-project` now flags raw Provider keys in config, disabled adapters, missing secret refs, and missing local secrets. Passing `audit-project` remains required before real Provider enablement.
+
+## 2026-05-17: MVP-2 Provider Config Preflight Write Path
+
+Decision: Add safe write paths for disabled Provider role config and project-local secrets.
+
+Reason: Before enabling a real Provider, the system needs to rehearse configuration, secret storage, status checks, and audit without network side effects.
+
+Impact: `configure-provider-role` writes registered adapter config and `project_secret.<name>` refs only. `set-project-secret` writes `data/secrets.local.json` and returns masked metadata only. Disabled adapters still return `adapter_disabled` and cannot generate drafts.

@@ -61,6 +61,9 @@ Provider config tests currently cover:
 - project secret resolver reads only `secrets.local.json`,
 - resolver errors for invalid, missing, and empty secret refs,
 - disabled real-provider adapters failing locally without draft/confirmed/Memory/RAG/export side effects,
+- safe disabled Provider config writes with `project_secret.*` refs,
+- project-local secret writes returning masked metadata only,
+- rejection of missing real-provider secret refs and raw key settings,
 - invalid role rejection.
 
 Provider interface tests currently cover:
@@ -115,6 +118,8 @@ CLI tests currently cover:
 - `provider-status` for mock writer,
 - disabled provider status without network,
 - Provider status output excluding plaintext secrets.
+- `configure-provider-role` and `set-project-secret` output excluding plaintext secrets,
+- missing secret ref rejection in CLI config write.
 
 Audit tests currently cover:
 

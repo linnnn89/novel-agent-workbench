@@ -79,6 +79,38 @@ Configures the writer role for deterministic local mock generation.
 
 Must not write raw API keys.
 
+### configure_provider_role(project_id, role, provider, model, api_key_ref="", base_url="")
+
+Writes Provider role configuration for a known adapter.
+
+For secret-requiring adapters, `api_key_ref` must use:
+
+```text
+project_secret.<name>
+```
+
+This method may configure disabled adapters for preflight only. It must not send network requests.
+
+Must not write plaintext API keys to `config.json`.
+
+### set_project_secret(project_id, name, value)
+
+Writes a project-local secret into:
+
+```text
+data/secrets.local.json
+```
+
+Returns only:
+
+```text
+name
+has_value
+masked
+```
+
+Must not return plaintext secret values.
+
 ### generate_draft(...)
 
 Inputs:

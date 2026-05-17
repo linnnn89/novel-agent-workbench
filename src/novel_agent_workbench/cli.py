@@ -44,6 +44,21 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument("project_id")
     configure.add_argument("--model", default="mock-writer")
 
+    configure_provider = subparsers.add_parser("configure-provider-role")
+    configure_provider.add_argument("project_id")
+    configure_provider.add_argument("role", choices=["writer", "scorer", "reviser"])
+    configure_provider.add_argument("--provider", required=True)
+    configure_provider.add_argument("--model", required=True)
+    configure_provider.add_argument("--api-key-ref", default="")
+    configure_provider.add_argument("--base-url", default="")
+
+    set_secret = subparsers.add_parser("set-project-secret")
+    set_secret.add_argument("project_id")
+    set_secret.add_argument("name")
+    value_group = set_secret.add_mutually_exclusive_group(required=True)
+    value_group.add_argument("--value")
+    value_group.add_argument("--value-stdin", action="store_true")
+
     generate = subparsers.add_parser("generate-draft")
     generate.add_argument("project_id")
     generate.add_argument("--chapter-id", required=True)
@@ -102,6 +117,18 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.project_state(args.project_id)
     if command == "configure-mock-writer":
         return app.configure_mock_writer(args.project_id, model=args.model)
+    if command == "configure-provider-role":
+        return app.configure_provider_role(
+            args.project_id,
+            args.role,
+            provider=args.provider,
+            model=args.model,
+            api_key_ref=args.api_key_ref,
+            base_url=args.base_url,
+        )
+    if command == "set-project-secret":
+        value = sys.stdin.read().strip() if args.value_stdin else args.value
+        return app.set_project_secret(args.project_id, args.name, value)
     if command == "generate-draft":
         return app.generate_draft(
             args.project_id,

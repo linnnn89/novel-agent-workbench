@@ -7,7 +7,7 @@ from typing import Any
 from .audit import audit_project
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .project_state import public_project_state
-from .providers import list_provider_adapters, provider_status, set_model_role_config
+from .providers import configure_provider_role, list_provider_adapters, provider_status, set_model_role_config, set_project_secret
 from .storage import ProjectRegistry, ProjectStore
 
 
@@ -44,6 +44,30 @@ class WorkbenchApplicationService:
         store = self._open_store(project_id)
         role_config = set_model_role_config(store, "writer", {"provider": "mock", "model": model})
         return role_config.to_dict()
+
+    def configure_provider_role(
+        self,
+        project_id: str,
+        role: str,
+        *,
+        provider: str,
+        model: str,
+        api_key_ref: str = "",
+        base_url: str = "",
+    ) -> dict[str, Any]:
+        store = self._open_store(project_id)
+        role_config = configure_provider_role(
+            store,
+            role,
+            provider=provider,
+            model=model,
+            api_key_ref=api_key_ref,
+            base_url=base_url,
+        )
+        return role_config.to_dict()
+
+    def set_project_secret(self, project_id: str, name: str, value: str) -> dict[str, Any]:
+        return set_project_secret(self._open_store(project_id), name, value)
 
     def generate_draft(
         self,
