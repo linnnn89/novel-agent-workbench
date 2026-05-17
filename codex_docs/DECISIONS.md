@@ -103,3 +103,11 @@ Decision: Add default config structures and migration helpers as backend-only MV
 Reason: MVP-1 Provider work and MVP-2 context work need stable project-level configuration files before any UI or LLM integration is attempted.
 
 Impact: `config.py` owns default structures and schema version. `ProjectStore` owns safe migration orchestration, checkpoint-before-migration, placeholder data file creation, secrets isolation, and public state masking.
+
+## 2026-05-17: MVP-1 Provider Config Stub
+
+Decision: Start MVP-1 with provider configuration objects and fake connection tests only.
+
+Reason: writer/scorer/reviser roles and secret references should be validated before any real Provider or network call is introduced.
+
+Impact: `providers.py` may parse and validate role config, update project config, and fake-test connection readiness. It must not perform HTTP requests or call external APIs.

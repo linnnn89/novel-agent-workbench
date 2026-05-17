@@ -52,6 +52,8 @@ MVP-0 first storage slice is implemented:
 - Project config schema defaults and migration.
 - Placeholder files for Planning Library, Memory Bank, scoring/revision policy, and export settings.
 - Public state with masked secrets only.
+- Provider role config objects for writer/scorer/reviser.
+- Fake provider connection test with no network calls.
 - Unit tests.
 
 Verification command:

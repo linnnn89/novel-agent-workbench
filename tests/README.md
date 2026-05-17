@@ -48,3 +48,13 @@ Foundation tests currently cover:
 - missing project metadata repair,
 - secrets isolation and masked public state,
 - checkpoint exclusion of secrets, backups, and `.trash` files.
+
+Provider config tests currently cover:
+
+- default role config is unconfigured,
+- model role config persistence,
+- raw API key rejection,
+- raw `api_key_ref` rejection,
+- missing project secret reporting,
+- fake connection success without network,
+- invalid role rejection.

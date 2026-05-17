@@ -68,6 +68,14 @@ Foundation completion slice:
 config schema/migration + default project structures + secrets public-state boundary + unit tests
 ```
 
+MVP-1 first slice:
+
+```text
+Provider role config objects + project_secret.* validation + fake connection tests only
+```
+
+Do not add real Provider HTTP calls until this slice is stable.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

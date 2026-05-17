@@ -6,3 +6,4 @@ Current MVP-0 module:
 
 - `storage.py`: safe local project storage kernel, checkpoint ZIP creation, reversible checkpoint restore, and backend-only project registry.
 - `config.py`: default project config, schema version, and placeholder data structures.
+- `providers.py`: writer/scorer/reviser config parsing, `project_secret.*` validation, and fake connection tests.
