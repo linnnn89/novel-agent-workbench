@@ -1,5 +1,6 @@
 """Core package for the new novel agent workbench."""
 
+from .drafts import DraftGenerationError, DraftGenerationRequest, DraftGenerationResult, DraftGenerationService
 from .providers import (
     ModelRoleConfig,
     MockProviderClient,
@@ -33,6 +34,10 @@ __all__ = [
     "ProjectStore",
     "StorageError",
     "create_provider_client",
+    "DraftGenerationError",
+    "DraftGenerationRequest",
+    "DraftGenerationResult",
+    "DraftGenerationService",
     "fake_test_model_role",
     "generate_with_provider",
     "get_model_role_config",

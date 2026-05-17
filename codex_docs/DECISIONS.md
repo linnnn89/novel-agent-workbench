@@ -119,3 +119,11 @@ Decision: Add a Provider interface and deterministic `mock` provider before any 
 Reason: Request/response contracts, role routing, error taxonomy, usage placeholders, and audit logs should be testable without network side effects or API keys.
 
 Impact: `ProviderRequest`, `ProviderResponse`, `ProviderClient`, and `MockProviderClient` are backend-only. `create_provider_client(...)` only enables `provider="mock"`; other provider ids fail with `unsupported_provider`. Provider call logs record metadata such as `call_id`, role, provider, model, status, error type, and usage, but never prompt text or plaintext secrets.
+
+## 2026-05-17: MVP-1 Draft Generation Writes Drafts Only
+
+Decision: Add a backend-only Draft Generation Service that writes mock writer output to draft artifacts only.
+
+Reason: Generation must be separated from confirmation. A draft can be inspected, revised, or discarded later, but it must not update formal context, Memory Bank, RAG, confirmed chapters, or export state.
+
+Impact: `DraftGenerationService` writes `data/drafts/*.json` and `data/drafts_index.json`. Draft artifacts store generated text and request summaries, but not prompt text or plaintext secrets. Confirmed chapter commit logic remains unimplemented.

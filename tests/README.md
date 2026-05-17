@@ -68,3 +68,13 @@ Provider interface tests currently cover:
 - simulated rate limit, timeout, and invalid-request errors,
 - provider call log exclusion of prompt text and plaintext secrets,
 - checkpoint inclusion of safe provider logs while excluding `secrets.local.json`.
+
+Draft generation tests currently cover:
+
+- mock writer output written to `data/drafts/*.json`,
+- draft index creation at `data/drafts_index.json`,
+- no creation of confirmed chapter files or export folders,
+- no mutation of Memory Bank or export settings,
+- draft artifact/index exclusion of prompt text and plaintext secrets,
+- provider error path leaving no draft artifact behind,
+- checkpoint inclusion of draft artifacts without secrets or prompt text.

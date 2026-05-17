@@ -82,6 +82,12 @@ ProviderRequest/ProviderResponse + ProviderClient + deterministic Mock Provider 
 
 Do not add real Provider HTTP calls until the mock-only interface and audit boundary are stable.
 
+MVP-1 draft generation service slice:
+
+```text
+Mock writer output -> draft artifact only; no confirmed chapters, Memory Bank, RAG, or export side effects.
+```
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

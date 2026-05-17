@@ -56,6 +56,7 @@ MVP-0 first storage slice is implemented:
 - Fake provider connection test with no network calls.
 - Provider interface objects and a deterministic local Mock Provider.
 - Provider call audit log at `data/provider_call_log.json`, with prompt/secrets excluded.
+- Draft Generation Service skeleton that writes mock writer output to draft artifacts only.
 - Unit tests.
 
 Verification command:
