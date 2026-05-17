@@ -6,6 +6,7 @@ from .chapters import ChapterWorkflowService
 from .drafts import DraftGenerationService
 from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
 from .reviews import DraftReviewService
+from .revisions import RevisionRequestService
 from .storage import ProjectStore
 
 
@@ -16,9 +17,11 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         store.initialize()
     draft_service = DraftGenerationService(store)
     review_service = DraftReviewService(store)
+    revision_request_service = RevisionRequestService(store)
     chapter_service = ChapterWorkflowService(store)
     drafts = draft_service.list_drafts()
     reviews = review_service.list_reviews()
+    revision_requests = revision_request_service.list_revision_requests()
     confirmed = draft_service.list_confirmed_chapters()
     chapters = chapter_service.list_chapters()
     store_state = store.public_state()
@@ -33,11 +36,13 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "secrets": store_state.get("secrets", {}),
         "draft_count": len(drafts),
         "review_count": len(reviews),
+        "revision_request_count": len(revision_requests),
         "chapter_count": len(chapters),
         "committed_chapter_count": len(confirmed),
         "latest_chapter": safe_chapter_summary(latest_by(chapters, "updated_at")),
         "latest_draft": safe_draft_summary(latest_by(drafts, "created_at")),
         "latest_review": safe_review_summary(latest_by(reviews, "created_at")),
+        "latest_revision_request": safe_revision_request_summary(latest_by(revision_requests, "created_at")),
         "latest_committed_chapter": safe_confirmed_summary(latest_by(confirmed, "committed_at")),
         "provider_roles": provider_roles_summary(store),
     }
@@ -119,6 +124,21 @@ def safe_review_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+def safe_revision_request_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "revision_request_id": item.get("revision_request_id"),
+        "review_id": item.get("review_id"),
+        "draft_id": item.get("draft_id"),
+        "chapter_id": item.get("chapter_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "source_decision": item.get("source_decision") if isinstance(item.get("source_decision"), dict) else {},
+        "revision_policy": item.get("revision_policy"),
+    }
+
+
 def safe_chapter_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
     if item is None:
         return None
@@ -131,6 +151,7 @@ def safe_chapter_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
         "latest_review_decision": item.get("latest_review_decision")
         if isinstance(item.get("latest_review_decision"), dict)
         else {},
+        "latest_revision_request_id": item.get("latest_revision_request_id"),
         "confirmed_chapter_id": item.get("confirmed_chapter_id"),
         "updated_at": item.get("updated_at"),
         "error_summary": item.get("error_summary") if isinstance(item.get("error_summary"), dict) else {},

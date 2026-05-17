@@ -78,6 +78,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
         ],
     )
     audit_reviews(store, checked_paths=checked_paths, findings=findings)
+    audit_revision_requests(store, checked_paths=checked_paths, findings=findings)
     audit_checkpoints(store, checked_paths=checked_paths, findings=findings)
     audit_provider_adapter_config(store, checked_paths=checked_paths, findings=findings)
     audit_draft_confirmed_consistency(store, checked_paths=checked_paths, findings=findings)
@@ -125,6 +126,26 @@ def audit_reviews(store: ProjectStore, *, checked_paths: list[str], findings: li
     if not reviews_dir.exists():
         return
     for path in sorted(reviews_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+
+
+def audit_revision_requests(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_revision_request", PROMPT_PATTERNS),
+        ("possible_secret_in_revision_request", SECRET_PATTERNS),
+        ("possible_content_in_revision_request", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "revision_requests_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    requests_dir = store.data_dir / "revision_requests"
+    checked_paths.append(str(requests_dir))
+    if not requests_dir.exists():
+        return
+    for path in sorted(requests_dir.glob("*.json")):
         check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
 
 

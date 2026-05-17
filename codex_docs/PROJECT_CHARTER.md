@@ -208,6 +208,14 @@ decide-review + accepted/needs_revision/blocked metadata + chapter workflow upda
 
 Manual review decisions are not commits and not automatic revisions. They may update review/chapter metadata only. Decision inputs are fixed enums plus safe `reason_code`; free-text notes remain intentionally excluded to avoid prompt/content leakage in metadata surfaces.
 
+MVP-4.5 revision request slice:
+
+```text
+revision_requests/*.json + revision_requests_index.json + revision_requested workflow state.
+```
+
+Revision requests may be created only from `needs_revision` review decisions. They are metadata-only and must not call LLMs, mutate drafts, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or store prompt text, draft content, raw Provider responses, plaintext secrets, or free-text notes.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

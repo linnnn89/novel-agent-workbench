@@ -17,7 +17,7 @@ Current backend verification command:
 py -3.13 -m unittest discover -s tests
 ```
 
-Current implemented tests cover storage, registry, foundation config, Provider config/interface, draft generation, draft review, explicit draft commit, and safe project state summaries.
+Current implemented tests cover storage, registry, foundation config, Provider config/interface, draft generation, draft review, manual review decisions, revision requests, explicit draft commit, and safe project state summaries.
 
 Chapter workflow tests currently cover:
 
@@ -45,6 +45,16 @@ Draft review tests currently cover:
 - invalid decision and unsafe reason code rejection,
 - blocked chapter review rejection,
 - CLI commands `review-draft`, `list-reviews`, `read-review`, and `decide-review`.
+
+Revision request tests currently cover:
+
+- creation only after a `needs_revision` review decision,
+- `data/revision_requests/*.json` and `data/revision_requests_index.json`,
+- chapter state moving to `revision_requested` with `latest_revision_request_id`,
+- rejection of pending, accepted, blocked, missing, and duplicate requests,
+- no Provider call, draft mutation, confirmed chapter, Memory Bank, RAG, or export side effects,
+- revision request artifact, index, public state, audit output, facade output, and CLI output excluding draft content, prompt text, and plaintext secrets,
+- CLI commands `create-revision-request`, `list-revision-requests`, and `read-revision-request`.
 
 Checkpoint tests currently cover:
 
@@ -142,6 +152,7 @@ Application service facade tests currently cover:
 - explicit commit and confirmed chapter read through the backend facade,
 - draft review/list/read through the backend facade,
 - manual review decision through the backend facade,
+- revision request create/list/read through the backend facade,
 - facade state exclusion of prompt text, chapter content, and plaintext secrets,
 - failed generation leaving no draft behind,
 - facade enable/disable real-provider flag updates without plaintext secret exposure,

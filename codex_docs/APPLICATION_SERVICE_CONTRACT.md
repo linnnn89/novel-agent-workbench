@@ -67,11 +67,13 @@ config
 secrets
 draft_count
 review_count
+revision_request_count
 chapter_count
 committed_chapter_count
 latest_chapter
 latest_draft
 latest_review
+latest_revision_request
 latest_committed_chapter
 provider_roles
 ```
@@ -93,6 +95,7 @@ updated_at
 latest_draft_id
 latest_review_id
 latest_review_decision
+latest_revision_request_id
 confirmed_chapter_id
 error_summary
 ```
@@ -401,6 +404,59 @@ blocked
 `accepted` is not a confirmed chapter. It must not auto-commit, auto-revise, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or enable real Providers.
 
 Must not return draft content, original prompt text, raw Provider responses, request bodies, or plaintext secrets.
+
+### create_revision_request(project_id, review_id)
+
+Creates a metadata-only revision request from an existing review.
+
+Required source state:
+
+```text
+review.decision.status == needs_revision
+```
+
+Returns:
+
+```text
+revision_request_id
+review_id
+draft_id
+chapter_id
+status
+path
+created_at
+```
+
+Writes:
+
+```text
+data/revision_requests/*.json
+data/revision_requests_index.json
+```
+
+On success, chapter workflow may update to:
+
+```text
+revision_requested
+```
+
+Must reject pending, accepted, blocked, missing, and duplicate revision requests.
+
+Must not call Providers, generate text, mutate draft artifacts, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or enable real Providers.
+
+Must not return or store draft content, original prompt text, raw Provider responses, request bodies, plaintext secrets, or free-text notes.
+
+### list_revision_requests(project_id)
+
+Returns revision request metadata from `data/revision_requests_index.json`.
+
+Metadata-only. Must not return draft content, prompt text, raw Provider responses, or plaintext secrets.
+
+### read_revision_request(project_id, revision_request_id)
+
+Returns one revision request artifact from `data/revision_requests/*.json`.
+
+Metadata-only. Must not return draft content, prompt text, raw Provider responses, or plaintext secrets.
 
 ### list_confirmed_chapters(project_id)
 

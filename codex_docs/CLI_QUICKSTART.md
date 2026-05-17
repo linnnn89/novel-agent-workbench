@@ -260,6 +260,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Only one decision may be recorded for a review in this phase. `accepted` still does not create a confirmed chapter; use `commit-draft` explicitly when the draft should enter confirmed storage.
 
+Create a revision request after `needs_revision`:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-revision-request demo_project <review_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-revision-requests demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-revision-request demo_project <revision_request_id>
+```
+
+This only creates metadata. It does not call an LLM, edit the draft, create a confirmed chapter, or update Memory Bank/RAG/export.
+
 Explicitly commit a draft:
 
 ```powershell
@@ -361,6 +371,22 @@ DraftReviewError: Review already has a manual decision
 ```
 
 Meaning: a review decision is intentionally one-shot in this phase. Create a later revision/review cycle instead of silently overwriting the decision.
+
+Revision request before `needs_revision`:
+
+```text
+RevisionRequestError: Revision request requires a needs_revision review decision.
+```
+
+Meaning: only drafts explicitly marked `needs_revision` can receive a revision request artifact.
+
+Duplicate revision request:
+
+```text
+RevisionRequestError: Review already has a revision request
+```
+
+Meaning: this phase stores one revision request per review.
 
 Unsafe project id:
 

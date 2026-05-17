@@ -21,6 +21,7 @@ from .providers import (
 )
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
 from .reviews import DraftReviewService
+from .revisions import RevisionRequestService
 from .storage import ProjectRegistry, ProjectStore
 
 
@@ -153,6 +154,16 @@ class WorkbenchApplicationService:
             reason_code=reason_code,
         )
         return result.to_dict()
+
+    def create_revision_request(self, project_id: str, review_id: str) -> dict[str, Any]:
+        result = RevisionRequestService(self._open_store(project_id)).create_revision_request(review_id)
+        return result.to_dict()
+
+    def list_revision_requests(self, project_id: str) -> list[dict[str, Any]]:
+        return RevisionRequestService(self._open_store(project_id)).list_revision_requests()
+
+    def read_revision_request(self, project_id: str, revision_request_id: str) -> dict[str, Any]:
+        return RevisionRequestService(self._open_store(project_id)).read_revision_request(revision_request_id)
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()

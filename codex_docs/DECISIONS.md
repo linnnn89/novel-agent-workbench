@@ -287,3 +287,11 @@ Decision: Add a one-time manual decision layer on top of review artifacts.
 Reason: After a review exists, the operator needs to mark whether the draft is acceptable, needs revision, or is blocked without accidentally committing or rewriting content.
 
 Impact: `DraftReviewService.decide_review(...)` accepts only `accepted`, `needs_revision`, or `blocked` plus an optional safe ASCII `reason_code`. It updates the review artifact/index and chapter workflow metadata. Chapter workflow may move to `review_accepted`, `needs_revision`, or `blocked`; `accepted` is not a commit and does not create confirmed chapters. The decision layer stores no free-text notes, draft content, prompt text, raw Provider response, or plaintext secrets. CLI command `decide-review` exposes the operation.
+
+## 2026-05-17: MVP-4.5 Revision Request Skeleton
+
+Decision: Add a metadata-only Revision Request layer after `needs_revision`.
+
+Reason: A draft that needs revision should be represented as a durable request before any future revision generator exists. This keeps the workflow inspectable without mutating drafts or confirmed chapters.
+
+Impact: `RevisionRequestService.create_revision_request(...)` creates `data/revision_requests/*.json` and `data/revision_requests_index.json` only when the source review decision is `needs_revision`. It rejects pending, accepted, blocked, missing, and duplicate requests. Chapter workflow may move to `revision_requested` with `latest_revision_request_id`. The operation does not call Providers, generate text, edit drafts, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or store prompt/content/secrets.
