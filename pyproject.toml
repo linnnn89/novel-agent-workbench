@@ -1,0 +1,9 @@
+[project]
+name = "novel-agent-workbench"
+version = "0.1.0"
+description = "Local recoverable long-form novel writing workbench."
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.unittest]
+testpaths = ["tests"]
