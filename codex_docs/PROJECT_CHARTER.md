@@ -14,7 +14,7 @@ Build a local, personal, recoverable long-form novel writing workbench that can 
 
 1. Do not modify `I:\AI-NOVEL\Tonade_DSv4-flash_100w_novel_agent-main` in place.
 2. Do not delete user data or generated work silently.
-3. During early MVP work, do not perform real file deletion. Retire files by renaming with a clear suffix such as `.trash` or `.ontodelete`.
+3. During early MVP work, do not perform real file deletion. Retire files by renaming with the `.trash` suffix.
 4. Write Markdown after every meaningful change.
 5. Keep business logic in backend modules, not frontend JavaScript.
 6. Keep draft revisions separate from confirmed chapters.
@@ -69,7 +69,7 @@ This directory is for real local project data and must not be tracked by Git.
 Deletion policy:
 
 ```text
-No real deletion in early MVP. Use .trash or .ontodelete suffixes for reversible retirement.
+No real deletion in early MVP. Use .trash for reversible retirement.
 ```
 
 ## Construction Strategy

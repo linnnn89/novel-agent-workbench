@@ -10,10 +10,11 @@ If a file is confirmed unnecessary, retire it by renaming it with a clear suffix
 
 ```text
 .trash
-.ontodelete
 ```
 
 The file should remain restorable and easy to recognize.
+
+Follow-up decision: `.trash` is the single standard suffix. Do not use `.ontodelete` unless the user changes this rule later.
 
 ## Operational Consequence
 

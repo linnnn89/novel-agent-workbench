@@ -62,4 +62,12 @@ Decision: Do not support or perform real file deletion during early MVP work.
 
 Reason: The user wants maximum recoverability. Files that appear unnecessary should remain restorable.
 
-Impact: When a file must be retired, rename it with a clear suffix such as `.trash` or `.ontodelete` instead of deleting it. Actual deletion requires a later explicit user decision and a documented recovery/backup policy.
+Impact: When a file must be retired, rename it with the `.trash` suffix instead of deleting it. Actual deletion requires a later explicit user decision and a documented recovery/backup policy.
+
+## 2026-05-17: Trash Suffix
+
+Decision: Use `.trash` as the single retirement suffix.
+
+Reason: `.trash` is short, clear, easy to search, and less likely than `.ontodelete` to imply that an automated later hard-delete is expected.
+
+Impact: Do not create alternative retirement suffixes unless the user changes this rule.
