@@ -17,6 +17,7 @@ secrets.local.json
 .env.*
 
 # Runtime data and generated outputs
+workspace_projects/
 app_projects/
 exports/
 backups/

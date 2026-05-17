@@ -47,3 +47,11 @@ Decision: MVP-0 may be backend/test-only with no UI.
 Reason: The first phase is about storage safety, project locking, backup behavior, and secrets isolation. These are best verified with deterministic unit tests and small command-line checks before adding a frontend surface.
 
 Impact: Do not build UI for MVP-0. Use tests and minimal commands to verify the storage kernel first.
+
+## 2026-05-17: Runtime Project Data Directory
+
+Decision: Store real runtime project data under `workspace_projects/` inside `novel_agent_workbench`.
+
+Reason: This keeps new project data isolated from the reference project and makes it easy to exclude real user/runtime data from Git.
+
+Impact: `workspace_projects/` is ignored by Git. Unit tests should use temporary directories unless explicitly testing default path behavior.

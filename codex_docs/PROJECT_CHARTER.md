@@ -57,6 +57,14 @@ MVP-0 verification mode:
 unit tests and minimal commands only; no frontend required
 ```
 
+Runtime project data default:
+
+```text
+I:\AI-NOVEL\novel_agent_workbench\workspace_projects
+```
+
+This directory is for real local project data and must not be tracked by Git.
+
 ## Construction Strategy
 
 Start from a clean skeleton. Use the reference project as a design and behavior sample only.
