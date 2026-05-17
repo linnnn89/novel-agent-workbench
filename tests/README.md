@@ -11,7 +11,7 @@ Minimum early test targets:
 - draft revisions having no confirmed-state side effects,
 - confirmed revision commit behavior.
 
-Current MVP-0 command:
+Current backend verification command:
 
 ```powershell
 py -3.13 -m unittest discover -s tests
@@ -58,3 +58,13 @@ Provider config tests currently cover:
 - missing project secret reporting,
 - fake connection success without network,
 - invalid role rejection.
+
+Provider interface tests currently cover:
+
+- request/response serialization,
+- mock writer/scorer/reviser generation,
+- unsupported provider rejection without network,
+- missing model and missing secret-ref errors,
+- simulated rate limit, timeout, and invalid-request errors,
+- provider call log exclusion of prompt text and plaintext secrets,
+- checkpoint inclusion of safe provider logs while excluding `secrets.local.json`.

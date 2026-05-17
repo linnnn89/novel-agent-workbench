@@ -74,7 +74,13 @@ MVP-1 first slice:
 Provider role config objects + project_secret.* validation + fake connection tests only
 ```
 
-Do not add real Provider HTTP calls until this slice is stable.
+MVP-1 provider interface slice:
+
+```text
+ProviderRequest/ProviderResponse + ProviderClient + deterministic Mock Provider + safe provider call log
+```
+
+Do not add real Provider HTTP calls until the mock-only interface and audit boundary are stable.
 
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 

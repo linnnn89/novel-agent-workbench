@@ -111,3 +111,11 @@ Decision: Start MVP-1 with provider configuration objects and fake connection te
 Reason: writer/scorer/reviser roles and secret references should be validated before any real Provider or network call is introduced.
 
 Impact: `providers.py` may parse and validate role config, update project config, and fake-test connection readiness. It must not perform HTTP requests or call external APIs.
+
+## 2026-05-17: MVP-1 Mock-Only Provider Interface
+
+Decision: Add a Provider interface and deterministic `mock` provider before any real LLM integration.
+
+Reason: Request/response contracts, role routing, error taxonomy, usage placeholders, and audit logs should be testable without network side effects or API keys.
+
+Impact: `ProviderRequest`, `ProviderResponse`, `ProviderClient`, and `MockProviderClient` are backend-only. `create_provider_client(...)` only enables `provider="mock"`; other provider ids fail with `unsupported_provider`. Provider call logs record metadata such as `call_id`, role, provider, model, status, error type, and usage, but never prompt text or plaintext secrets.

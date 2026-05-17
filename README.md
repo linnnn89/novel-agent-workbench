@@ -54,6 +54,8 @@ MVP-0 first storage slice is implemented:
 - Public state with masked secrets only.
 - Provider role config objects for writer/scorer/reviser.
 - Fake provider connection test with no network calls.
+- Provider interface objects and a deterministic local Mock Provider.
+- Provider call audit log at `data/provider_call_log.json`, with prompt/secrets excluded.
 - Unit tests.
 
 Verification command:
