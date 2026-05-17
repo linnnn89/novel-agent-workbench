@@ -71,3 +71,11 @@ Decision: Use `.trash` as the single retirement suffix.
 Reason: `.trash` is short, clear, easy to search, and less likely than `.ontodelete` to imply that an automated later hard-delete is expected.
 
 Impact: Do not create alternative retirement suffixes unless the user changes this rule.
+
+## 2026-05-17: Test Temporary Directory Cleanup
+
+Decision: Unit tests may create and automatically clean test-only temporary files/directories.
+
+Reason: Storage safety tests need isolated files to verify writes, backups, and locks. Temporary test cleanup is safe when isolated from real runtime data.
+
+Impact: Cleanup is allowed only for system temp directories or test-owned temp directories. Real project files under `workspace_projects/` still follow the no-hard-delete policy and must be retired with `.trash`.

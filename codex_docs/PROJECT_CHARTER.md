@@ -72,6 +72,12 @@ Deletion policy:
 No real deletion in early MVP. Use .trash for reversible retirement.
 ```
 
+Testing exception:
+
+```text
+Unit tests may create and clean isolated temporary files/directories. This exception does not apply to real runtime project data.
+```
+
 ## Construction Strategy
 
 Start from a clean skeleton. Use the reference project as a design and behavior sample only.
