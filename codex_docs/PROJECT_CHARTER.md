@@ -200,6 +200,14 @@ reviews/*.json + reviews_index.json + mock scorer review + review_ready workflow
 
 Draft Review / Quality Check is backend-only and metadata-only. It may record scores, issues, recommendation, Provider/model/usage, draft id, and chapter id. It must not store draft content, original prompts, raw Provider responses, or plaintext secrets. It must not auto-commit, auto-revise, update Memory Bank, update RAG, create exports, create DOCX, or enable new real Providers.
 
+MVP-4 manual review decision slice:
+
+```text
+decide-review + accepted/needs_revision/blocked metadata + chapter workflow update.
+```
+
+Manual review decisions are not commits and not automatic revisions. They may update review/chapter metadata only. Decision inputs are fixed enums plus safe `reason_code`; free-text notes remain intentionally excluded to avoid prompt/content leakage in metadata surfaces.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

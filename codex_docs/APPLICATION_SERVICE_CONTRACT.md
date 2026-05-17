@@ -92,6 +92,7 @@ created_at
 updated_at
 latest_draft_id
 latest_review_id
+latest_review_decision
 confirmed_chapter_id
 error_summary
 ```
@@ -363,6 +364,43 @@ Returns one review artifact from `data/reviews/*.json`.
 May return scores, issues, recommendation, and short safe comments.
 
 Must not return draft content, original prompt text, raw Provider responses, or plaintext secrets.
+
+### decide_review(project_id, review_id, decision, reason_code="")
+
+Records one manual decision for an existing review.
+
+Allowed decisions:
+
+```text
+accepted
+needs_revision
+blocked
+```
+
+Returns:
+
+```text
+review_id
+draft_id
+chapter_id
+decision
+reason_code
+decided_at
+```
+
+`reason_code` is optional and must use safe ASCII letters, numbers, `_`, or `-`. Free-text notes are intentionally not stored in this phase.
+
+On success, chapter workflow may update to:
+
+```text
+review_accepted
+needs_revision
+blocked
+```
+
+`accepted` is not a confirmed chapter. It must not auto-commit, auto-revise, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or enable real Providers.
+
+Must not return draft content, original prompt text, raw Provider responses, request bodies, or plaintext secrets.
 
 ### list_confirmed_chapters(project_id)
 

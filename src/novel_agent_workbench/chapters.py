@@ -8,7 +8,16 @@ from .storage import ProjectStore, utc_stamp
 
 
 CHAPTER_WORKFLOW_FILENAME = "chapters_workflow.json"
-CHAPTER_STATUSES = {"planned", "drafting", "draft_ready", "review_ready", "committed", "blocked"}
+CHAPTER_STATUSES = {
+    "planned",
+    "drafting",
+    "draft_ready",
+    "review_ready",
+    "review_accepted",
+    "needs_revision",
+    "committed",
+    "blocked",
+}
 
 
 class ChapterWorkflowError(RuntimeError):
@@ -24,6 +33,7 @@ class ChapterWorkflowEntry:
     updated_at: str
     latest_draft_id: str = ""
     latest_review_id: str = ""
+    latest_review_decision: dict[str, Any] | None = None
     confirmed_chapter_id: str = ""
     error_summary: dict[str, Any] | None = None
 
@@ -83,6 +93,53 @@ class ChapterWorkflowService:
             latest_draft_id=draft_id,
             latest_review_id=review_id,
             error_summary={},
+        )
+
+    def mark_review_decision(
+        self,
+        chapter_id: str,
+        *,
+        title: str = "",
+        draft_id: str,
+        review_id: str,
+        decision: str,
+        reason_code: str = "",
+        decided_at: str,
+    ) -> dict[str, Any]:
+        current = self._find(chapter_id)
+        if current and current.get("status") == "committed":
+            status = "committed"
+        elif decision == "accepted":
+            status = "review_accepted"
+        elif decision == "needs_revision":
+            status = "needs_revision"
+        elif decision == "blocked":
+            status = "blocked"
+        else:
+            raise ChapterWorkflowError(f"Invalid review decision: {decision}")
+        error_summary = (
+            {
+                "stage": "review_decision",
+                "error_type": "manual_block",
+                "message": safe_error_field(reason_code),
+                "timestamp": decided_at,
+            }
+            if decision == "blocked"
+            else {}
+        )
+        return self._upsert(
+            chapter_id,
+            title=title,
+            status=status,
+            latest_draft_id=draft_id,
+            latest_review_id=review_id,
+            latest_review_decision={
+                "decision": safe_error_field(decision),
+                "review_id": safe_error_field(review_id),
+                "reason_code": safe_error_field(reason_code),
+                "decided_at": decided_at,
+            },
+            error_summary=error_summary,
         )
 
     def mark_committed(
@@ -147,6 +204,7 @@ class ChapterWorkflowService:
         status: str,
         latest_draft_id: str | None = None,
         latest_review_id: str | None = None,
+        latest_review_decision: dict[str, Any] | None = None,
         confirmed_chapter_id: str | None = None,
         error_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -171,6 +229,9 @@ class ChapterWorkflowService:
                 "latest_review_id": latest_review_id
                 if latest_review_id is not None
                 else str(item.get("latest_review_id") or ""),
+                "latest_review_decision": latest_review_decision
+                if latest_review_decision is not None
+                else item.get("latest_review_decision") or {},
                 "confirmed_chapter_id": confirmed_chapter_id
                 if confirmed_chapter_id is not None
                 else str(item.get("confirmed_chapter_id") or ""),
@@ -184,6 +245,7 @@ class ChapterWorkflowService:
                 "status": status,
                 "latest_draft_id": latest_draft_id or "",
                 "latest_review_id": latest_review_id or "",
+                "latest_review_decision": latest_review_decision or {},
                 "confirmed_chapter_id": confirmed_chapter_id or "",
                 "error_summary": error_summary or {},
             }
@@ -201,6 +263,7 @@ def default_entry(chapter_id: str, timestamp: str) -> dict[str, Any]:
         "updated_at": timestamp,
         "latest_draft_id": "",
         "latest_review_id": "",
+        "latest_review_decision": {},
         "confirmed_chapter_id": "",
         "error_summary": {},
     }

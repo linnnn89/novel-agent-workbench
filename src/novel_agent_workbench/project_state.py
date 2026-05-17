@@ -115,6 +115,7 @@ def safe_review_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
         "provider": item.get("provider"),
         "model": item.get("model"),
         "recommendation": item.get("recommendation"),
+        "decision": item.get("decision") if isinstance(item.get("decision"), dict) else {},
     }
 
 
@@ -127,6 +128,9 @@ def safe_chapter_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
         "status": item.get("status"),
         "latest_draft_id": item.get("latest_draft_id"),
         "latest_review_id": item.get("latest_review_id"),
+        "latest_review_decision": item.get("latest_review_decision")
+        if isinstance(item.get("latest_review_decision"), dict)
+        else {},
         "confirmed_chapter_id": item.get("confirmed_chapter_id"),
         "updated_at": item.get("updated_at"),
         "error_summary": item.get("error_summary") if isinstance(item.get("error_summary"), dict) else {},

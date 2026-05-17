@@ -112,6 +112,12 @@ def build_parser() -> argparse.ArgumentParser:
     read_review.add_argument("project_id")
     read_review.add_argument("review_id")
 
+    decide_review = subparsers.add_parser("decide-review")
+    decide_review.add_argument("project_id")
+    decide_review.add_argument("review_id")
+    decide_review.add_argument("--decision", required=True, choices=["accepted", "needs_revision", "blocked"])
+    decide_review.add_argument("--reason-code", default="")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -229,6 +235,13 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_reviews(args.project_id)
     if command == "read-review":
         return app.read_review(args.project_id, args.review_id)
+    if command == "decide-review":
+        return app.decide_review(
+            args.project_id,
+            args.review_id,
+            decision=args.decision,
+            reason_code=args.reason_code,
+        )
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

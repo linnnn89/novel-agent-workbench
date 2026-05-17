@@ -35,12 +35,16 @@ Draft review tests currently cover:
 - mock scorer review artifact creation at `data/reviews/*.json`,
 - review index creation at `data/reviews_index.json`,
 - chapter state moving to `review_ready` with `latest_review_id`,
+- manual review decisions `accepted`, `needs_revision`, and `blocked`,
+- chapter state moving to `review_accepted`, `needs_revision`, or `blocked` after manual decision,
 - no confirmed chapter, Memory Bank, RAG, or export side effects,
 - review artifacts, review index, provider logs, public state, audit output, and CLI output excluding draft content, prompt text, and plaintext secrets,
 - missing draft rejection,
 - duplicate review rejection,
+- duplicate decision rejection,
+- invalid decision and unsafe reason code rejection,
 - blocked chapter review rejection,
-- CLI commands `review-draft`, `list-reviews`, and `read-review`.
+- CLI commands `review-draft`, `list-reviews`, `read-review`, and `decide-review`.
 
 Checkpoint tests currently cover:
 
@@ -137,6 +141,7 @@ Application service facade tests currently cover:
 - draft generation/list/read through the backend facade,
 - explicit commit and confirmed chapter read through the backend facade,
 - draft review/list/read through the backend facade,
+- manual review decision through the backend facade,
 - facade state exclusion of prompt text, chapter content, and plaintext secrets,
 - failed generation leaving no draft behind,
 - facade enable/disable real-provider flag updates without plaintext secret exposure,

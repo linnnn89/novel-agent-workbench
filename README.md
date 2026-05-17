@@ -76,6 +76,7 @@ MVP-0 first storage slice is implemented:
 - Minimal chapter workflow state at `data/chapters_workflow.json`, tracking planned/drafting/draft_ready/committed/blocked without prompt text, chapter content, or plaintext secrets.
 - Draft Review / Quality Check skeleton using mock scorer output to create metadata-only review artifacts at `data/reviews/*.json` plus `data/reviews_index.json`.
 - Chapter workflow can now move to `review_ready` with `latest_review_id`; review does not auto-commit, update Memory Bank/RAG/export, or store draft content/prompt/API keys.
+- Manual review decision skeleton for `accepted`, `needs_revision`, and `blocked` decisions. Decisions update review/chapter metadata only and still do not commit or revise drafts automatically.
 - Unit tests.
 
 Verification command:

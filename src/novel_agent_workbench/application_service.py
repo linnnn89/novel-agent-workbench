@@ -146,6 +146,14 @@ class WorkbenchApplicationService:
     def read_review(self, project_id: str, review_id: str) -> dict[str, Any]:
         return DraftReviewService(self._open_store(project_id)).read_review(review_id)
 
+    def decide_review(self, project_id: str, review_id: str, *, decision: str, reason_code: str = "") -> dict[str, Any]:
+        result = DraftReviewService(self._open_store(project_id)).decide_review(
+            review_id,
+            decision=decision,
+            reason_code=reason_code,
+        )
+        return result.to_dict()
+
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()
 

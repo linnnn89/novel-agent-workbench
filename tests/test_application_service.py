@@ -84,6 +84,39 @@ class WorkbenchApplicationServiceTest(unittest.TestCase):
             self.assertNotIn("MOCK writer", state_text)
             self.assertNotIn("sk-", state_text)
 
+    def test_facade_review_and_decision_contract_is_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_project("demo")
+            app.configure_mock_writer("demo")
+            app.configure_provider_role("demo", "scorer", provider="mock", model="mock-scorer")
+            draft = app.generate_draft("demo", chapter_id="chapter_001", prompt="private facade review prompt")
+
+            review = app.review_draft("demo", draft["draft_id"])
+            decision = app.decide_review(
+                "demo",
+                review["review_id"],
+                decision="accepted",
+                reason_code="manual_pass",
+            )
+            state = app.project_state("demo")
+            result_text = json.dumps(
+                {
+                    "review": review,
+                    "decision": decision,
+                    "reviews": app.list_reviews("demo"),
+                    "state": state,
+                },
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(review["status"], "review_ready")
+            self.assertEqual(decision["decision"], "accepted")
+            self.assertEqual(state["latest_chapter"]["status"], "review_accepted")
+            self.assertEqual(state["committed_chapter_count"], 0)
+            self.assertNotIn("private facade review prompt", result_text)
+            self.assertNotIn("MOCK writer", result_text)
+
     def test_facade_audit_project_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             app = WorkbenchApplicationService.open(Path(temp))

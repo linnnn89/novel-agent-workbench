@@ -279,3 +279,11 @@ Decision: Add a backend-only Draft Review / Quality Check layer using the existi
 Reason: Before adding automatic revision or complex scoring, the workbench needs a safe review artifact boundary that can be inspected by humans and future UI code without mutating confirmed chapters or formal context.
 
 Impact: `DraftReviewService.review_draft(...)` writes `data/reviews/*.json` and `data/reviews_index.json`, then marks chapter workflow state as `review_ready` with `latest_review_id`. Review artifacts contain review metadata, scores, issues, recommendation, Provider/model/usage, and character-count summaries only. They must not store draft content, original prompts, raw Provider responses, or plaintext secrets. CLI commands `review-draft`, `list-reviews`, and `read-review` expose the flow. Review does not auto-commit, auto-revise, update Memory Bank, update RAG, create exports, create DOCX, or call new real Providers.
+
+## 2026-05-17: MVP-4 Manual Review Decision Skeleton
+
+Decision: Add a one-time manual decision layer on top of review artifacts.
+
+Reason: After a review exists, the operator needs to mark whether the draft is acceptable, needs revision, or is blocked without accidentally committing or rewriting content.
+
+Impact: `DraftReviewService.decide_review(...)` accepts only `accepted`, `needs_revision`, or `blocked` plus an optional safe ASCII `reason_code`. It updates the review artifact/index and chapter workflow metadata. Chapter workflow may move to `review_accepted`, `needs_revision`, or `blocked`; `accepted` is not a commit and does not create confirmed chapters. The decision layer stores no free-text notes, draft content, prompt text, raw Provider response, or plaintext secrets. CLI command `decide-review` exposes the operation.

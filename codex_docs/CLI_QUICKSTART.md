@@ -250,6 +250,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Review output is metadata-only. It does not include the draft body, original prompt, raw Provider response, or API key. It also does not commit the draft, revise it, update Memory Bank/RAG, or create exports.
 
+Record a manual review decision:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test decide-review demo_project <review_id> --decision accepted --reason-code manual_pass
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test decide-review demo_project <review_id> --decision needs_revision --reason-code tone_fix
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test decide-review demo_project <review_id> --decision blocked --reason-code manual_block
+```
+
+Only one decision may be recorded for a review in this phase. `accepted` still does not create a confirmed chapter; use `commit-draft` explicitly when the draft should enter confirmed storage.
+
 Explicitly commit a draft:
 
 ```powershell
@@ -343,6 +353,14 @@ DraftReviewError: Draft already has a review
 ```
 
 Meaning: the draft has already produced one review artifact. This phase keeps review creation idempotent by rejecting duplicate review writes.
+
+Duplicate decision:
+
+```text
+DraftReviewError: Review already has a manual decision
+```
+
+Meaning: a review decision is intentionally one-shot in this phase. Create a later revision/review cycle instead of silently overwriting the decision.
 
 Unsafe project id:
 
