@@ -135,6 +135,8 @@ class ProviderConfigTest(unittest.TestCase):
         self.assertFalse(adapters["openai_compatible"]["network_allowed"])
         self.assertFalse(adapters["deepseek"]["enabled"])
         self.assertFalse(adapters["deepseek"]["network_allowed"])
+        self.assertFalse(adapters["chutes_openai"]["enabled"])
+        self.assertFalse(adapters["chutes_openai"]["network_allowed"])
 
     def test_resolve_project_secret_reads_only_secrets_local_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -271,6 +273,31 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertEqual(result.error_type, "adapter_disabled")
             self.assertEqual(result.request_summary["provider"], "openai_compatible")
             self.assertEqual(result.request_summary["base_url_host"], "gateway.example.test")
+
+    def test_chutes_openai_dry_run_uses_chutes_host_and_model_without_secret_leak(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            set_project_secret(store, "chutes_key", "cpk-test-secret")
+            configure_provider_role(
+                store,
+                "writer",
+                provider="chutes_openai",
+                model="Qwen/Qwen3-32B-TEE",
+                api_key_ref="project_secret.chutes_key",
+                base_url="https://llm.chutes.ai/v1",
+            )
+
+            result = provider_dry_run(store, ProviderRequest(role="writer", prompt="private chutes prompt"))
+            result_text = json.dumps(result.to_dict(), ensure_ascii=False)
+
+            self.assertEqual(result.error_type, "adapter_disabled")
+            self.assertEqual(result.request_summary["provider"], "chutes_openai")
+            self.assertEqual(result.request_summary["model"], "Qwen/Qwen3-32B-TEE")
+            self.assertEqual(result.request_summary["base_url_host"], "llm.chutes.ai")
+            self.assertEqual(result.request_summary["prompt_chars"], len("private chutes prompt"))
+            self.assertNotIn("private chutes prompt", result_text)
+            self.assertNotIn("cpk-test-secret", result_text)
 
     def test_provider_dry_run_reports_secret_errors_without_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

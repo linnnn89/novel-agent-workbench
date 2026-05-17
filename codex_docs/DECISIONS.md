@@ -231,3 +231,11 @@ Decision: Add disabled dry-run adapter behavior for `deepseek` and `openai_compa
 Reason: Before enabling real HTTP calls, Provider request translation must be testable without exposing prompt text, request bodies, or API keys.
 
 Impact: `provider-dry-run` returns a safe OpenAI-compatible summary containing provider, model, base_url_host, message_count, prompt/system prompt character counts, temperature, max_tokens, and metadata key names. It sends no network requests, writes no preflight log by default, and keeps real adapters disabled.
+
+## 2026-05-17: MVP-2 Chutes Provider Preflight
+
+Decision: Register `chutes_openai` as a disabled OpenAI-compatible Provider adapter.
+
+Reason: The user supplied Chutes endpoint/model details. The workbench can capture the public Provider shape now while keeping real network calls behind a later explicit approval gate.
+
+Impact: `chutes_openai` supports config and dry-run summaries with `base_url=https://llm.chutes.ai/v1` and model examples such as `Qwen/Qwen3-32B-TEE`. It remains disabled, no-network, and cannot generate drafts.

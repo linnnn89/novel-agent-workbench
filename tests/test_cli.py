@@ -301,6 +301,53 @@ class CliTest(unittest.TestCase):
             self.assertEqual(payload["result"]["request_summary"], {})
             self.assertNotIn("private missing secret prompt", stdout)
 
+    def test_chutes_provider_dry_run_cli_is_safe_and_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            run_cli(["--projects-root", temp, "set-project-secret", "demo", "chutes_key", "--value", "cpk-cli-secret"])
+            run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "configure-provider-role",
+                    "demo",
+                    "writer",
+                    "--provider",
+                    "chutes_openai",
+                    "--model",
+                    "Qwen/Qwen3-32B-TEE",
+                    "--api-key-ref",
+                    "project_secret.chutes_key",
+                    "--base-url",
+                    "https://llm.chutes.ai/v1",
+                ]
+            )
+
+            code, stdout, stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "provider-dry-run",
+                    "demo",
+                    "writer",
+                    "--prompt",
+                    "private chutes cli prompt",
+                    "--temperature",
+                    "0.7",
+                    "--max-tokens",
+                    "1024",
+                ]
+            )
+            payload = json.loads(stdout)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(payload["result"]["error_type"], "adapter_disabled")
+            self.assertEqual(payload["result"]["request_summary"]["provider"], "chutes_openai")
+            self.assertEqual(payload["result"]["request_summary"]["model"], "Qwen/Qwen3-32B-TEE")
+            self.assertEqual(payload["result"]["request_summary"]["base_url_host"], "llm.chutes.ai")
+            self.assertNotIn("private chutes cli prompt", stdout)
+            self.assertNotIn("cpk-cli-secret", stdout)
+
 
 def run_cli(args: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()

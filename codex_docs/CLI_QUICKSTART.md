@@ -131,6 +131,25 @@ request_summary.system_prompt_chars: <length only>
 
 The output must not contain prompt text, system prompt text, request body, or API key.
 
+Chutes preflight example:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test set-project-secret demo_project chutes_key --value-stdin
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test configure-provider-role demo_project writer --provider chutes_openai --model "Qwen/Qwen3-32B-TEE" --api-key-ref project_secret.chutes_key --base-url https://llm.chutes.ai/v1
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test provider-dry-run demo_project writer --prompt "Tell me a 250 word story." --temperature 0.7 --max-tokens 1024
+```
+
+Current expected Chutes result:
+
+```text
+error_type: adapter_disabled
+network_allowed: false
+request_summary.provider: chutes_openai
+request_summary.base_url_host: llm.chutes.ai
+```
+
+This is a dry-run only. It does not call Chutes.
+
 Generate a draft:
 
 ```powershell

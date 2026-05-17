@@ -293,6 +293,14 @@ Current enabled Provider:
 mock
 ```
 
+Current disabled dry-run Provider ids:
+
+```text
+openai_compatible
+deepseek
+chutes_openai
+```
+
 Future real Providers must:
 
 - read secrets only through `secrets.local.json`,

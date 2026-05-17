@@ -12,8 +12,9 @@ from .storage import ProjectStore, utc_stamp
 MODEL_ROLES = {"writer", "scorer", "reviser"}
 SECRET_REF_PREFIX = "project_secret."
 MOCK_PROVIDER_ID = "mock"
+CHUTES_PROVIDER_ID = "chutes_openai"
 PROVIDER_CALL_LOG_FILENAME = "provider_call_log.json"
-DISABLED_ADAPTER_IDS = ("openai_compatible", "deepseek")
+DISABLED_ADAPTER_IDS = ("openai_compatible", "deepseek", CHUTES_PROVIDER_ID)
 
 
 class ProviderConfigError(ValueError):
@@ -250,6 +251,13 @@ PROVIDER_ADAPTER_REGISTRY: dict[str, ProviderAdapterInfo] = {
         network_allowed=False,
         requires_secret=True,
         description="Reserved DeepSeek adapter. Disabled until MVP-2 real-provider gate is approved.",
+    ),
+    CHUTES_PROVIDER_ID: ProviderAdapterInfo(
+        adapter_id=CHUTES_PROVIDER_ID,
+        enabled=False,
+        network_allowed=False,
+        requires_secret=True,
+        description="Reserved Chutes OpenAI-compatible adapter. Disabled until explicit network approval.",
     ),
 }
 

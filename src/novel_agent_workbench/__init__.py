@@ -10,6 +10,7 @@ from .drafts import (
     DraftGenerationService,
 )
 from .providers import (
+    CHUTES_PROVIDER_ID,
     ModelRoleConfig,
     MockProviderClient,
     ProviderAdapterInfo,
@@ -54,6 +55,7 @@ __all__ = [
     "StorageError",
     "WorkbenchApplicationService",
     "AuditFinding",
+    "CHUTES_PROVIDER_ID",
     "audit_project",
     "configure_provider_role",
     "create_provider_client",

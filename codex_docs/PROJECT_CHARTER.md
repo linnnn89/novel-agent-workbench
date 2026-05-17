@@ -152,6 +152,14 @@ disabled real-provider dry-run adapter + OpenAI-compatible safe request summary 
 
 Dry-run may expose only safe counts and config metadata. It must not expose prompt text, request bodies, API keys, or raw responses, and it must not write preflight logs by default.
 
+MVP-2 Chutes provider preflight slice:
+
+```text
+reserved chutes_openai adapter + Chutes OpenAI-compatible base URL/model dry-run coverage.
+```
+
+Chutes remains disabled and no-network until the user explicitly authorizes a real connection test.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

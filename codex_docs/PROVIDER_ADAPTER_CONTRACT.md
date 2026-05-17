@@ -17,6 +17,7 @@ Reserved but disabled adapters:
 ```text
 openai_compatible
 deepseek
+chutes_openai
 ```
 
 Disabled adapters must never send HTTP requests, create drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
@@ -41,7 +42,7 @@ description
 
 `mock` is enabled and has `network_allowed=false`.
 
-`openai_compatible` and `deepseek` are registered only as future placeholders. They have `enabled=false` and `network_allowed=false`.
+`openai_compatible`, `deepseek`, and `chutes_openai` are registered only as future placeholders. They have `enabled=false` and `network_allowed=false`.
 
 ## Secret Lookup
 
@@ -138,6 +139,20 @@ raw response content
 ```
 
 `deepseek` uses the same OpenAI-compatible summary shape while preserving `provider=deepseek`.
+
+`chutes_openai` uses the same OpenAI-compatible summary shape while preserving `provider=chutes_openai`.
+
+Known Chutes base URL shape:
+
+```text
+https://llm.chutes.ai/v1
+```
+
+Known Chutes model example:
+
+```text
+Qwen/Qwen3-32B-TEE
+```
 
 Dry-run does not write preflight logs by default. If a later phase adds preflight logs, they must follow the same no prompt, no body, no key rule.
 
