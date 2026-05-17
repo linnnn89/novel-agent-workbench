@@ -382,6 +382,26 @@ class ProviderConfigTest(unittest.TestCase):
             self.assertFalse((store.root / "exports").exists())
             self.assertFalse((store.data_dir / "rag").exists())
 
+    def test_disable_real_generation_can_recover_incomplete_chutes_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            config = store.read_config()
+            config["model_roles"]["writer"].update(
+                {
+                    "provider": "chutes_openai",
+                    "model": "Qwen/Qwen3-32B-TEE",
+                    "settings": {"real_generation_enabled": True},
+                }
+            )
+            store.write_config(config)
+
+            role_config = set_real_generation_enabled(store, "writer", provider="chutes_openai", enabled=False)
+
+            self.assertFalse(role_config.settings["real_generation_enabled"])
+            with self.assertRaises(ProviderConfigError):
+                set_real_generation_enabled(store, "writer", provider="chutes_openai", enabled=True)
+
     def test_chutes_real_generation_writes_draft_only_with_mocked_http(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = ProjectStore.open(Path(temp), "demo")

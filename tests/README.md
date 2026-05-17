@@ -68,6 +68,7 @@ Provider config tests currently cover:
 - disabled Chutes OpenAI-compatible dry-run summary,
 - mocked Chutes real-test metadata path without log/draft side effects,
 - Chutes `generate-draft` blocked until `settings.real_generation_enabled=true`,
+- Chutes real-generation disable path can recover incomplete Chutes config,
 - mocked Chutes real draft generation writing draft content only to `data/drafts/*.json`,
 - Chutes real generation audit gate blocking prompt/key/content leak findings,
 - dry-run secret error handling without request summaries,

@@ -204,6 +204,8 @@ local secret: present and non-empty in data/secrets.local.json
 audit leak gate: no key/prompt/content leak findings
 ```
 
+Enabling the gate is intentionally strict and requires model, base URL, and `api_key_ref` to be configured. Disabling the gate is intentionally lenient so a partially broken Chutes config can always be moved back to a non-real-generation state.
+
 Stable blocking errors include:
 
 ```text

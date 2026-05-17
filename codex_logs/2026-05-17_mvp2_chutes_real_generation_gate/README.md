@@ -68,6 +68,8 @@ audit_gate_failed
 
 `provider_adapter_disabled` remains an expected audit finding for Chutes because the adapter registry still marks Chutes disabled. The real-generation gate ignores that finding and blocks only leak findings plus secret resolution failures.
 
+2026-05-17 review correction: disabling the gate is lenient. It can turn `settings.real_generation_enabled` back to `false` even if model, base URL, or secret reference is incomplete. Enabling remains strict.
+
 ## Chutes Client Boundary
 
 The Chutes client sends a non-streaming OpenAI-compatible `/chat/completions` request with a finite timeout.

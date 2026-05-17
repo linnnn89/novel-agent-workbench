@@ -409,12 +409,13 @@ def set_real_generation_enabled(store: ProjectStore, role: str, *, provider: str
         raise ProviderConfigError("Only chutes_openai can be explicitly enabled for real generation in this phase.")
     if role_config.provider != provider:
         raise ProviderConfigError(f"Role {role!r} is not configured for provider {provider!r}.")
-    if not role_config.model:
-        raise ProviderConfigError("Real generation requires a model id.")
-    if not role_config.base_url:
-        raise ProviderConfigError("Real generation requires base_url.")
-    if not role_config.api_key_ref:
-        raise ProviderConfigError("Real generation requires api_key_ref.")
+    if enabled:
+        if not role_config.model:
+            raise ProviderConfigError("Real generation requires a model id.")
+        if not role_config.base_url:
+            raise ProviderConfigError("Real generation requires base_url.")
+        if not role_config.api_key_ref:
+            raise ProviderConfigError("Real generation requires api_key_ref.")
     settings = {**role_config.settings, REAL_GENERATION_FLAG: bool(enabled)}
     updated = ModelRoleConfig(
         role=role_config.role,
