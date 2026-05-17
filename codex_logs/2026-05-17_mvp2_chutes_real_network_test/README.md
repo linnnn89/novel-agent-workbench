@@ -84,3 +84,23 @@ Tracked-file secret search found no committed key material.
 ## Next Step
 
 Keep normal generation blocked for `chutes_openai`. The next phase should decide whether to add a user-approved `enable_real_provider_for_tests` setting or keep real calls limited to `provider-real-test`.
+
+## Secret Removal
+
+After the successful network test, the user asked to temporarily delete the key.
+
+Action taken:
+
+```text
+Removed chutes_key from workspace_projects\chutes_realtest_20260517\data\secrets.local.json.
+```
+
+Verification:
+
+```text
+secrets_file_exists: true
+contains_chutes_key: false
+secret_count: 0
+```
+
+No plaintext key was written to this log.
