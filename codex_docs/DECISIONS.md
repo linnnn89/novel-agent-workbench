@@ -255,3 +255,11 @@ Decision: Allow `chutes_openai` to generate writer drafts only through an explic
 Reason: The workbench needs one real Provider path for end-to-end draft testing, but it must stay auditable, reversible, and unable to silently become normal generation for every role or Provider.
 
 Impact: `enable-real-provider <project_id> writer --provider chutes_openai` writes `settings.real_generation_enabled=true`; `disable-real-provider` turns it off. `generate-draft` only reaches Chutes when the role is writer, the Provider is `chutes_openai`, the secret resolves from `secrets.local.json`, and audit has no key/prompt/content leak finding. Generated content is stored only in draft artifacts; provider logs, CLI output, and audit output remain metadata-only. No automatic commit, Memory Bank, RAG, export, UI, DOCX, or scoring work was added.
+
+## 2026-05-17: MVP-2.5 Chutes Real Provider Runbook
+
+Decision: Add `chutes-generate-once` as the preferred operator command for controlled real Chutes draft tests.
+
+Reason: Manual real-provider testing required several separate commands, which increased the chance of forgetting to disable the gate, clear the runtime secret, or run post-audit. A single runbook command makes the sequence auditable and easier to recover.
+
+Impact: The runbook performs audit precheck, optional no-backup secret write, provider config write, explicit gate enable, draft generation, gate disable, optional no-backup secret cleanup, and audit postcheck. It requires `--allow-network` before any HTTP call and returns only metadata. Draft content stays in `data/drafts/*.json`; no confirmed chapter, Memory Bank, RAG, export, UI, DOCX, or scoring/revision behavior was added.

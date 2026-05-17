@@ -119,6 +119,25 @@ def build_parser() -> argparse.ArgumentParser:
     provider_real_test.add_argument("--max-tokens", type=int, default=16)
     provider_real_test.add_argument("--temperature", type=float, default=0)
 
+    chutes_once = subparsers.add_parser("chutes-generate-once")
+    chutes_once.add_argument("project_id")
+    chutes_once.add_argument("--chapter-id", required=True)
+    chutes_once.add_argument("--prompt", required=True)
+    chutes_once.add_argument("--title", default="")
+    chutes_once.add_argument("--system-prompt", default="")
+    chutes_once.add_argument("--model", default="Qwen/Qwen3-32B-TEE")
+    chutes_once.add_argument("--base-url", default="https://llm.chutes.ai/v1")
+    chutes_once.add_argument("--secret-name", default="chutes_key")
+    secret_value_group = chutes_once.add_mutually_exclusive_group()
+    secret_value_group.add_argument("--secret-value")
+    secret_value_group.add_argument("--secret-value-stdin", action="store_true")
+    chutes_once.add_argument("--max-tokens", type=int, default=96)
+    chutes_once.add_argument("--temperature", type=float, default=0.2)
+    chutes_once.add_argument("--allow-network", action="store_true")
+    clear_group = chutes_once.add_mutually_exclusive_group()
+    clear_group.add_argument("--clear-secret-after-run", dest="clear_secret_after_run", action="store_true", default=True)
+    clear_group.add_argument("--keep-secret-after-run", dest="clear_secret_after_run", action="store_false")
+
     subparsers.add_parser("list-provider-adapters")
 
     smoke = subparsers.add_parser("smoke")
@@ -200,6 +219,23 @@ def run_command(args: argparse.Namespace) -> Any:
             system_prompt=args.system_prompt,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
+        )
+    if command == "chutes-generate-once":
+        secret_value = sys.stdin.read().strip() if args.secret_value_stdin else (args.secret_value or "")
+        return app.chutes_generate_once(
+            args.project_id,
+            chapter_id=args.chapter_id,
+            title=args.title,
+            prompt=args.prompt,
+            system_prompt=args.system_prompt,
+            model=args.model,
+            base_url=args.base_url,
+            secret_name=args.secret_name,
+            secret_value=secret_value,
+            max_tokens=args.max_tokens,
+            temperature=args.temperature,
+            allow_network=args.allow_network,
+            clear_secret_after_run=args.clear_secret_after_run,
         )
     if command == "list-provider-adapters":
         return app.list_provider_adapters()

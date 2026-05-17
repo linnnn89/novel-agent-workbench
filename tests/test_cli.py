@@ -521,6 +521,129 @@ class CliTest(unittest.TestCase):
             self.assertNotIn("cpk-cli-secret", stdout)
             self.assertNotIn("CLI REAL DRAFT CONTENT", stdout)
 
+    def test_chutes_generate_once_requires_explicit_network_allowance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+
+            with patch("novel_agent_workbench.providers.urllib.request.urlopen") as urlopen:
+                code, stdout, stderr = run_cli(
+                    [
+                        "--projects-root",
+                        temp,
+                        "chutes-generate-once",
+                        "demo",
+                        "--chapter-id",
+                        "chapter_001",
+                        "--prompt",
+                        "private no network runbook prompt",
+                        "--secret-value",
+                        "cpk-cli-secret",
+                    ]
+                )
+            payload = json.loads(stdout)
+
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(payload["result"]["status"], "error")
+            self.assertEqual(payload["result"]["error_type"], "network_not_allowed")
+            urlopen.assert_not_called()
+            self.assertNotIn("private no network runbook prompt", stdout)
+            self.assertNotIn("cpk-cli-secret", stdout)
+
+    def test_chutes_generate_once_cli_success_cleans_secret_and_outputs_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+
+            with patch(
+                "novel_agent_workbench.providers.urllib.request.urlopen",
+                return_value=FakeHttpResponse(
+                    200,
+                    {
+                        "choices": [{"message": {"content": "RUNBOOK REAL DRAFT CONTENT"}, "finish_reason": "stop"}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+                    },
+                ),
+            ):
+                code, stdout, stderr = run_cli(
+                    [
+                        "--projects-root",
+                        temp,
+                        "chutes-generate-once",
+                        "demo",
+                        "--chapter-id",
+                        "chapter_001",
+                        "--prompt",
+                        "private runbook prompt",
+                        "--secret-value",
+                        "cpk-cli-secret",
+                        "--allow-network",
+                        "--clear-secret-after-run",
+                        "--max-tokens",
+                        "32",
+                    ]
+                )
+            payload = json.loads(stdout)
+            result = payload["result"]
+            config_path = Path(temp) / "demo" / "data" / "config.json"
+            secrets_path = Path(temp) / "demo" / "data" / "secrets.local.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            secrets = json.loads(secrets_path.read_text(encoding="utf-8"))
+            draft_path = Path(result["draft"]["path"])
+            draft = json.loads(draft_path.read_text(encoding="utf-8"))
+            key_file_hits = count_text_hits(Path(temp), "cpk-cli-secret")
+
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["draft"]["provider"], "chutes_openai")
+            self.assertEqual(result["draft"]["usage"]["total_tokens"], 10)
+            self.assertFalse(config["model_roles"]["writer"]["settings"]["real_generation_enabled"])
+            self.assertEqual(secrets, {})
+            self.assertFalse(result["secret"]["has_value_after"])
+            self.assertEqual(key_file_hits, 0)
+            self.assertEqual(result["side_effects"]["confirmed_chapter_count"], 0)
+            self.assertFalse(result["side_effects"]["exports_exists"])
+            self.assertFalse(result["side_effects"]["rag_exists"])
+            self.assertEqual(draft["content"], "RUNBOOK REAL DRAFT CONTENT")
+            self.assertNotIn("private runbook prompt", stdout)
+            self.assertNotIn("cpk-cli-secret", stdout)
+            self.assertNotIn("RUNBOOK REAL DRAFT CONTENT", stdout)
+
+    def test_chutes_generate_once_cli_audit_gate_blocks_leak_and_cleans_nothing_sensitive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            provider_log = Path(temp) / "demo" / "data" / "provider_call_log.json"
+            provider_log.write_text(
+                json.dumps({"schema_version": 1, "calls": [{"prompt": "private leaked prompt"}]}),
+                encoding="utf-8",
+            )
+
+            with patch("novel_agent_workbench.providers.urllib.request.urlopen") as urlopen:
+                code, stdout, stderr = run_cli(
+                    [
+                        "--projects-root",
+                        temp,
+                        "chutes-generate-once",
+                        "demo",
+                        "--chapter-id",
+                        "chapter_001",
+                        "--prompt",
+                        "private blocked runbook prompt",
+                        "--secret-value",
+                        "cpk-cli-secret",
+                        "--allow-network",
+                    ]
+                )
+            payload = json.loads(stdout)
+            secrets = json.loads((Path(temp) / "demo" / "data" / "secrets.local.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(payload["result"]["status"], "error")
+            self.assertEqual(payload["result"]["error_type"], "audit_gate_failed")
+            urlopen.assert_not_called()
+            self.assertEqual(secrets, {})
+            self.assertFalse((Path(temp) / "demo" / "data" / "drafts").exists())
+            self.assertNotIn("private blocked runbook prompt", stdout)
+            self.assertNotIn("cpk-cli-secret", stdout)
+
 
 def run_cli(args: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()
@@ -543,6 +666,20 @@ class FakeHttpResponse:
 
     def read(self) -> bytes:
         return json.dumps(self.payload).encode("utf-8")
+
+
+def count_text_hits(root: Path, needle: str) -> int:
+    hits = 0
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if needle in text:
+            hits += 1
+    return hits
 
 
 if __name__ == "__main__":

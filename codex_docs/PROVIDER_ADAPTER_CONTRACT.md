@@ -236,6 +236,32 @@ data/drafts/*.json
 
 because `read-draft` is the human review surface. It must not be copied into provider logs, CLI `generate-draft` output, audit output, `data/drafts_index.json`, confirmed chapters, Memory Bank, RAG, or exports unless a later explicit commit/update feature is implemented.
 
+## Chutes Generate Once Runbook
+
+`chutes-generate-once` is the preferred CLI path for real Chutes draft trials.
+
+It must require:
+
+```text
+--allow-network
+```
+
+before any HTTP request can occur.
+
+It must run:
+
+```text
+audit precheck
+secret/config setup
+enable gate
+generate draft
+disable gate
+optional secret cleanup
+audit postcheck
+```
+
+It returns a metadata-only summary and must not include prompt text, generated content, raw response, request body, or plaintext key. Temporary secret setup/cleanup uses no-backup writes so clearing a key does not leave a new `secrets.local.json` backup containing the old key.
+
 ## Logs
 
 Provider call logs may record:

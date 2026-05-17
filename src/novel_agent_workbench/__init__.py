@@ -38,6 +38,7 @@ from .providers import (
     set_model_role_config,
 )
 from .project_state import public_project_state
+from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
 from .storage import InvalidProjectIdError, ProjectLockError, ProjectRegistry, ProjectStore, StorageError
 
 __all__ = [
@@ -60,7 +61,9 @@ __all__ = [
     "WorkbenchApplicationService",
     "AuditFinding",
     "CHUTES_PROVIDER_ID",
+    "ChutesGenerateOnceRequest",
     "audit_project",
+    "chutes_generate_once",
     "configure_provider_role",
     "create_provider_client",
     "DraftCommitResult",

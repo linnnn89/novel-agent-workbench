@@ -18,6 +18,7 @@ from .providers import (
     set_model_role_config,
     set_project_secret,
 )
+from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
 from .storage import ProjectRegistry, ProjectStore
 
 
@@ -181,6 +182,41 @@ class WorkbenchApplicationService:
                 metadata=metadata or {},
             ),
         ).to_dict()
+
+    def chutes_generate_once(
+        self,
+        project_id: str,
+        *,
+        chapter_id: str,
+        prompt: str,
+        title: str = "",
+        system_prompt: str = "",
+        model: str = "Qwen/Qwen3-32B-TEE",
+        base_url: str = "https://llm.chutes.ai/v1",
+        secret_name: str = "chutes_key",
+        secret_value: str = "",
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        allow_network: bool = False,
+        clear_secret_after_run: bool = True,
+    ) -> dict[str, Any]:
+        return chutes_generate_once(
+            self._open_store(project_id),
+            ChutesGenerateOnceRequest(
+                chapter_id=chapter_id,
+                title=title,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=model,
+                base_url=base_url,
+                secret_name=secret_name,
+                secret_value=secret_value,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                allow_network=allow_network,
+                clear_secret_after_run=clear_secret_after_run,
+            ),
+        )
 
     def list_provider_adapters(self) -> list[dict[str, Any]]:
         return list_provider_adapters()

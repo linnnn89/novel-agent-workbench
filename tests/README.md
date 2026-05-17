@@ -115,7 +115,8 @@ Application service facade tests currently cover:
 - explicit commit and confirmed chapter read through the backend facade,
 - facade state exclusion of prompt text, chapter content, and plaintext secrets,
 - failed generation leaving no draft behind,
-- facade enable/disable real-provider flag updates without plaintext secret exposure.
+- facade enable/disable real-provider flag updates without plaintext secret exposure,
+- facade Chutes one-command runbook output excluding prompt, key, and generated content.
 
 CLI tests currently cover:
 
@@ -134,6 +135,9 @@ CLI tests currently cover:
 - Chutes `provider-real-test` CLI output with mocked HTTP and no prompt/key/response-text leak.
 - `enable-real-provider` / `disable-real-provider` only changing config and making no network call.
 - Chutes real `generate-draft` CLI output with mocked HTTP excluding prompt/key/generated content.
+- `chutes-generate-once` requiring `--allow-network`, using mocked HTTP for success, cleaning secrets, disabling the gate, and excluding prompt/key/generated content.
+- `chutes-generate-once` mocked success leaving zero file hits for the fake key after cleanup.
+- `chutes-generate-once` audit-gate blocking without network or draft side effects.
 
 Audit tests currently cover:
 

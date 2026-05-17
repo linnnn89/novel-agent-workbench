@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -178,6 +179,53 @@ class WorkbenchApplicationServiceTest(unittest.TestCase):
             self.assertTrue(state["provider_roles"]["writer"]["real_generation_enabled"])
             self.assertFalse(disabled["settings"]["real_generation_enabled"])
             self.assertNotIn("cpk-facade-secret", result_text)
+
+    def test_facade_chutes_generate_once_is_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_project("demo")
+
+            with patch(
+                "novel_agent_workbench.providers.urllib.request.urlopen",
+                return_value=FakeHttpResponse(
+                    200,
+                    {
+                        "choices": [{"message": {"content": "FACADE REAL DRAFT CONTENT"}, "finish_reason": "stop"}],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+                    },
+                ),
+            ):
+                result = app.chutes_generate_once(
+                    "demo",
+                    chapter_id="chapter_001",
+                    prompt="private facade runbook prompt",
+                    secret_value="cpk-facade-secret",
+                    allow_network=True,
+                    clear_secret_after_run=True,
+                )
+            result_text = json.dumps(result, ensure_ascii=False)
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["draft"]["provider"], "chutes_openai")
+            self.assertFalse(result["secret"]["has_value_after"])
+            self.assertNotIn("private facade runbook prompt", result_text)
+            self.assertNotIn("cpk-facade-secret", result_text)
+            self.assertNotIn("FACADE REAL DRAFT CONTENT", result_text)
+
+
+class FakeHttpResponse:
+    def __init__(self, status: int, payload: dict[str, object]) -> None:
+        self.status = status
+        self.payload = payload
+
+    def __enter__(self) -> "FakeHttpResponse":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
 
 
 if __name__ == "__main__":

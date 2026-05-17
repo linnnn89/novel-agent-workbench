@@ -146,6 +146,68 @@ Must not send network requests, generate drafts, create confirmed chapters, upda
 
 Must not return plaintext secrets.
 
+### chutes_generate_once(...)
+
+Runs the safe operator runbook for one controlled Chutes writer draft.
+
+Inputs:
+
+```text
+project_id
+chapter_id
+prompt
+title
+system_prompt
+model
+base_url
+secret_name
+secret_value
+temperature
+max_tokens
+allow_network
+clear_secret_after_run
+```
+
+Required order:
+
+```text
+audit precheck
+secret/config setup
+enable real-generation gate
+generate draft
+disable real-generation gate
+optional secret cleanup
+audit postcheck
+metadata-only summary
+```
+
+`allow_network=true` is required for any real HTTP request.
+
+Returns metadata only:
+
+```text
+status
+project_id
+role
+provider
+model
+base_url_host
+chapter_id
+steps
+draft metadata
+error_type
+message
+secret state summary
+audit code summaries
+side effect summary
+```
+
+Must not return prompt text, system prompt text, generated draft content, raw response JSON, request body, or plaintext secrets.
+
+Must not auto-commit, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or run scoring/revision workflows.
+
+If `clear_secret_after_run=true`, the runbook rewrites `data/secrets.local.json` without creating a `.bak` containing the old key.
+
 ### generate_draft(...)
 
 Inputs:

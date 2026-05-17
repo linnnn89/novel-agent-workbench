@@ -176,6 +176,14 @@ enable-real-provider / disable-real-provider + chutes_openai writer-only real dr
 
 `chutes_openai` remains disabled in the adapter registry and is not generally enabled. Normal draft generation may use it only when the writer role is configured for Chutes, `settings.real_generation_enabled=true`, the local project secret resolves, and audit has no key/prompt/content leak findings. Real output is written only as a draft artifact and must not auto-commit or update Memory Bank, RAG, or exports.
 
+MVP-2.5 real Provider runbook slice:
+
+```text
+chutes-generate-once + audit precheck/postcheck + automatic gate disable + optional secret cleanup.
+```
+
+The runbook is the preferred operator path for real Chutes tests. It requires explicit `--allow-network`, returns metadata only, and keeps generated content confined to draft artifacts.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

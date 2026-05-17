@@ -174,6 +174,29 @@ The `generate-draft` command returns metadata only. To inspect the generated con
 
 The real draft path still does not auto-commit, update Memory Bank, update RAG, create exports, or create DOCX.
 
+Preferred one-command Chutes runbook:
+
+```powershell
+$env:PYTHONPATH="I:\AI-NOVEL\novel_agent_workbench\src"
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test chutes-generate-once demo_project --chapter-id chapter_001 --prompt "Write a short test draft." --secret-value-stdin --allow-network --clear-secret-after-run --temperature 0.2 --max-tokens 96
+```
+
+Paste the Chutes key through stdin when prompted by PowerShell pipeline or terminal input. Do not put real keys directly in reusable command history.
+
+This command runs:
+
+```text
+audit precheck
+secret/config setup
+enable gate
+generate draft
+disable gate
+clear secret by default
+audit postcheck
+```
+
+The JSON output is metadata-only. It does not include prompt text, generated text, request body, raw response, or API key.
+
 Generate a draft:
 
 ```powershell
