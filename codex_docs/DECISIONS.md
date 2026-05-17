@@ -263,3 +263,11 @@ Decision: Add `chutes-generate-once` as the preferred operator command for contr
 Reason: Manual real-provider testing required several separate commands, which increased the chance of forgetting to disable the gate, clear the runtime secret, or run post-audit. A single runbook command makes the sequence auditable and easier to recover.
 
 Impact: The runbook performs audit precheck, optional no-backup secret write, provider config write, explicit gate enable, draft generation, gate disable, optional no-backup secret cleanup, and audit postcheck. It requires `--allow-network` before any HTTP call and returns only metadata. Draft content stays in `data/drafts/*.json`; no confirmed chapter, Memory Bank, RAG, export, UI, DOCX, or scoring/revision behavior was added.
+
+## 2026-05-17: MVP-3 Chapter Workflow State
+
+Decision: Add `data/chapters_workflow.json` as the metadata-only chapter workflow index.
+
+Reason: Drafts and confirmed chapters are artifacts, but future UI and scoring/revision flows need a stable chapter-level state boundary before any complex workflow is added.
+
+Impact: Chapters can move through `planned`, `drafting`, `draft_ready`, `committed`, and `blocked`. Draft generation marks `drafting` then `draft_ready` on success or `blocked` on provider/config failure. Explicit commit marks `committed`; duplicate or failed commit records metadata-only error without downgrading an already committed chapter. CLI commands `mark-chapter-planned`, `chapter-status`, and `list-chapters` expose the state. Workflow state stores only metadata and error summaries, never prompt text, generated content, or plaintext secrets.

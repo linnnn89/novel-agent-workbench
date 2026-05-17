@@ -65,13 +65,52 @@ project_id
 config
 secrets
 draft_count
+chapter_count
 committed_chapter_count
+latest_chapter
 latest_draft
 latest_committed_chapter
 provider_roles
 ```
 
 Must not return prompt text, chapter content, or plaintext secrets.
+
+### mark_chapter_planned(project_id, chapter_id, title="")
+
+Creates or updates a metadata-only chapter workflow entry.
+
+Returns:
+
+```text
+chapter_id
+title
+status
+created_at
+updated_at
+latest_draft_id
+confirmed_chapter_id
+error_summary
+```
+
+Status is `planned`.
+
+Must not return prompt text, generated content, or plaintext secrets.
+
+### list_chapters(project_id)
+
+Returns chapter workflow metadata from:
+
+```text
+data/chapters_workflow.json
+```
+
+Metadata-only. Must not return prompt text, generated content, or plaintext secrets.
+
+### chapter_status(project_id, chapter_id)
+
+Returns one chapter workflow entry.
+
+Metadata-only. Must not return prompt text, generated content, or plaintext secrets.
 
 ### configure_mock_writer(project_id, model="mock-writer")
 
@@ -241,6 +280,10 @@ Must not auto-commit.
 
 When the writer role uses `chutes_openai`, real generation is allowed only after `enable_real_provider(...)`, local secret resolution, and audit leak-gate success. CLI/facade output remains metadata-only; generated content is visible through `read_draft(...)`.
 
+On successful draft generation, chapter workflow state may update to `draft_ready` with `latest_draft_id`.
+
+On generation failure, chapter workflow state may update to `blocked` with metadata-only error summary.
+
 ### list_drafts(project_id)
 
 Returns draft metadata from `data/drafts_index.json`.
@@ -273,6 +316,10 @@ checkpoint
 Must create a `pre_commit` checkpoint before confirmed files are written.
 
 Must not update Memory Bank, RAG, or exports.
+
+On successful explicit commit, chapter workflow state updates to `committed` with `confirmed_chapter_id`.
+
+On failed commit, chapter workflow records metadata-only error. If the chapter is already `committed`, it must not be downgraded to `blocked`.
 
 ### list_confirmed_chapters(project_id)
 

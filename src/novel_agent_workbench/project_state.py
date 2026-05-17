@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .chapters import ChapterWorkflowService
 from .drafts import DraftGenerationService
 from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
 from .storage import ProjectStore
@@ -13,8 +14,10 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     if initialize:
         store.initialize()
     draft_service = DraftGenerationService(store)
+    chapter_service = ChapterWorkflowService(store)
     drafts = draft_service.list_drafts()
     confirmed = draft_service.list_confirmed_chapters()
+    chapters = chapter_service.list_chapters()
     store_state = store.public_state()
     config = store_state.get("config") if isinstance(store_state.get("config"), dict) else {}
     return {
@@ -26,7 +29,9 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         },
         "secrets": store_state.get("secrets", {}),
         "draft_count": len(drafts),
+        "chapter_count": len(chapters),
         "committed_chapter_count": len(confirmed),
+        "latest_chapter": safe_chapter_summary(latest_by(chapters, "updated_at")),
         "latest_draft": safe_draft_summary(latest_by(drafts, "created_at")),
         "latest_committed_chapter": safe_confirmed_summary(latest_by(confirmed, "committed_at")),
         "provider_roles": provider_roles_summary(store),
@@ -90,4 +95,18 @@ def safe_confirmed_summary(item: dict[str, Any] | None) -> dict[str, Any] | None
         "provider": item.get("provider"),
         "model": item.get("model"),
         "usage": item.get("usage") if isinstance(item.get("usage"), dict) else {},
+    }
+
+
+def safe_chapter_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "chapter_id": item.get("chapter_id"),
+        "title": item.get("title"),
+        "status": item.get("status"),
+        "latest_draft_id": item.get("latest_draft_id"),
+        "confirmed_chapter_id": item.get("confirmed_chapter_id"),
+        "updated_at": item.get("updated_at"),
+        "error_summary": item.get("error_summary") if isinstance(item.get("error_summary"), dict) else {},
     }

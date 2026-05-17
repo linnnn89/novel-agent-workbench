@@ -71,6 +71,19 @@ Configure mock writer:
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test configure-mock-writer demo_project
 ```
 
+Plan a chapter:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test mark-chapter-planned demo_project chapter_001 --title "Opening"
+```
+
+Inspect chapter workflow state:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test chapter-status demo_project chapter_001
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-chapters demo_project
+```
+
 Check Provider adapter registry:
 
 ```powershell

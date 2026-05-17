@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .audit import audit_project
+from .chapters import ChapterWorkflowService
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .project_state import public_project_state
 from .providers import (
@@ -50,6 +51,15 @@ class WorkbenchApplicationService:
 
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))
+
+    def mark_chapter_planned(self, project_id: str, chapter_id: str, *, title: str = "") -> dict[str, Any]:
+        return ChapterWorkflowService(self._open_store(project_id)).mark_planned(chapter_id, title=title)
+
+    def list_chapters(self, project_id: str) -> list[dict[str, Any]]:
+        return ChapterWorkflowService(self._open_store(project_id)).list_chapters()
+
+    def chapter_status(self, project_id: str, chapter_id: str) -> dict[str, Any]:
+        return ChapterWorkflowService(self._open_store(project_id)).get_chapter(chapter_id)
 
     def configure_mock_writer(self, project_id: str, *, model: str = "mock-writer") -> dict[str, Any]:
         store = self._open_store(project_id)

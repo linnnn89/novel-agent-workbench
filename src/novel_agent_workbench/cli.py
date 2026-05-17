@@ -40,6 +40,18 @@ def build_parser() -> argparse.ArgumentParser:
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
+    mark_chapter = subparsers.add_parser("mark-chapter-planned")
+    mark_chapter.add_argument("project_id")
+    mark_chapter.add_argument("chapter_id")
+    mark_chapter.add_argument("--title", default="")
+
+    chapter_status = subparsers.add_parser("chapter-status")
+    chapter_status.add_argument("project_id")
+    chapter_status.add_argument("chapter_id")
+
+    list_chapters = subparsers.add_parser("list-chapters")
+    list_chapters.add_argument("project_id")
+
     configure = subparsers.add_parser("configure-mock-writer")
     configure.add_argument("project_id")
     configure.add_argument("--model", default="mock-writer")
@@ -160,6 +172,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_projects()
     if command == "state":
         return app.project_state(args.project_id)
+    if command == "mark-chapter-planned":
+        return app.mark_chapter_planned(args.project_id, args.chapter_id, title=args.title)
+    if command == "chapter-status":
+        return app.chapter_status(args.project_id, args.chapter_id)
+    if command == "list-chapters":
+        return app.list_chapters(args.project_id)
     if command == "configure-mock-writer":
         return app.configure_mock_writer(args.project_id, model=args.model)
     if command == "configure-provider-role":

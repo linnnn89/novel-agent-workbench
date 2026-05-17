@@ -73,6 +73,7 @@ MVP-0 first storage slice is implemented:
 - Explicit `provider-real-test` command for one approved Chutes connection test, separate from draft generation and without returning response text.
 - Controlled Chutes real draft generation gate: `chutes_openai` can generate a writer draft only after `enable-real-provider` sets `settings.real_generation_enabled=true`, the project secret exists, and audit leak checks pass.
 - One-command Chutes runbook `chutes-generate-once` that performs audit precheck, safe secret/config setup, explicit gate enable, real draft generation, gate disable, optional secret cleanup, and audit postcheck with metadata-only output.
+- Minimal chapter workflow state at `data/chapters_workflow.json`, tracking planned/drafting/draft_ready/committed/blocked without prompt text, chapter content, or plaintext secrets.
 - Unit tests.
 
 Verification command:

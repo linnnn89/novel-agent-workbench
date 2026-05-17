@@ -19,6 +19,16 @@ py -3.13 -m unittest discover -s tests
 
 Current implemented tests cover storage, registry, foundation config, Provider config/interface, draft generation, explicit draft commit, and safe project state summaries.
 
+Chapter workflow tests currently cover:
+
+- planned chapter creation,
+- generate success moving state to `draft_ready`,
+- explicit commit moving state to `committed`,
+- generation failure moving state to `blocked` without prompt leakage,
+- duplicate commit keeping `committed` while recording metadata-only error,
+- chapter CLI commands `mark-chapter-planned`, `chapter-status`, and `list-chapters`,
+- public state and audit output excluding prompt text, generated content, and plaintext secrets.
+
 Checkpoint tests currently cover:
 
 - manifest creation,
@@ -121,6 +131,7 @@ Application service facade tests currently cover:
 CLI tests currently cover:
 
 - one-command smoke flow with mock writer and explicit commit,
+- chapter workflow CLI commands,
 - split create/configure/generate/commit/list commands,
 - JSON error output on failed generation,
 - no prompt text in smoke JSON output,

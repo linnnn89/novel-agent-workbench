@@ -2,6 +2,7 @@
 
 from .application_service import WorkbenchApplicationService
 from .audit import AuditFinding, audit_project
+from .chapters import ChapterWorkflowEntry, ChapterWorkflowError, ChapterWorkflowService
 from .drafts import (
     DraftCommitResult,
     DraftGenerationError,
@@ -62,6 +63,9 @@ __all__ = [
     "AuditFinding",
     "CHUTES_PROVIDER_ID",
     "ChutesGenerateOnceRequest",
+    "ChapterWorkflowEntry",
+    "ChapterWorkflowError",
+    "ChapterWorkflowService",
     "audit_project",
     "chutes_generate_once",
     "configure_provider_role",

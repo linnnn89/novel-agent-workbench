@@ -184,6 +184,14 @@ chutes-generate-once + audit precheck/postcheck + automatic gate disable + optio
 
 The runbook is the preferred operator path for real Chutes tests. It requires explicit `--allow-network`, returns metadata only, and keeps generated content confined to draft artifacts.
 
+MVP-3 chapter workflow slice:
+
+```text
+chapters_workflow.json + planned/drafting/draft_ready/committed/blocked + chapter CLI.
+```
+
+Chapter workflow state is metadata-only. It may reference draft ids and confirmed chapter ids, but it must not store prompt text, generated content, raw provider responses, or plaintext secrets.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

@@ -67,6 +67,16 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
             ("possible_secret_in_commit_log", SECRET_PATTERNS),
         ],
     )
+    check_text_file(
+        store.data_dir / "chapters_workflow.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=[
+            ("possible_prompt_in_chapter_workflow", PROMPT_PATTERNS),
+            ("possible_secret_in_chapter_workflow", SECRET_PATTERNS),
+            ("possible_content_in_chapter_workflow", CONTENT_PATTERNS),
+        ],
+    )
     audit_checkpoints(store, checked_paths=checked_paths, findings=findings)
     audit_provider_adapter_config(store, checked_paths=checked_paths, findings=findings)
     audit_draft_confirmed_consistency(store, checked_paths=checked_paths, findings=findings)

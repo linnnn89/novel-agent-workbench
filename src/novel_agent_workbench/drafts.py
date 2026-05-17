@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from .chapters import ChapterWorkflowService
 from .providers import ProviderRequest, generate_with_provider
 from .storage import ProjectStore, safe_filename, utc_stamp
 
@@ -110,10 +111,22 @@ class DraftGenerationService:
     def generate_draft(self, request: DraftGenerationRequest) -> DraftGenerationResult:
         self.store.initialize()
         with self.store.lock():
-            response = generate_with_provider(self.store, request.to_provider_request())
-            draft_id = new_draft_id()
-            created_at = utc_stamp()
             title = request.title.strip()
+            workflow = ChapterWorkflowService(self.store)
+            workflow.mark_drafting(request.chapter_id, title=title)
+            try:
+                response = generate_with_provider(self.store, request.to_provider_request())
+                draft_id = new_draft_id()
+                created_at = utc_stamp()
+            except Exception as exc:
+                workflow.record_error(
+                    request.chapter_id,
+                    title=title,
+                    stage="generate_draft",
+                    error_type=getattr(exc, "error_type", exc.__class__.__name__),
+                    message=str(exc),
+                )
+                raise
             draft_path = self.drafts_dir / f"{safe_filename(request.chapter_id)}__{draft_id}.json"
             artifact = {
                 "schema_version": 1,
@@ -150,6 +163,7 @@ class DraftGenerationService:
                     "usage": response.usage,
                 }
             )
+            workflow.mark_draft_ready(request.chapter_id, title=title, draft_id=draft_id)
             return DraftGenerationResult(
                 draft_id=draft_id,
                 chapter_id=request.chapter_id,
@@ -189,73 +203,93 @@ class DraftGenerationService:
     def commit_draft(self, draft_id: str) -> DraftCommitResult:
         self.store.initialize()
         with self.store.lock():
-            draft_entry = self._draft_index_entry(draft_id)
-            draft = self.read_draft(draft_id)
-            if draft.get("status") != "draft" or draft_entry.get("status") != "draft":
-                raise DraftGenerationError(f"Draft is not committable: {draft_id}")
-            chapter_id = str(draft.get("chapter_id") or "").strip()
-            validate_chapter_id(chapter_id)
-            confirmed_index = self._read_confirmed_index()
-            if any(item.get("chapter_id") == chapter_id for item in confirmed_index):
-                raise DraftGenerationError(f"Confirmed chapter already exists: {chapter_id}")
+            chapter_id = ""
+            title = ""
+            workflow = ChapterWorkflowService(self.store)
+            try:
+                draft_entry = self._draft_index_entry(draft_id)
+                draft = self.read_draft(draft_id)
+                chapter_id = str(draft.get("chapter_id") or "").strip()
+                validate_chapter_id(chapter_id)
+                title = str(draft.get("title") or "")
+                if draft.get("status") != "draft" or draft_entry.get("status") != "draft":
+                    raise DraftGenerationError(f"Draft is not committable: {draft_id}")
+                confirmed_index = self._read_confirmed_index()
+                if any(item.get("chapter_id") == chapter_id for item in confirmed_index):
+                    raise DraftGenerationError(f"Confirmed chapter already exists: {chapter_id}")
 
-            checkpoint = self.store.create_checkpoint(label="pre_commit")
-            committed_at = utc_stamp()
-            title = str(draft.get("title") or "")
-            provider = draft.get("provider") if isinstance(draft.get("provider"), dict) else {}
-            artifact_path = self.confirmed_dir / f"{safe_filename(chapter_id)}.json"
-            artifact = {
-                "schema_version": 1,
-                "chapter_id": chapter_id,
-                "title": title,
-                "content": str(draft.get("content") or ""),
-                "source_draft_id": draft_id,
-                "committed_at": committed_at,
-                "provider": {
-                    "provider": str(provider.get("provider") or ""),
-                    "model": str(provider.get("model") or ""),
-                    "usage": provider.get("usage") if isinstance(provider.get("usage"), dict) else {},
-                },
-                "future_hooks": {
-                    "memory_bank_update": "not_implemented",
-                    "rag_update": "not_implemented",
-                    "export_update": "not_implemented",
-                },
-            }
-            confirmed_entry = {
-                "chapter_id": chapter_id,
-                "title": title,
-                "source_draft_id": draft_id,
-                "committed_at": committed_at,
-                "path": str(artifact_path.relative_to(self.store.root)),
-                "provider": artifact["provider"]["provider"],
-                "model": artifact["provider"]["model"],
-                "usage": artifact["provider"]["usage"],
-            }
-            self.store.write_json(artifact_path, artifact)
-            self._append_confirmed_entry(confirmed_entry)
-            self._update_draft_status(draft_id, status="committed", committed_at=committed_at, chapter_id=chapter_id)
-            self._append_commit_log(
-                {
-                    "commit_id": f"{committed_at}_{uuid4().hex[:12]}",
-                    "timestamp": committed_at,
-                    "draft_id": draft_id,
+                checkpoint = self.store.create_checkpoint(label="pre_commit")
+                committed_at = utc_stamp()
+                provider = draft.get("provider") if isinstance(draft.get("provider"), dict) else {}
+                artifact_path = self.confirmed_dir / f"{safe_filename(chapter_id)}.json"
+                artifact = {
+                    "schema_version": 1,
                     "chapter_id": chapter_id,
-                    "status": "committed",
+                    "title": title,
+                    "content": str(draft.get("content") or ""),
+                    "source_draft_id": draft_id,
+                    "committed_at": committed_at,
+                    "provider": {
+                        "provider": str(provider.get("provider") or ""),
+                        "model": str(provider.get("model") or ""),
+                        "usage": provider.get("usage") if isinstance(provider.get("usage"), dict) else {},
+                    },
+                    "future_hooks": {
+                        "memory_bank_update": "not_implemented",
+                        "rag_update": "not_implemented",
+                        "export_update": "not_implemented",
+                    },
+                }
+                confirmed_entry = {
+                    "chapter_id": chapter_id,
+                    "title": title,
+                    "source_draft_id": draft_id,
+                    "committed_at": committed_at,
+                    "path": str(artifact_path.relative_to(self.store.root)),
                     "provider": artifact["provider"]["provider"],
                     "model": artifact["provider"]["model"],
                     "usage": artifact["provider"]["usage"],
-                    "checkpoint_id": checkpoint.get("checkpoint_id"),
                 }
-            )
-            return DraftCommitResult(
-                draft_id=draft_id,
-                chapter_id=chapter_id,
-                title=title,
-                path=str(artifact_path),
-                committed_at=committed_at,
-                checkpoint=checkpoint,
-            )
+                self.store.write_json(artifact_path, artifact)
+                self._append_confirmed_entry(confirmed_entry)
+                self._update_draft_status(draft_id, status="committed", committed_at=committed_at, chapter_id=chapter_id)
+                self._append_commit_log(
+                    {
+                        "commit_id": f"{committed_at}_{uuid4().hex[:12]}",
+                        "timestamp": committed_at,
+                        "draft_id": draft_id,
+                        "chapter_id": chapter_id,
+                        "status": "committed",
+                        "provider": artifact["provider"]["provider"],
+                        "model": artifact["provider"]["model"],
+                        "usage": artifact["provider"]["usage"],
+                        "checkpoint_id": checkpoint.get("checkpoint_id"),
+                    }
+                )
+                workflow.mark_committed(
+                    chapter_id,
+                    title=title,
+                    draft_id=draft_id,
+                    confirmed_chapter_id=chapter_id,
+                )
+                return DraftCommitResult(
+                    draft_id=draft_id,
+                    chapter_id=chapter_id,
+                    title=title,
+                    path=str(artifact_path),
+                    committed_at=committed_at,
+                    checkpoint=checkpoint,
+                )
+            except Exception as exc:
+                if chapter_id:
+                    workflow.record_error(
+                        chapter_id,
+                        title=title,
+                        stage="commit_draft",
+                        error_type=getattr(exc, "error_type", exc.__class__.__name__),
+                        message=str(exc),
+                    )
+                raise
 
     def list_confirmed_chapters(self) -> list[dict[str, Any]]:
         return self._read_confirmed_index()
