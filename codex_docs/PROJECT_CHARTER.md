@@ -300,6 +300,14 @@ context-assembly-dry-run + local candidate ranking preview + metadata-only token
 
 This is a diagnostic surface for future Provider prompt assembly. It may read formal context plans and Memory Bank item metadata, but it must not return prompt text, chapter text, Memory Bank text, or plaintext secrets. It must not call Providers or write project data.
 
+MVP-8.5 formal context task queue slice:
+
+```text
+enqueue-formal-context-tasks + formal_context_task_queue.json + manual status marking.
+```
+
+This queue turns formal context plans into per-category manual tasks. It must not extract text, write Memory Bank, write world book, update RAG/export, mutate drafts/confirmed chapters, or call Providers.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

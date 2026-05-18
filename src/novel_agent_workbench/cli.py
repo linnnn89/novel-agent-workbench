@@ -181,6 +181,20 @@ def build_parser() -> argparse.ArgumentParser:
     context_assembly.add_argument("project_id")
     context_assembly.add_argument("--max-context-tokens", type=int, default=None)
 
+    enqueue_formal_context_tasks = subparsers.add_parser("enqueue-formal-context-tasks")
+    enqueue_formal_context_tasks.add_argument("project_id")
+    enqueue_formal_context_tasks.add_argument("plan_id")
+
+    list_formal_context_tasks = subparsers.add_parser("list-formal-context-tasks")
+    list_formal_context_tasks.add_argument("project_id")
+    list_formal_context_tasks.add_argument("--status", default="")
+
+    mark_formal_context_task = subparsers.add_parser("mark-formal-context-task")
+    mark_formal_context_task.add_argument("project_id")
+    mark_formal_context_task.add_argument("task_id")
+    mark_formal_context_task.add_argument("--status", required=True, choices=["pending", "acknowledged", "skipped"])
+    mark_formal_context_task.add_argument("--reason-code", default="")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -337,6 +351,17 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.read_formal_context_plan(args.project_id, args.plan_id)
     if command == "context-assembly-dry-run":
         return app.context_assembly_dry_run(args.project_id, max_context_tokens=args.max_context_tokens)
+    if command == "enqueue-formal-context-tasks":
+        return app.enqueue_formal_context_tasks(args.project_id, args.plan_id)
+    if command == "list-formal-context-tasks":
+        return app.list_formal_context_tasks(args.project_id, status=args.status)
+    if command == "mark-formal-context-task":
+        return app.mark_formal_context_task(
+            args.project_id,
+            args.task_id,
+            status=args.status,
+            reason_code=args.reason_code,
+        )
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

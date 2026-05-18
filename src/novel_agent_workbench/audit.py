@@ -89,6 +89,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     )
     audit_context_previews(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
+    audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_reviews(store, checked_paths=checked_paths, findings=findings)
     audit_revision_requests(store, checked_paths=checked_paths, findings=findings)
     audit_revision_consistency(store, checked_paths=checked_paths, findings=findings)
@@ -200,6 +201,19 @@ def audit_formal_context_plans(store: ProjectStore, *, checked_paths: list[str],
         return
     for path in sorted(plans_dir.glob("*.json")):
         check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+
+
+def audit_formal_context_tasks(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    check_text_file(
+        store.data_dir / "formal_context_task_queue.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=[
+            ("possible_prompt_in_formal_context_task_queue", PROMPT_PATTERNS),
+            ("possible_secret_in_formal_context_task_queue", SECRET_PATTERNS),
+            ("possible_content_in_formal_context_task_queue", CONTENT_PATTERNS),
+        ],
+    )
 
 
 def audit_revision_consistency(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:

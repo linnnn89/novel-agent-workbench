@@ -363,6 +363,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This command does not call a Provider and does not print chapter text, prompt text, Memory Bank text, or secrets. It previews candidate priority, estimated token use, selected/skipped status, and world-book overlap recommendations.
 
+Create manual formal context tasks:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test enqueue-formal-context-tasks demo_project <plan_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-formal-context-tasks demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test mark-formal-context-task demo_project <task_id> --status acknowledged --reason-code manual_done
+```
+
+Tasks are operator-facing metadata only. They do not extract text or apply Memory Bank/world book/RAG/export updates.
+
 Read a confirmed chapter:
 
 ```powershell

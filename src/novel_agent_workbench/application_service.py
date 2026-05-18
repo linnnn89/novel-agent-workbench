@@ -11,6 +11,7 @@ from .context_assembler import ContextAssemblerService
 from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .formal_context import FormalContextPlanService
+from .formal_context_tasks import FormalContextTaskQueueService
 from .project_state import public_project_state
 from .providers import (
     ProviderRequest,
@@ -223,6 +224,21 @@ class WorkbenchApplicationService:
         return ContextAssemblerService(self._open_store(project_id)).dry_run(
             max_context_tokens=max_context_tokens,
         ).to_dict()
+
+    def enqueue_formal_context_tasks(self, project_id: str, plan_id: str) -> dict[str, Any]:
+        return FormalContextTaskQueueService(self._open_store(project_id)).enqueue_plan_tasks(plan_id).to_dict()
+
+    def list_formal_context_tasks(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return FormalContextTaskQueueService(self._open_store(project_id)).list_tasks(status=status)
+
+    def mark_formal_context_task(
+        self, project_id: str, task_id: str, *, status: str, reason_code: str = ""
+    ) -> dict[str, Any]:
+        return FormalContextTaskQueueService(self._open_store(project_id)).mark_task(
+            task_id,
+            status=status,
+            reason_code=reason_code,
+        )
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()

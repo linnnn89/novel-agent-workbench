@@ -381,3 +381,11 @@ Decision: Add a metadata-only local Context Assembler dry-run before implementin
 Reason: Memory priority is not an LLM API-native capability. The project needs a local, testable surface that shows which context candidates would be selected, skipped, or reduced before real Provider calls depend on that behavior.
 
 Impact: `ContextAssemblerService.dry_run(...)` collects formal context plan categories and existing Memory Bank item metadata, estimates token usage with a simple character-based estimator, sorts by category priority and memory weight, and returns selected/skipped metadata. It exposes that LLM APIs do not accept priority fields and that local assembly is required. CLI command `context-assembly-dry-run` exposes the check. The dry-run writes no files, returns no chapter text, Memory Bank text, prompt text, or plaintext secrets, and does not call Providers.
+
+## 2026-05-18: MVP-8.5 Formal Context Task Queue
+
+Decision: Add a metadata-only manual task queue from formal context plans.
+
+Reason: After a plan exists and a dry-run can show priority, the operator and future UI need a stable list of per-category manual tasks before any actual Memory Bank application exists.
+
+Impact: `FormalContextTaskQueueService.enqueue_plan_tasks(...)` writes `data/formal_context_task_queue.json` with one task per formal context category. Tasks include ids, plan/preview/update/chapter references, category, priority, target, memory weight, recommendation, status, timestamps, and safety flags. They do not store chapter text, prompt text, Memory Bank text, raw Provider responses, or plaintext secrets. CLI commands `enqueue-formal-context-tasks`, `list-formal-context-tasks`, and `mark-formal-context-task` expose the flow. The queue does not write Memory Bank, world book, RAG, exports, drafts, confirmed chapters, or Providers.

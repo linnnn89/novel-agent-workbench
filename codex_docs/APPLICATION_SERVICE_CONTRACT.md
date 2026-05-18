@@ -812,6 +812,76 @@ Candidate items may include source type, ids, category id, priority, memory weig
 
 This method is read-only. It must not write artifacts, mutate Memory Bank, update RAG/export, create drafts, create confirmed chapters, or call Providers.
 
+### enqueue_formal_context_tasks(project_id, plan_id)
+
+Creates metadata-only manual tasks from one formal context plan.
+
+Writes:
+
+```text
+data/formal_context_task_queue.json
+```
+
+Returns:
+
+```text
+created_count
+total_count
+items
+```
+
+Each task may include:
+
+```text
+task_id
+plan_id
+preview_id
+update_id
+chapter_id
+title
+category_id
+priority
+target
+memory_weight
+recommendation
+status
+created_at
+updated_at
+safety
+```
+
+This is idempotent by `plan_id + category_id`. It must not return or store chapter text, prompt text, Memory Bank text, raw Provider responses, request bodies, or plaintext secrets. It must not update Memory Bank, world book, RAG, exports, drafts, confirmed chapters, or Providers.
+
+### list_formal_context_tasks(project_id, status="")
+
+Returns formal context manual task metadata.
+
+Optional `status` filter:
+
+```text
+pending
+acknowledged
+skipped
+```
+
+Metadata-only. Must not return chapter text, prompt text, Memory Bank text, or plaintext secrets.
+
+### mark_formal_context_task(project_id, task_id, status, reason_code="")
+
+Updates one formal context task status.
+
+Allowed statuses:
+
+```text
+pending
+acknowledged
+skipped
+```
+
+`reason_code` must use safe ASCII letters, numbers, `_`, or `-`.
+
+This marks task metadata only. It must not update Memory Bank, world book, RAG, exports, drafts, confirmed chapters, or Providers.
+
 ### list_confirmed_chapters(project_id)
 
 Returns confirmed chapter metadata from `data/confirmed_chapters.json`.

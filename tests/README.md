@@ -120,6 +120,16 @@ Context assembler dry-run tests currently cover:
 - world-book overlap weight reflected in dry-run candidates,
 - CLI output excluding prompt text, confirmed chapter text, Memory Bank text, and plaintext secrets.
 
+Formal context task queue tests currently cover:
+
+- creating `data/formal_context_task_queue.json`,
+- one task per formal context category,
+- idempotent enqueue behavior,
+- listing and marking task status,
+- public state `formal_context_task_count` reporting,
+- no Memory Bank mutation,
+- CLI/facade output excluding prompt text, confirmed chapter text, and plaintext secrets.
+
 Checkpoint tests currently cover:
 
 - manifest creation,

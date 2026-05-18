@@ -95,6 +95,59 @@ class ContextAssemblerTest(unittest.TestCase):
             self.assertNotIn("private assembler prompt", stdout)
             self.assertNotIn("MOCK writer", stdout)
 
+    def test_formal_context_task_queue_is_metadata_only_and_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_context_plan_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            store.update_secrets({"mock_key": "sk-formal-task-secret"})
+            confirmed = app.read_confirmed_chapter("demo", "chapter_001")
+            memory_before = store.data_file_path("memory_bank.json").read_text(encoding="utf-8")
+            plan_id = app.list_formal_context_plans("demo")[0]["plan_id"]
+
+            first = app.enqueue_formal_context_tasks("demo", plan_id)
+            second = app.enqueue_formal_context_tasks("demo", plan_id)
+            listed = app.list_formal_context_tasks("demo")
+            state = app.project_state("demo")
+            result_text = json.dumps(
+                {"first": first, "second": second, "listed": listed, "state": state},
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(first["created_count"], 5)
+            self.assertEqual(second["created_count"], 0)
+            self.assertEqual(len(listed), 5)
+            self.assertEqual(listed[0]["category_id"], "world_building")
+            self.assertEqual(state["formal_context_task_count"], 5)
+            self.assertNotIn("private assembler prompt", result_text)
+            self.assertNotIn(str(confirmed["content"]), result_text)
+            self.assertNotIn("sk-formal-task-secret", result_text)
+            self.assertEqual(memory_before, store.data_file_path("memory_bank.json").read_text(encoding="utf-8"))
+
+    def test_formal_context_task_mark_and_cli_are_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            configured_context_plan_app(temp)
+            app = WorkbenchApplicationService.open(Path(temp))
+            plan_id = app.list_formal_context_plans("demo")[0]["plan_id"]
+            created = app.enqueue_formal_context_tasks("demo", plan_id)
+            task_id = created["items"][0]["task_id"]
+
+            marked = app.mark_formal_context_task("demo", task_id, status="acknowledged", reason_code="manual_done")
+            pending = app.list_formal_context_tasks("demo", status="pending")
+            acknowledged = app.list_formal_context_tasks("demo", status="acknowledged")
+
+            self.assertEqual(marked["status"], "acknowledged")
+            self.assertEqual(marked["reason_code"], "manual_done")
+            self.assertEqual(len(pending), 4)
+            self.assertEqual(acknowledged[0]["task_id"], task_id)
+
+            code, stdout, stderr = run_cli(
+                ["--projects-root", temp, "list-formal-context-tasks", "demo", "--status", "acknowledged"]
+            )
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(json.loads(stdout)["result"][0]["task_id"], task_id)
+            self.assertNotIn("private assembler prompt", stdout)
+            self.assertNotIn("MOCK writer", stdout)
+
 
 def configured_context_plan_app(temp: str, *, world_book_enabled: bool = False) -> WorkbenchApplicationService:
     app = WorkbenchApplicationService.open(Path(temp))
