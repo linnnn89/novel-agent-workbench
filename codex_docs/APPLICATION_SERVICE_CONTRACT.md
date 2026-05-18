@@ -71,6 +71,8 @@ revision_request_count
 context_update_count
 context_preview_count
 formal_context_plan_count
+formal_context_task_count
+memory_apply_preview_count
 chapter_count
 committed_chapter_count
 latest_chapter
@@ -80,6 +82,8 @@ latest_revision_request
 latest_context_update
 latest_context_preview
 latest_formal_context_plan
+latest_formal_context_task
+latest_memory_apply_preview
 latest_committed_chapter
 provider_roles
 ```
@@ -881,6 +885,59 @@ skipped
 `reason_code` must use safe ASCII letters, numbers, `_`, or `-`.
 
 This marks task metadata only. It must not update Memory Bank, world book, RAG, exports, drafts, confirmed chapters, or Providers.
+
+### create_memory_apply_preview(project_id, status="pending")
+
+Creates a metadata-only preview before any Memory Bank write.
+
+Writes:
+
+```text
+data/memory_apply_previews/*.json
+data/memory_apply_previews_index.json
+```
+
+Returns:
+
+```text
+preview_id
+status
+task_count
+path
+created_at
+```
+
+The preview artifact may include:
+
+```text
+preview_id
+status
+created_at
+source
+task_status_filter
+task_count
+world_book_enabled
+items
+summary
+safety
+recommendation
+```
+
+Each item may include task id, plan id, category id, priority, target, memory weight, duplicate-risk metadata, and proposed action. Items must not include chapter text, prompt text, Memory Bank text, raw Provider responses, request bodies, or plaintext secrets.
+
+This method must not write `memory_bank.json`, update world book, update RAG/export, create drafts, create confirmed chapters, or call Providers.
+
+### list_memory_apply_previews(project_id)
+
+Returns Memory Apply Preview index metadata.
+
+Metadata-only. Must not return chapter text, prompt text, Memory Bank text, or plaintext secrets.
+
+### read_memory_apply_preview(project_id, preview_id)
+
+Returns one Memory Apply Preview artifact.
+
+May return candidate metadata, safety flags, duplicate-risk metadata, and recommendation. Must not return chapter text, prompt text, Memory Bank text, raw Provider responses, request bodies, or plaintext secrets.
 
 ### list_confirmed_chapters(project_id)
 

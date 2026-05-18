@@ -19,6 +19,7 @@ from .formal_context_tasks import (
     FormalContextTaskQueueResult,
     FormalContextTaskQueueService,
 )
+from .memory_apply_preview import MemoryApplyPreviewError, MemoryApplyPreviewResult, MemoryApplyPreviewService
 from .providers import (
     CHUTES_PROVIDER_ID,
     ModelRoleConfig,
@@ -109,6 +110,9 @@ __all__ = [
     "FormalContextTaskQueueError",
     "FormalContextTaskQueueResult",
     "FormalContextTaskQueueService",
+    "MemoryApplyPreviewError",
+    "MemoryApplyPreviewResult",
+    "MemoryApplyPreviewService",
     "ReviewDecisionResult",
     "RevisionCandidateComparison",
     "RevisionCandidateError",

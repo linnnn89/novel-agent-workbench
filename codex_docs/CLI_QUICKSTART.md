@@ -373,6 +373,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Tasks are operator-facing metadata only. They do not extract text or apply Memory Bank/world book/RAG/export updates.
 
+Preview future Memory Bank apply candidates:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-memory-apply-preview demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-memory-apply-previews demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-memory-apply-preview demo_project <preview_id>
+```
+
+Memory apply previews do not write `memory_bank.json`. They show candidate category metadata, priority, weight, and duplicate-risk hints only.
+
 Read a confirmed chapter:
 
 ```powershell

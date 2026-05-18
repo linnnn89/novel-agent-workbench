@@ -90,6 +90,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     audit_context_previews(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
+    audit_memory_apply_previews(store, checked_paths=checked_paths, findings=findings)
     audit_reviews(store, checked_paths=checked_paths, findings=findings)
     audit_revision_requests(store, checked_paths=checked_paths, findings=findings)
     audit_revision_consistency(store, checked_paths=checked_paths, findings=findings)
@@ -214,6 +215,26 @@ def audit_formal_context_tasks(store: ProjectStore, *, checked_paths: list[str],
             ("possible_content_in_formal_context_task_queue", CONTENT_PATTERNS),
         ],
     )
+
+
+def audit_memory_apply_previews(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_memory_apply_preview", PROMPT_PATTERNS),
+        ("possible_secret_in_memory_apply_preview", SECRET_PATTERNS),
+        ("possible_content_in_memory_apply_preview", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "memory_apply_previews_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    previews_dir = store.data_dir / "memory_apply_previews"
+    checked_paths.append(str(previews_dir))
+    if not previews_dir.exists():
+        return
+    for path in sorted(previews_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
 
 
 def audit_revision_consistency(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:

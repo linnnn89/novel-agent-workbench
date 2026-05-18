@@ -130,6 +130,15 @@ Formal context task queue tests currently cover:
 - no Memory Bank mutation,
 - CLI/facade output excluding prompt text, confirmed chapter text, and plaintext secrets.
 
+Memory apply preview tests currently cover:
+
+- creating `data/memory_apply_previews/*.json` and `data/memory_apply_previews_index.json`,
+- previewing pending formal context tasks as Memory Bank candidate metadata,
+- world-book overlap duplicate-risk hints,
+- public state `memory_apply_preview_count` reporting,
+- no `memory_bank.json` mutation,
+- CLI/facade output excluding prompt text, confirmed chapter text, Memory Bank text, and plaintext secrets.
+
 Checkpoint tests currently cover:
 
 - manifest creation,

@@ -148,6 +148,75 @@ class ContextAssemblerTest(unittest.TestCase):
             self.assertNotIn("private assembler prompt", stdout)
             self.assertNotIn("MOCK writer", stdout)
 
+    def test_memory_apply_preview_is_metadata_only_and_does_not_write_memory_bank(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_context_plan_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            store.update_secrets({"mock_key": "sk-memory-preview-secret"})
+            plan_id = app.list_formal_context_plans("demo")[0]["plan_id"]
+            app.enqueue_formal_context_tasks("demo", plan_id)
+            memory_before = store.data_file_path("memory_bank.json").read_text(encoding="utf-8")
+            confirmed = app.read_confirmed_chapter("demo", "chapter_001")
+
+            result = app.create_memory_apply_preview("demo")
+            previews = app.list_memory_apply_previews("demo")
+            preview = app.read_memory_apply_preview("demo", result["preview_id"])
+            state = app.project_state("demo")
+            result_text = json.dumps(
+                {"result": result, "previews": previews, "preview": preview, "state": state},
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(result["status"], "preview_ready")
+            self.assertEqual(result["task_count"], 5)
+            self.assertEqual(preview["summary"]["would_write_memory_bank"], False)
+            self.assertEqual(len(preview["items"]), 5)
+            self.assertEqual(preview["items"][0]["proposed_action"], "manual_memory_bank_candidate")
+            self.assertEqual(state["memory_apply_preview_count"], 1)
+            self.assertNotIn("private assembler prompt", result_text)
+            self.assertNotIn(str(confirmed["content"]), result_text)
+            self.assertNotIn("sk-memory-preview-secret", result_text)
+            self.assertEqual(memory_before, store.data_file_path("memory_bank.json").read_text(encoding="utf-8"))
+
+    def test_memory_apply_preview_flags_world_book_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_context_plan_app(temp, world_book_enabled=True)
+            plan_id = app.list_formal_context_plans("demo")[0]["plan_id"]
+            app.enqueue_formal_context_tasks("demo", plan_id)
+
+            result = app.create_memory_apply_preview("demo")
+            preview = app.read_memory_apply_preview("demo", result["preview_id"])
+            world_building = preview["items"][0]
+
+            self.assertTrue(preview["world_book_enabled"])
+            self.assertEqual(world_building["category_id"], "world_building")
+            self.assertEqual(world_building["memory_weight"], 0.35)
+            self.assertEqual(world_building["duplicate_risk"], "world_book_overlap_review_required")
+
+    def test_memory_apply_preview_cli_is_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            configured_context_plan_app(temp)
+            app = WorkbenchApplicationService.open(Path(temp))
+            plan_id = app.list_formal_context_plans("demo")[0]["plan_id"]
+            app.enqueue_formal_context_tasks("demo", plan_id)
+
+            create_code, create_stdout, create_stderr = run_cli(
+                ["--projects-root", temp, "create-memory-apply-preview", "demo"]
+            )
+            preview_id = json.loads(create_stdout)["result"]["preview_id"]
+            list_code, list_stdout, list_stderr = run_cli(["--projects-root", temp, "list-memory-apply-previews", "demo"])
+            read_code, read_stdout, read_stderr = run_cli(
+                ["--projects-root", temp, "read-memory-apply-preview", "demo", preview_id]
+            )
+            combined = create_stdout + list_stdout + read_stdout
+
+            self.assertEqual(create_code, 0, create_stderr)
+            self.assertEqual(list_code, 0, list_stderr)
+            self.assertEqual(read_code, 0, read_stderr)
+            self.assertEqual(json.loads(read_stdout)["result"]["task_count"], 5)
+            self.assertNotIn("private assembler prompt", combined)
+            self.assertNotIn("MOCK writer", combined)
+
 
 def configured_context_plan_app(temp: str, *, world_book_enabled: bool = False) -> WorkbenchApplicationService:
     app = WorkbenchApplicationService.open(Path(temp))

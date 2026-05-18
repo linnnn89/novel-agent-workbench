@@ -12,6 +12,7 @@ from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
+from .memory_apply_preview import MemoryApplyPreviewService
 from .project_state import public_project_state
 from .providers import (
     ProviderRequest,
@@ -239,6 +240,17 @@ class WorkbenchApplicationService:
             status=status,
             reason_code=reason_code,
         )
+
+    def create_memory_apply_preview(self, project_id: str, *, status: str = "pending") -> dict[str, Any]:
+        return MemoryApplyPreviewService(self._open_store(project_id)).create_memory_apply_preview(
+            status=status,
+        ).to_dict()
+
+    def list_memory_apply_previews(self, project_id: str) -> list[dict[str, Any]]:
+        return MemoryApplyPreviewService(self._open_store(project_id)).list_memory_apply_previews()
+
+    def read_memory_apply_preview(self, project_id: str, preview_id: str) -> dict[str, Any]:
+        return MemoryApplyPreviewService(self._open_store(project_id)).read_memory_apply_preview(preview_id)
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()

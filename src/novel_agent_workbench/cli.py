@@ -195,6 +195,17 @@ def build_parser() -> argparse.ArgumentParser:
     mark_formal_context_task.add_argument("--status", required=True, choices=["pending", "acknowledged", "skipped"])
     mark_formal_context_task.add_argument("--reason-code", default="")
 
+    create_memory_apply_preview = subparsers.add_parser("create-memory-apply-preview")
+    create_memory_apply_preview.add_argument("project_id")
+    create_memory_apply_preview.add_argument("--status", default="pending")
+
+    list_memory_apply_previews = subparsers.add_parser("list-memory-apply-previews")
+    list_memory_apply_previews.add_argument("project_id")
+
+    read_memory_apply_preview = subparsers.add_parser("read-memory-apply-preview")
+    read_memory_apply_preview.add_argument("project_id")
+    read_memory_apply_preview.add_argument("preview_id")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -362,6 +373,12 @@ def run_command(args: argparse.Namespace) -> Any:
             status=args.status,
             reason_code=args.reason_code,
         )
+    if command == "create-memory-apply-preview":
+        return app.create_memory_apply_preview(args.project_id, status=args.status)
+    if command == "list-memory-apply-previews":
+        return app.list_memory_apply_previews(args.project_id)
+    if command == "read-memory-apply-preview":
+        return app.read_memory_apply_preview(args.project_id, args.preview_id)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

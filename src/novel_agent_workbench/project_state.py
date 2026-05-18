@@ -8,6 +8,7 @@ from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
+from .memory_apply_preview import MemoryApplyPreviewService
 from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
 from .reviews import DraftReviewService
 from .revisions import RevisionRequestService
@@ -27,6 +28,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     context_preview_service = ContextUpdatePreviewService(store)
     formal_context_plan_service = FormalContextPlanService(store)
     formal_context_task_service = FormalContextTaskQueueService(store)
+    memory_apply_preview_service = MemoryApplyPreviewService(store)
     drafts = draft_service.list_drafts()
     reviews = review_service.list_reviews()
     revision_requests = revision_request_service.list_revision_requests()
@@ -36,6 +38,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     context_previews = context_preview_service.list_context_previews()
     formal_context_plans = formal_context_plan_service.list_formal_context_plans()
     formal_context_tasks = formal_context_task_service.list_tasks()
+    memory_apply_previews = memory_apply_preview_service.list_memory_apply_previews()
     store_state = store.public_state()
     config = store_state.get("config") if isinstance(store_state.get("config"), dict) else {}
     return {
@@ -53,6 +56,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "context_preview_count": len(context_previews),
         "formal_context_plan_count": len(formal_context_plans),
         "formal_context_task_count": len(formal_context_tasks),
+        "memory_apply_preview_count": len(memory_apply_previews),
         "chapter_count": len(chapters),
         "committed_chapter_count": len(confirmed),
         "latest_chapter": safe_chapter_summary(latest_by(chapters, "updated_at")),
@@ -66,6 +70,9 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         ),
         "latest_formal_context_task": safe_formal_context_task_summary(
             latest_by(formal_context_tasks, "updated_at")
+        ),
+        "latest_memory_apply_preview": safe_memory_apply_preview_summary(
+            latest_by(memory_apply_previews, "created_at")
         ),
         "latest_committed_chapter": safe_confirmed_summary(latest_by(confirmed, "committed_at")),
         "provider_roles": provider_roles_summary(store),
@@ -231,6 +238,19 @@ def safe_formal_context_task_summary(item: dict[str, Any] | None) -> dict[str, A
         "status": item.get("status"),
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
+    }
+
+
+def safe_memory_apply_preview_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "preview_id": item.get("preview_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "task_status_filter": item.get("task_status_filter"),
+        "task_count": item.get("task_count"),
+        "recommendation": item.get("recommendation"),
     }
 
 

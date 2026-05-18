@@ -308,6 +308,14 @@ enqueue-formal-context-tasks + formal_context_task_queue.json + manual status ma
 
 This queue turns formal context plans into per-category manual tasks. It must not extract text, write Memory Bank, write world book, update RAG/export, mutate drafts/confirmed chapters, or call Providers.
 
+MVP-9 memory apply preview slice:
+
+```text
+create-memory-apply-preview + memory_apply_previews/*.json + candidate metadata only.
+```
+
+This preview shows what might later be written to Memory Bank. It must not write `memory_bank.json`, copy chapter text, copy prompt text, copy Memory Bank text, write world book, update RAG/export, mutate drafts/confirmed chapters, or call Providers.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

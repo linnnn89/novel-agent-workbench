@@ -389,3 +389,11 @@ Decision: Add a metadata-only manual task queue from formal context plans.
 Reason: After a plan exists and a dry-run can show priority, the operator and future UI need a stable list of per-category manual tasks before any actual Memory Bank application exists.
 
 Impact: `FormalContextTaskQueueService.enqueue_plan_tasks(...)` writes `data/formal_context_task_queue.json` with one task per formal context category. Tasks include ids, plan/preview/update/chapter references, category, priority, target, memory weight, recommendation, status, timestamps, and safety flags. They do not store chapter text, prompt text, Memory Bank text, raw Provider responses, or plaintext secrets. CLI commands `enqueue-formal-context-tasks`, `list-formal-context-tasks`, and `mark-formal-context-task` expose the flow. The queue does not write Memory Bank, world book, RAG, exports, drafts, confirmed chapters, or Providers.
+
+## 2026-05-18: MVP-9 Memory Apply Preview
+
+Decision: Add a metadata-only preview before any Memory Bank write.
+
+Reason: The task queue identifies what category work should be done, but writing long-term memory is high-risk. A preview layer lets the operator and future UI inspect candidate writes, world-book overlap risk, and safety flags before `memory_bank.json` is changed.
+
+Impact: `MemoryApplyPreviewService.create_memory_apply_preview(...)` writes `data/memory_apply_previews/*.json` plus `data/memory_apply_previews_index.json`. Previews include task ids, categories, priority, target, memory weight, duplicate-risk metadata, safety flags, and `would_write_memory_bank=false`. CLI commands `create-memory-apply-preview`, `list-memory-apply-previews`, and `read-memory-apply-preview` expose the flow. The preview does not store chapter text, prompt text, Memory Bank text, raw Provider responses, or plaintext secrets, and does not write Memory Bank, world book, RAG, exports, drafts, confirmed chapters, or Providers.

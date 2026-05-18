@@ -88,6 +88,7 @@ MVP-0 first storage slice is implemented:
 - World-book overlap policy for world building context: when `world_book_enabled=true`, formal context plans reduce world-building Memory Bank weight by default to avoid duplicate tokens.
 - MVP-8 Context Assembler dry-run that previews local context selection, estimated token budget, and selected/skipped metadata before any Provider call.
 - MVP-8.5 Formal Context Task Queue that turns formal context plans into metadata-only manual tasks without applying Memory Bank/RAG/export updates.
+- MVP-9 Memory Apply Preview that shows future Memory Bank candidate writes as metadata only, without changing `memory_bank.json`.
 - Unit tests.
 
 Verification command:
