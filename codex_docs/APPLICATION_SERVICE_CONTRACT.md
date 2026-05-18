@@ -675,6 +675,16 @@ safety
 recommendation
 ```
 
+`target_plan.formal_context.priority_order` follows the project config policy:
+
+```text
+world_building
+character_relationships
+chapter_summary
+style_memory
+foreshadowing
+```
+
 Must reject skipped queue items and duplicate previews.
 
 Must not return or store chapter text, prompt text, raw Provider responses, request bodies, or plaintext secrets. Must not update Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.

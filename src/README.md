@@ -26,6 +26,7 @@ Current safety hardening:
 - revision candidate comparison is read-only and metadata-only.
 - context update queue entries are metadata-only and do not mutate Memory Bank/RAG/export.
 - context update preview artifacts are metadata-only plans and do not copy chapter text.
+- formal context policy priority is stored in config and copied into preview metadata only.
 - audit checks confirmed chapter consistency and revision request/generated draft consistency.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

@@ -335,3 +335,25 @@ Decision: Add metadata-only preview artifacts for queued formal context work.
 Reason: Before any Memory Bank/RAG/export mutation exists, the operator and future UI need a stable artifact that shows what would be considered for context work without copying chapter text or making irreversible updates.
 
 Impact: `ContextUpdatePreviewService` creates `data/context_update_previews/*.json` plus `data/context_update_previews_index.json` from context queue items. Previews include ids, text statistics, target operation placeholders, and safety flags. They do not store chapter text, prompt text, raw Provider responses, or plaintext secrets, and they do not mutate Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers. `public_project_state` now exposes `context_preview_count` and `latest_context_preview`.
+
+## 2026-05-18: MVP-7 Formal Context Policy Priority
+
+Decision: Formal context work uses this priority order:
+
+```text
+world_building
+character_relationships
+chapter_summary
+style_memory
+foreshadowing
+```
+
+This reflects the user-provided order:
+
+```text
+世界观设定 > 人物关系 > 章节摘要 > 文风记忆 > 剧情伏笔
+```
+
+Reason: The system needs a stable policy before any Memory Bank/RAG update logic exists. Prioritizing world building and relationships first fits long-form novel continuity better than extracting every possible detail equally.
+
+Impact: `config.py` now includes `formal_context_policy` under `context_policy`, with `mode=manual_preview_first`, category metadata, and `auto_extract=false` for every category. Context preview artifacts include a policy priority snapshot in `target_plan.formal_context.priority_order`. No automatic extraction, Provider call, Memory Bank mutation, RAG mutation, export update, or UI work was added.

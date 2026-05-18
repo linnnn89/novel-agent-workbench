@@ -83,6 +83,7 @@ MVP-0 first storage slice is implemented:
 - MVP-5.5 Revision Candidate Comparison read-model for listing and comparing source draft vs revision draft candidate metadata without returning content or making workflow decisions.
 - MVP-6 Confirmed Context Update Queue that explicitly queues confirmed chapters for future manual Memory Bank/RAG/export work without updating those systems automatically.
 - MVP-6.5 Context Update Preview artifacts that turn queue items into metadata-only plans for future formal context work without copying chapter text.
+- MVP-7 Formal Context Policy schema with priority order: world building, character relationships, chapter summary, style memory, foreshadowing.
 - Unit tests.
 
 Verification command:

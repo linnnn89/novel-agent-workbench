@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from .config import FORMAL_CONTEXT_PRIORITY_ORDER
 from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationService
 from .storage import ProjectStore, safe_filename, utc_stamp
@@ -78,6 +79,11 @@ class ContextUpdatePreviewService:
                     "line_count": count_lines(text),
                 },
                 "target_plan": {
+                    "formal_context": {
+                        "operation": "manual_extract_preview_required",
+                        "state": "not_started",
+                        "priority_order": context_priority_order(self.store),
+                    },
                     "memory_bank": {"operation": "manual_extract_required", "state": "not_started"},
                     "rag": {"operation": "manual_index_plan_required", "state": "not_started"},
                     "export": {"operation": "not_in_scope", "state": "not_started"},
@@ -165,3 +171,13 @@ def count_lines(value: str) -> int:
     if not value:
         return 0
     return len(value.splitlines()) or 1
+
+
+def context_priority_order(store: ProjectStore) -> list[str]:
+    config = store.read_config()
+    policy = config.get("context_policy") if isinstance(config, dict) else {}
+    formal = policy.get("formal_context_policy") if isinstance(policy, dict) else {}
+    order = formal.get("priority_order") if isinstance(formal, dict) else []
+    if isinstance(order, list) and all(isinstance(item, str) for item in order) and order:
+        return list(order)
+    return list(FORMAL_CONTEXT_PRIORITY_ORDER)

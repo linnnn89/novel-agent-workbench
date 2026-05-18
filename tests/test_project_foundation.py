@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from novel_agent_workbench import ProjectStore
-from novel_agent_workbench.config import CURRENT_CONFIG_SCHEMA_VERSION, DATA_FILE_DEFAULTS
+from novel_agent_workbench.config import CURRENT_CONFIG_SCHEMA_VERSION, DATA_FILE_DEFAULTS, FORMAL_CONTEXT_PRIORITY_ORDER
 
 
 class ProjectFoundationTest(unittest.TestCase):
@@ -23,6 +23,14 @@ class ProjectFoundationTest(unittest.TestCase):
             self.assertEqual(config["schema_version"], CURRENT_CONFIG_SCHEMA_VERSION)
             self.assertEqual(set(config["model_roles"]), {"writer", "scorer", "reviser"})
             self.assertEqual(config["active_workflow_preset_id"], "manual_studio")
+            self.assertEqual(
+                config["context_policy"]["formal_context_policy"]["priority_order"],
+                FORMAL_CONTEXT_PRIORITY_ORDER,
+            )
+            self.assertEqual(
+                set(config["context_policy"]["formal_context_policy"]["categories"]),
+                set(FORMAL_CONTEXT_PRIORITY_ORDER),
+            )
             self.assertEqual(
                 {item["id"] for item in config["workflow_presets"]},
                 {"classic_direct", "manual_studio", "auto_pipeline"},
@@ -44,6 +52,10 @@ class ProjectFoundationTest(unittest.TestCase):
             self.assertTrue(result["changed"])
             self.assertEqual(config["schema_version"], CURRENT_CONFIG_SCHEMA_VERSION)
             self.assertTrue(config["context_policy"]["memory_bank_enabled"])
+            self.assertEqual(
+                config["context_policy"]["formal_context_policy"]["priority_order"],
+                FORMAL_CONTEXT_PRIORITY_ORDER,
+            )
             self.assertIn("writer", config["model_roles"])
             self.assertTrue(result["checkpoint"]["path"].endswith(".zip"))
             self.assertTrue(Path(result["checkpoint"]["path"]).exists())

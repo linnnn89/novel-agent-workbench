@@ -320,6 +320,22 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Preview artifacts are plans only. They include text statistics and target placeholders, but they do not copy chapter text or update Memory Bank/RAG/export.
 
+Current formal context priority:
+
+```text
+1. world_building
+2. character_relationships
+3. chapter_summary
+4. style_memory
+5. foreshadowing
+```
+
+This maps to:
+
+```text
+世界观设定 > 人物关系 > 章节摘要 > 文风记忆 > 剧情伏笔
+```
+
 Read a confirmed chapter:
 
 ```powershell

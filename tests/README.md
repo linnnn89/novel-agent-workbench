@@ -95,6 +95,7 @@ Context update preview tests currently cover:
 - preview artifacts containing target placeholders, text statistics, and safety flags only,
 - duplicate, skipped, and missing queue item rejection,
 - public state `context_preview_count` reporting,
+- formal context priority order copied into preview metadata,
 - no automatic Memory Bank, RAG, export, draft, confirmed chapter, or Provider side effects,
 - audit/public/CLI outputs excluding prompt text, confirmed chapter text, and plaintext secrets,
 - CLI commands `create-context-preview`, `list-context-previews`, and `read-context-preview`.
@@ -127,7 +128,8 @@ Foundation tests currently cover:
 - checkpoint-before-migration behavior,
 - missing project metadata repair,
 - secrets isolation and masked public state,
-- checkpoint exclusion of secrets, backups, and `.trash` files.
+- checkpoint exclusion of secrets, backups, and `.trash` files,
+- formal context policy defaults and migration fill-in with priority order `world_building`, `character_relationships`, `chapter_summary`, `style_memory`, `foreshadowing`.
 
 Provider config tests currently cover:
 

@@ -256,6 +256,14 @@ create-context-preview + context_update_previews/*.json + metadata-only target p
 
 Preview artifacts may record target placeholders, text statistics, and safety flags. They must not copy chapter text, prompt text, raw Provider responses, or plaintext secrets. They must not mutate Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.
 
+MVP-7 formal context policy slice:
+
+```text
+formal_context_policy priority schema: world_building > character_relationships > chapter_summary > style_memory > foreshadowing.
+```
+
+This is a policy schema only. It must guide future context previews and extraction planning, but it must not perform extraction, call Providers, or mutate Memory Bank/RAG/export automatically.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

@@ -17,6 +17,7 @@ from novel_agent_workbench import (
     audit_project,
 )
 from novel_agent_workbench.cli import main
+from novel_agent_workbench.config import FORMAL_CONTEXT_PRIORITY_ORDER
 from novel_agent_workbench.storage import ProjectStore
 
 
@@ -154,6 +155,10 @@ class ContextUpdateQueueTest(unittest.TestCase):
             self.assertEqual(result["status"], "preview_ready")
             self.assertEqual(preview["update_id"], update["update_id"])
             self.assertEqual(preview["recommendation"], "manual_review_required")
+            self.assertEqual(
+                preview["target_plan"]["formal_context"]["priority_order"],
+                FORMAL_CONTEXT_PRIORITY_ORDER,
+            )
             self.assertFalse(preview["safety"]["text_copied"])
             self.assertFalse(preview["safety"]["provider_called"])
             self.assertEqual(state["context_preview_count"], 1)

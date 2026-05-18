@@ -4,7 +4,15 @@ from copy import deepcopy
 from typing import Any
 
 
-CURRENT_CONFIG_SCHEMA_VERSION = 1
+CURRENT_CONFIG_SCHEMA_VERSION = 2
+
+FORMAL_CONTEXT_PRIORITY_ORDER = [
+    "world_building",
+    "character_relationships",
+    "chapter_summary",
+    "style_memory",
+    "foreshadowing",
+]
 
 DATA_FILE_DEFAULTS: dict[str, Any] = {
     "planning_library.json": {
@@ -88,6 +96,47 @@ def default_project_config() -> dict[str, Any]:
             "memory_bank_enabled": False,
             "world_book_enabled": False,
             "max_context_tokens": 32768,
+            "formal_context_policy": default_formal_context_policy(),
+        },
+    }
+
+
+def default_formal_context_policy() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "mode": "manual_preview_first",
+        "priority_order": list(FORMAL_CONTEXT_PRIORITY_ORDER),
+        "categories": {
+            "world_building": {
+                "label": "World Building",
+                "target": "memory_bank",
+                "enabled": True,
+                "auto_extract": False,
+            },
+            "character_relationships": {
+                "label": "Character Relationships",
+                "target": "memory_bank",
+                "enabled": True,
+                "auto_extract": False,
+            },
+            "chapter_summary": {
+                "label": "Chapter Summary",
+                "target": "memory_bank",
+                "enabled": True,
+                "auto_extract": False,
+            },
+            "style_memory": {
+                "label": "Style Memory",
+                "target": "memory_bank",
+                "enabled": True,
+                "auto_extract": False,
+            },
+            "foreshadowing": {
+                "label": "Foreshadowing",
+                "target": "memory_bank",
+                "enabled": True,
+                "auto_extract": False,
+            },
         },
     }
 
