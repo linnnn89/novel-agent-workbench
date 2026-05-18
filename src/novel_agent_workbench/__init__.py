@@ -3,7 +3,12 @@
 from .application_service import WorkbenchApplicationService
 from .audit import AuditFinding, audit_project
 from .chapters import ChapterWorkflowEntry, ChapterWorkflowError, ChapterWorkflowService
-from .context_assembler import ContextAssemblerService, ContextAssemblyDryRunResult, ContextPackagePreviewResult
+from .context_assembler import (
+    ContextAssemblerService,
+    ContextAssemblyDryRunResult,
+    ContextPackagePreviewResult,
+    PromptRenderDryRunResult,
+)
 from .context_previews import ContextUpdatePreviewError, ContextUpdatePreviewResult, ContextUpdatePreviewService
 from .context_queue import ContextUpdateQueueError, ContextUpdateQueueResult, ContextUpdateQueueService
 from .drafts import (
@@ -93,6 +98,7 @@ __all__ = [
     "ContextAssemblerService",
     "ContextAssemblyDryRunResult",
     "ContextPackagePreviewResult",
+    "PromptRenderDryRunResult",
     "ContextUpdateQueueError",
     "ContextUpdateQueueResult",
     "ContextUpdateQueueService",

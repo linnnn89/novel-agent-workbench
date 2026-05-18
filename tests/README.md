@@ -131,6 +131,14 @@ Context package preview tests currently cover:
 - CLI output excluding manual text by default and including it only with `--include-text`,
 - output excluding prompt text, confirmed chapter text, and plaintext secrets.
 
+Prompt render dry-run tests currently cover:
+
+- redacted prompt/context message envelope by default,
+- explicit prompt/context text inclusion only with include flags,
+- provider boundary reporting no Provider call and no project writes,
+- no Memory Bank mutation,
+- CLI default output excluding operator prompt, system prompt, Memory Bank text, confirmed chapter text, and plaintext secrets.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

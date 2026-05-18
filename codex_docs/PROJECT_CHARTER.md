@@ -348,6 +348,14 @@ context-package-preview + enabled manual Memory Bank text selection + explicit i
 
 This is a read-only preview layer before final prompt rendering. It may select enabled, ready, manual Memory Bank items and estimate token usage. Default output must be metadata-only; manual text may appear only with an explicit include-text option. It must not write artifacts, call Providers, read chapter content, write prompt logs, update world book, update RAG/export, mutate drafts/confirmed chapters, or generate text.
 
+MVP-11.5 prompt render dry-run slice:
+
+```text
+prompt-render-dry-run + redacted message envelope + explicit prompt/context text flags.
+```
+
+This is a no-write envelope preview before Provider calls. It may combine an operator prompt, optional system prompt, and selected context package metadata. Default output must redact prompt text and context text. Text may appear only with explicit include flags. It must not write prompt logs, call Providers, create drafts, read chapter content, update world book, update RAG/export, or mutate confirmed chapters.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

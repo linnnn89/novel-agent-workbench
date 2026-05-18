@@ -42,6 +42,22 @@ class ContextPackagePreviewResult:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class PromptRenderDryRunResult:
+    project_id: str
+    mode: str
+    provider_api_boundary: dict[str, Any]
+    include_prompt_text: bool
+    include_context_text: bool
+    prompt_summary: dict[str, Any]
+    context_package: dict[str, Any]
+    rendered_messages: list[dict[str, Any]]
+    warnings: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class ContextAssemblerService:
     """Builds metadata-only previews of future Provider context assembly."""
 
@@ -149,6 +165,79 @@ class ContextAssemblerService:
             + [
                 "preview_only_no_provider_call",
                 "manual_memory_text_only",
+            ],
+        )
+
+    def prompt_render_dry_run(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str = "",
+        max_context_tokens: int | None = None,
+        include_prompt_text: bool = False,
+        include_context_text: bool = False,
+    ) -> PromptRenderDryRunResult:
+        self.store.initialize()
+        context_package = self.package_preview(
+            max_context_tokens=max_context_tokens,
+            include_text=include_context_text,
+        ).to_dict()
+        prompt_value = str(prompt or "")
+        system_prompt_value = str(system_prompt or "")
+        context_chars = sum(safe_int(item.get("char_count"), default=0) for item in context_package["sections"])
+        rendered_messages = [
+            rendered_message(
+                role="system",
+                content=system_prompt_value,
+                include_text=include_prompt_text,
+                label="system_prompt",
+            ),
+            {
+                "role": "context",
+                "label": "memory_bank_context",
+                "section_count": len(context_package["sections"]),
+                "content_chars": context_chars,
+                "content_redacted": not include_context_text,
+                "content_source": "enabled_manual_memory_bank_items",
+                "sections": context_package["sections"],
+            },
+            rendered_message(
+                role="user",
+                content=prompt_value,
+                include_text=include_prompt_text,
+                label="draft_prompt",
+            ),
+        ]
+        return PromptRenderDryRunResult(
+            project_id=self.store.project_id,
+            mode="prompt_render_dry_run",
+            provider_api_boundary={
+                "provider_called": False,
+                "writes_project_files": False,
+                "final_prompt_for_provider": False,
+                "output_contains_prompt_text": include_prompt_text,
+                "output_contains_context_text": include_context_text,
+                "output_contains_chapter_text": False,
+                "output_contains_plaintext_secrets": False,
+            },
+            include_prompt_text=include_prompt_text,
+            include_context_text=include_context_text,
+            prompt_summary={
+                "prompt_chars": len(prompt_value),
+                "system_prompt_chars": len(system_prompt_value),
+                "context_section_count": len(context_package["sections"]),
+                "context_chars": context_chars,
+                "estimated_total_chars": len(prompt_value) + len(system_prompt_value) + context_chars,
+                "estimated_total_tokens": ceil(
+                    (len(prompt_value) + len(system_prompt_value) + context_chars) / DEFAULT_CHARS_PER_TOKEN
+                ),
+            },
+            context_package=context_package,
+            rendered_messages=rendered_messages,
+            warnings=context_package["warnings"]
+            + [
+                "dry_run_only_no_provider_call",
+                "dry_run_output_is_not_logged_by_service",
             ],
         )
 
@@ -260,6 +349,18 @@ def memory_bank_package_candidates(store: ProjectStore, *, include_text: bool) -
             public["text"] = text
         candidates.append(public)
     return candidates
+
+
+def rendered_message(*, role: str, content: str, include_text: bool, label: str) -> dict[str, Any]:
+    message = {
+        "role": role,
+        "label": label,
+        "content_chars": len(content),
+        "content_redacted": not include_text,
+    }
+    if include_text:
+        message["content"] = content
+    return message
 
 
 def item_text_char_count(item: dict[str, Any]) -> int:

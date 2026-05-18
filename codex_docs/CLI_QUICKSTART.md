@@ -379,6 +379,22 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This preview is not a Provider prompt and does not call a model. Disabled items are skipped with `memory_item_disabled`; empty or not-ready items are skipped with `manual_text_missing`; budget overflow is skipped with `token_budget_exceeded`.
 
+Preview the future prompt/message envelope without showing text:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test prompt-render-dry-run demo_project --prompt "Draft the next scene." --system-prompt "Use a restrained tone." --max-context-tokens 4096
+```
+
+Default output redacts the operator prompt, system prompt, and Memory Bank text. It reports message roles, character counts, token estimates, and selected context metadata only.
+
+For explicit local inspection:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test prompt-render-dry-run demo_project --prompt "Draft the next scene." --max-context-tokens 4096 --include-prompt-text --include-context-text
+```
+
+This is still a dry-run. It does not call a Provider, write prompt logs, create drafts, or update confirmed chapters/Memory Bank/RAG/export.
+
 Create manual formal context tasks:
 
 ```powershell

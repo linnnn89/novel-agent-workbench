@@ -868,6 +868,52 @@ final_prompt_rendering=not_implemented
 
 This method must not write artifacts, call Providers, read chapter content, write prompt logs, update world book, update RAG/export, create drafts, create confirmed chapters, or return plaintext secrets.
 
+### prompt_render_dry_run(project_id, prompt, system_prompt="", max_context_tokens=None, include_prompt_text=False, include_context_text=False)
+
+Builds a no-write redacted envelope for future Provider prompt rendering.
+
+Returns:
+
+```text
+project_id
+mode
+provider_api_boundary
+include_prompt_text
+include_context_text
+prompt_summary
+context_package
+rendered_messages
+warnings
+```
+
+Default behavior:
+
+```text
+include_prompt_text=false
+include_context_text=false
+```
+
+Default output must not include operator prompt text, system prompt text, or Memory Bank text. It may return character counts, selected/skipped context metadata, estimated tokens, and message roles.
+
+Explicit text flags:
+
+```text
+include_prompt_text=true
+include_context_text=true
+```
+
+These flags are for human local inspection only. The result is still not a Provider call and must not be persisted as a prompt log by this service.
+
+Provider boundary:
+
+```text
+provider_called=false
+writes_project_files=false
+final_prompt_for_provider=false
+```
+
+This method must not write artifacts, call Providers, create drafts, read confirmed chapter content, update world book, update RAG/export, create prompt logs, create confirmed chapters, or return plaintext secrets.
+
 ### enqueue_formal_context_tasks(project_id, plan_id)
 
 Creates metadata-only manual tasks from one formal context plan.

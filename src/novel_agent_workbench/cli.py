@@ -186,6 +186,14 @@ def build_parser() -> argparse.ArgumentParser:
     context_package.add_argument("--max-context-tokens", type=int, default=None)
     context_package.add_argument("--include-text", action="store_true")
 
+    prompt_render = subparsers.add_parser("prompt-render-dry-run")
+    prompt_render.add_argument("project_id")
+    prompt_render.add_argument("--prompt", required=True)
+    prompt_render.add_argument("--system-prompt", default="")
+    prompt_render.add_argument("--max-context-tokens", type=int, default=None)
+    prompt_render.add_argument("--include-prompt-text", action="store_true")
+    prompt_render.add_argument("--include-context-text", action="store_true")
+
     enqueue_formal_context_tasks = subparsers.add_parser("enqueue-formal-context-tasks")
     enqueue_formal_context_tasks.add_argument("project_id")
     enqueue_formal_context_tasks.add_argument("plan_id")
@@ -401,6 +409,15 @@ def run_command(args: argparse.Namespace) -> Any:
             args.project_id,
             max_context_tokens=args.max_context_tokens,
             include_text=args.include_text,
+        )
+    if command == "prompt-render-dry-run":
+        return app.prompt_render_dry_run(
+            args.project_id,
+            prompt=args.prompt,
+            system_prompt=args.system_prompt,
+            max_context_tokens=args.max_context_tokens,
+            include_prompt_text=args.include_prompt_text,
+            include_context_text=args.include_context_text,
         )
     if command == "enqueue-formal-context-tasks":
         return app.enqueue_formal_context_tasks(args.project_id, args.plan_id)

@@ -93,6 +93,7 @@ MVP-0 first storage slice is implemented:
 - MVP-10 Manual Memory Bank Text Fill/Edit that lets the operator explicitly fill placeholder text, creates a `pre_memory_text_update` checkpoint, rejects empty/oversized/secret-like text, and keeps default list/read/state output metadata-only.
 - MVP-10.5 Memory Bank Item Lifecycle Controls that allow explicit enable/disable with checkpointing and make Context Assembler dry-run skip disabled memory items.
 - MVP-11 Context Package Preview that assembles enabled manual Memory Bank text into a local preview, remains read-only, calls no Provider, and defaults to metadata-only output unless `include_text` is explicit.
+- MVP-11.5 Prompt Render Dry-Run that combines an operator prompt with the context package in a no-write envelope, defaulting to redacted prompt/context output unless explicit include flags are used.
 - Unit tests.
 
 Verification command:

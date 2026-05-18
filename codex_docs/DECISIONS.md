@@ -429,3 +429,11 @@ Decision: Add a read-only local context package preview built from enabled manua
 Reason: The project needs to verify the practical Memory Bank priority and token-budget behavior before any final Provider prompt rendering or real generation depends on it. The safest next step is an operator-visible preview that can show which manual memory notes would be selected or skipped.
 
 Impact: `ContextAssemblerService.package_preview(...)` returns selected Memory Bank sections, skipped items, estimated token usage, and Provider boundary metadata. Default output remains metadata-only and does not include Memory Bank text. Text is returned only when `include_text=true`, for explicit human review. CLI command `context-package-preview` exposes the flow. The method is read-only; it writes no artifact, calls no Provider, logs no prompt, does not read chapter content, and does not update world book, RAG, exports, drafts, or confirmed chapters.
+
+## 2026-05-18: MVP-11.5 Prompt Render Dry-Run
+
+Decision: Add a no-write prompt render dry-run envelope before final Provider prompt rendering.
+
+Reason: Before connecting context assembly to draft generation, the operator needs to see the shape of the future message payload and token estimates without leaking prompt/context text by default or calling a model.
+
+Impact: `ContextAssemblerService.prompt_render_dry_run(...)` combines an operator prompt, optional system prompt, and the context package preview into a redacted message envelope. Default output reports character counts, selected context metadata, and Provider boundary flags only. Prompt text and context text appear only with explicit include flags. CLI command `prompt-render-dry-run` exposes the flow. The method writes no files, calls no Provider, does not read chapter content, does not create prompt logs, and does not update world book, RAG, exports, drafts, or confirmed chapters.

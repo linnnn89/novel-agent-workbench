@@ -508,6 +508,110 @@ class ContextAssemblerTest(unittest.TestCase):
             self.assertNotIn(manual_text, default_stdout)
             self.assertEqual(json.loads(include_stdout)["result"]["sections"][0]["text"], manual_text)
 
+    def test_prompt_render_dry_run_redacts_prompt_and_context_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            store.update_secrets({"mock_key": "sk-prompt-render-secret"})
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: the north archive hides the regent ledger."
+            prompt = "Draft the next scene with a private prompt detail."
+            system_prompt = "Private system instruction."
+            app.set_memory_text("demo", memory_id, manual_text)
+            confirmed = app.read_confirmed_chapter("demo", "chapter_001")
+
+            result = app.prompt_render_dry_run(
+                "demo",
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_context_tokens=4096,
+            )
+            result_text = json.dumps(result, ensure_ascii=False)
+            memory_before = store.data_file_path("memory_bank.json").read_text(encoding="utf-8")
+
+            self.assertEqual(result["mode"], "prompt_render_dry_run")
+            self.assertFalse(result["include_prompt_text"])
+            self.assertFalse(result["include_context_text"])
+            self.assertFalse(result["provider_api_boundary"]["provider_called"])
+            self.assertFalse(result["provider_api_boundary"]["writes_project_files"])
+            self.assertEqual(result["prompt_summary"]["prompt_chars"], len(prompt))
+            self.assertTrue(all("content" not in message for message in result["rendered_messages"] if "content_redacted" in message))
+            self.assertNotIn(prompt, result_text)
+            self.assertNotIn(system_prompt, result_text)
+            self.assertNotIn(manual_text, result_text)
+            self.assertNotIn(str(confirmed["content"]), result_text)
+            self.assertNotIn("sk-prompt-render-secret", result_text)
+            self.assertEqual(memory_before, store.data_file_path("memory_bank.json").read_text(encoding="utf-8"))
+
+    def test_prompt_render_dry_run_text_inclusion_is_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: the oracle refuses all iron gifts."
+            prompt = "Draft the oracle confrontation."
+            system_prompt = "Use a restrained tone."
+            app.set_memory_text("demo", memory_id, manual_text)
+
+            result = app.prompt_render_dry_run(
+                "demo",
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_context_tokens=4096,
+                include_prompt_text=True,
+                include_context_text=True,
+            )
+            result_text = json.dumps(result, ensure_ascii=False)
+
+            self.assertTrue(result["include_prompt_text"])
+            self.assertTrue(result["include_context_text"])
+            self.assertIn(prompt, result_text)
+            self.assertIn(system_prompt, result_text)
+            self.assertIn(manual_text, result_text)
+
+    def test_prompt_render_dry_run_cli_is_redacted_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: the harbor bell marks a false surrender."
+            prompt = "Draft with a private CLI prompt."
+            app.set_memory_text("demo", memory_id, manual_text)
+
+            default_code, default_stdout, default_stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "prompt-render-dry-run",
+                    "demo",
+                    "--prompt",
+                    prompt,
+                    "--system-prompt",
+                    "Private CLI system prompt.",
+                    "--max-context-tokens",
+                    "4096",
+                ]
+            )
+            include_code, include_stdout, include_stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "prompt-render-dry-run",
+                    "demo",
+                    "--prompt",
+                    prompt,
+                    "--max-context-tokens",
+                    "4096",
+                    "--include-prompt-text",
+                    "--include-context-text",
+                ]
+            )
+
+            self.assertEqual(default_code, 0, default_stderr)
+            self.assertEqual(include_code, 0, include_stderr)
+            self.assertNotIn(prompt, default_stdout)
+            self.assertNotIn(manual_text, default_stdout)
+            self.assertIn(prompt, include_stdout)
+            self.assertIn(manual_text, include_stdout)
+
     def test_manual_memory_text_cli_is_metadata_only_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             app = configured_memory_bank_app(temp)
