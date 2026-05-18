@@ -816,6 +816,12 @@ output_contains_chapter_text=false
 
 Candidate items may include source type, ids, category id, priority, memory weight, estimated tokens, character count, and reason. They must not include prompt text, chapter text, Memory Bank text, raw Provider responses, request bodies, or plaintext secrets.
 
+Disabled Memory Bank items remain visible as metadata candidates but must be skipped with:
+
+```text
+skip_reason=memory_item_disabled
+```
+
 This method is read-only. It must not write artifacts, mutate Memory Bank, update RAG/export, create drafts, create confirmed chapters, or call Providers.
 
 ### enqueue_formal_context_tasks(project_id, plan_id)
@@ -1002,6 +1008,9 @@ priority
 target
 memory_weight
 duplicate_risk
+enabled
+lifecycle_status
+lifecycle_reason_code
 text_status
 text_chars
 created_at
@@ -1056,6 +1065,43 @@ safety.provider_called=false
 ```
 
 This method must not call Providers, auto-extract from chapters, update world book, update RAG/export, create drafts, create confirmed chapters, or auto-assemble Provider prompts.
+
+### set_memory_item_enabled(project_id, memory_id, enabled, reason_code="")
+
+Explicitly changes the lifecycle switch for one Memory Bank item.
+
+Creates a pre-write checkpoint:
+
+```text
+label=pre_memory_lifecycle_update
+```
+
+Validation:
+
+```text
+reason_code is optional
+reason_code must use ASCII letters, numbers, "_" or "-"
+reason_code length <= 80 characters
+```
+
+Returns metadata only:
+
+```text
+memory_id
+enabled
+lifecycle_status
+reason_code
+checkpoint
+updated_at
+```
+
+When `enabled=false`, future Context Assembler dry-runs must keep the item on disk but skip it with:
+
+```text
+skip_reason=memory_item_disabled
+```
+
+This method must not delete files, alter Memory Bank text, call Providers, update world book, update RAG/export, create drafts, create confirmed chapters, or auto-assemble Provider prompts.
 
 ### list_confirmed_chapters(project_id)
 

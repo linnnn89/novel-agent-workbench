@@ -413,3 +413,11 @@ Decision: Add an explicit manual text fill/edit workflow for placeholder Memory 
 Reason: The project now has a safe metadata path from confirmed chapters to manual context tasks and placeholder Memory Bank entries. The next safest step is human-authored Memory Bank text, not automatic extraction. This keeps the difficult context-priority problem visible while avoiding silent prompt/content copying.
 
 Impact: `MemoryBankService.set_memory_text(...)` creates a `pre_memory_text_update` checkpoint, validates nonempty text, rejects text longer than 1200 characters, rejects obvious secret-like values, and writes the text only into the selected `memory_bank.json` item with `status=ready` and `text_status=manual`. Default list/read/project-state surfaces remain metadata-only; the actual Memory Bank text is returned only by an explicit `include_text=true` read. CLI commands `list-memory-items`, `read-memory-item`, and `set-memory-text` expose the flow. The operation does not call Providers, extract chapter text, write world book, update RAG/export, mutate drafts/confirmed chapters, or auto-assemble Provider prompts.
+
+## 2026-05-18: MVP-10.5 Memory Bank Item Lifecycle Controls
+
+Decision: Add explicit enable/disable controls for individual Memory Bank items.
+
+Reason: Manual Memory Bank text can still become stale, duplicated, or temporarily unsafe for context assembly. The system needs a reversible metadata switch before any real prompt rendering exists.
+
+Impact: `MemoryBankService.set_memory_item_enabled(...)` creates a `pre_memory_lifecycle_update` checkpoint and writes `enabled`, `lifecycle_status`, and `lifecycle_reason_code` metadata on the selected item. CLI commands `disable-memory-item` and `enable-memory-item` expose the operation. Disabled items are not deleted and their text is not returned by default outputs. `ContextAssemblerService.dry_run(...)` now reports disabled Memory Bank candidates as skipped with `skip_reason=memory_item_disabled`. The operation does not call Providers, alter Memory Bank text, write world book, update RAG/export, mutate drafts/confirmed chapters, or auto-render prompt context.

@@ -265,6 +265,20 @@ class WorkbenchApplicationService:
     def set_memory_text(self, project_id: str, memory_id: str, text: str) -> dict[str, Any]:
         return MemoryBankService(self._open_store(project_id)).set_memory_text(memory_id, text).to_dict()
 
+    def set_memory_item_enabled(
+        self,
+        project_id: str,
+        memory_id: str,
+        *,
+        enabled: bool,
+        reason_code: str = "",
+    ) -> dict[str, Any]:
+        return MemoryBankService(self._open_store(project_id)).set_memory_item_enabled(
+            memory_id,
+            enabled=enabled,
+            reason_code=reason_code,
+        ).to_dict()
+
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()
 

@@ -162,6 +162,15 @@ Manual Memory Bank text tests currently cover:
 - audit passing after safe manual Memory Bank text,
 - CLI/facade output excluding prompt text, confirmed chapter text, manual text by default, and plaintext secrets.
 
+Memory Bank lifecycle tests currently cover:
+
+- explicit disable/enable operations,
+- `pre_memory_lifecycle_update` checkpoint creation,
+- lifecycle metadata in item reads and public state,
+- disabled Memory Bank items being skipped by Context Assembler dry-run,
+- unsafe lifecycle reason code rejection,
+- CLI output excluding Memory Bank text and plaintext secrets.
+
 Checkpoint tests currently cover:
 
 - manifest creation,

@@ -25,7 +25,7 @@ from .memory_apply_preview import (
     MemoryApplyPreviewResult,
     MemoryApplyPreviewService,
 )
-from .memory_bank import MemoryBankError, MemoryBankService, MemoryBankUpdateResult
+from .memory_bank import MemoryBankError, MemoryBankLifecycleResult, MemoryBankService, MemoryBankUpdateResult
 from .providers import (
     CHUTES_PROVIDER_ID,
     ModelRoleConfig,
@@ -121,6 +121,7 @@ __all__ = [
     "MemoryApplyCommitResult",
     "MemoryApplyPreviewService",
     "MemoryBankError",
+    "MemoryBankLifecycleResult",
     "MemoryBankService",
     "MemoryBankUpdateResult",
     "ReviewDecisionResult",

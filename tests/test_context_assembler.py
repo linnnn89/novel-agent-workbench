@@ -349,6 +349,83 @@ class ContextAssemblerTest(unittest.TestCase):
             after = sorted(checkpoint_dir.glob("*.zip"))
             self.assertEqual(before, after)
 
+    def test_memory_item_disable_excludes_item_from_context_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: sky iron is banned inside the city."
+            app.set_memory_text("demo", memory_id, manual_text)
+
+            disabled = app.set_memory_item_enabled("demo", memory_id, enabled=False, reason_code="duplicate_world_book")
+            read_default = app.read_memory_item("demo", memory_id)
+            state = app.project_state("demo")
+            dry_run = app.context_assembly_dry_run("demo", max_context_tokens=4096)
+            skipped = [
+                item
+                for item in dry_run["skipped"]
+                if item.get("source_type") == "memory_bank" and item.get("source_id") == memory_id
+            ]
+            selected = [
+                item
+                for item in dry_run["selected"]
+                if item.get("source_type") == "memory_bank" and item.get("source_id") == memory_id
+            ]
+            result_text = json.dumps({"disabled": disabled, "read": read_default, "state": state, "dry_run": dry_run})
+
+            self.assertFalse(disabled["enabled"])
+            self.assertEqual(disabled["lifecycle_status"], "disabled")
+            self.assertTrue(Path(disabled["checkpoint"]["path"]).exists())
+            self.assertFalse(read_default["enabled"])
+            self.assertEqual(state["latest_memory_bank_item"]["lifecycle_status"], "disabled")
+            self.assertEqual(skipped[0]["skip_reason"], "memory_item_disabled")
+            self.assertEqual(selected, [])
+            self.assertNotIn(manual_text, result_text)
+
+    def test_memory_item_enable_disable_cli_is_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: the canal gate opens only at dawn."
+            app.set_memory_text("demo", memory_id, manual_text)
+
+            disable_code, disable_stdout, disable_stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "disable-memory-item",
+                    "demo",
+                    memory_id,
+                    "--reason-code",
+                    "manual_suppress",
+                ]
+            )
+            enable_code, enable_stdout, enable_stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "enable-memory-item",
+                    "demo",
+                    memory_id,
+                    "--reason-code",
+                    "manual_restore",
+                ]
+            )
+            combined = disable_stdout + enable_stdout
+
+            self.assertEqual(disable_code, 0, disable_stderr)
+            self.assertEqual(enable_code, 0, enable_stderr)
+            self.assertFalse(json.loads(disable_stdout)["result"]["enabled"])
+            self.assertTrue(json.loads(enable_stdout)["result"]["enabled"])
+            self.assertNotIn(manual_text, combined)
+
+    def test_memory_item_lifecycle_rejects_unsafe_reason_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+
+            with self.assertRaises(MemoryBankError):
+                app.set_memory_item_enabled("demo", memory_id, enabled=False, reason_code="bad reason")
+
     def test_manual_memory_text_cli_is_metadata_only_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             app = configured_memory_bank_app(temp)

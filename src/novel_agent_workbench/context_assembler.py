@@ -44,6 +44,9 @@ class ContextAssemblerService:
         skipped: list[dict[str, Any]] = []
         used_tokens = 0
         for candidate in sorted(candidates, key=candidate_sort_key):
+            if candidate.get("enabled") is False:
+                skipped.append({**candidate, "selection_status": "skipped", "skip_reason": "memory_item_disabled"})
+                continue
             estimated_tokens = safe_int(candidate.get("estimated_tokens"), default=0)
             if estimated_tokens <= 0:
                 skipped.append({**candidate, "selection_status": "skipped", "skip_reason": "empty_or_metadata_only"})
@@ -112,6 +115,7 @@ def formal_context_plan_candidates(store: ProjectStore) -> list[dict[str, Any]]:
                     "char_count": char_count,
                     "reason": str(category.get("recommendation") or "manual_extract_required"),
                     "contains_text": False,
+                    "enabled": True,
                 }
             )
     return candidates
@@ -128,6 +132,7 @@ def memory_bank_candidates(store: ProjectStore) -> list[dict[str, Any]]:
         category_id = str(item.get("category_id") or item.get("category") or "")
         char_count = item_text_char_count(item)
         memory_weight = safe_float(item.get("memory_weight"), default=1.0)
+        enabled = item.get("enabled") if isinstance(item.get("enabled"), bool) else True
         candidates.append(
             {
                 "source_type": "memory_bank",
@@ -139,8 +144,10 @@ def memory_bank_candidates(store: ProjectStore) -> list[dict[str, Any]]:
                 "memory_weight": memory_weight,
                 "estimated_tokens": ceil((char_count * memory_weight) / DEFAULT_CHARS_PER_TOKEN),
                 "char_count": char_count,
-                "reason": "existing_memory_bank_item",
+                "reason": "existing_memory_bank_item" if enabled else "memory_item_disabled",
                 "contains_text": False,
+                "enabled": enabled,
+                "lifecycle_status": item.get("lifecycle_status") or ("active" if enabled else "disabled"),
             }
         )
     return candidates

@@ -91,6 +91,7 @@ MVP-0 first storage slice is implemented:
 - MVP-9 Memory Apply Preview that shows future Memory Bank candidate writes as metadata only, without changing `memory_bank.json`.
 - MVP-9.5 Memory Bank Apply Commit Gate that explicitly commits preview metadata into placeholder Memory Bank entries with a pre-write checkpoint.
 - MVP-10 Manual Memory Bank Text Fill/Edit that lets the operator explicitly fill placeholder text, creates a `pre_memory_text_update` checkpoint, rejects empty/oversized/secret-like text, and keeps default list/read/state output metadata-only.
+- MVP-10.5 Memory Bank Item Lifecycle Controls that allow explicit enable/disable with checkpointing and make Context Assembler dry-run skip disabled memory items.
 - Unit tests.
 
 Verification command:

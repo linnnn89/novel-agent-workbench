@@ -409,6 +409,15 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Manual Memory Bank text writes create a `pre_memory_text_update` checkpoint, reject empty text, reject text longer than 1200 characters, and reject obvious secret-like values. They do not call Providers, update world book, update RAG/export, mutate drafts/confirmed chapters, or auto-assemble Provider prompts.
 
+Disable or re-enable one Memory Bank item:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test disable-memory-item demo_project <memory_id> --reason-code duplicate_world_book
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test enable-memory-item demo_project <memory_id> --reason-code manual_restore
+```
+
+These commands create a `pre_memory_lifecycle_update` checkpoint and return metadata only. Disabled items stay in `memory_bank.json`; they are not deleted and their text is not printed. `context-assembly-dry-run` skips disabled Memory Bank items with `skip_reason=memory_item_disabled`.
+
 Read a confirmed chapter:
 
 ```powershell

@@ -225,6 +225,16 @@ def build_parser() -> argparse.ArgumentParser:
     text_group.add_argument("--text")
     text_group.add_argument("--text-stdin", action="store_true")
 
+    disable_memory_item = subparsers.add_parser("disable-memory-item")
+    disable_memory_item.add_argument("project_id")
+    disable_memory_item.add_argument("memory_id")
+    disable_memory_item.add_argument("--reason-code", default="")
+
+    enable_memory_item = subparsers.add_parser("enable-memory-item")
+    enable_memory_item.add_argument("project_id")
+    enable_memory_item.add_argument("memory_id")
+    enable_memory_item.add_argument("--reason-code", default="")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -407,6 +417,20 @@ def run_command(args: argparse.Namespace) -> Any:
     if command == "set-memory-text":
         text = sys.stdin.read().strip() if args.text_stdin else args.text
         return app.set_memory_text(args.project_id, args.memory_id, text)
+    if command == "disable-memory-item":
+        return app.set_memory_item_enabled(
+            args.project_id,
+            args.memory_id,
+            enabled=False,
+            reason_code=args.reason_code,
+        )
+    if command == "enable-memory-item":
+        return app.set_memory_item_enabled(
+            args.project_id,
+            args.memory_id,
+            enabled=True,
+            reason_code=args.reason_code,
+        )
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

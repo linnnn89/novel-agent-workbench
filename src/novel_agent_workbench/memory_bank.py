@@ -30,6 +30,19 @@ class MemoryBankUpdateResult:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class MemoryBankLifecycleResult:
+    memory_id: str
+    enabled: bool
+    lifecycle_status: str
+    reason_code: str
+    checkpoint: dict[str, Any]
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class MemoryBankService:
     """Manual Memory Bank text fill/edit workflow."""
 
@@ -86,6 +99,47 @@ class MemoryBankService:
                 updated_at=updated_at,
             )
 
+    def set_memory_item_enabled(
+        self,
+        memory_id: str,
+        *,
+        enabled: bool,
+        reason_code: str = "",
+    ) -> MemoryBankLifecycleResult:
+        safe_reason_code = validate_memory_reason_code(reason_code)
+        self.store.initialize()
+        with self.store.lock():
+            memory_bank = self._read_memory_bank()
+            if not any(str(item.get("memory_id") or item.get("id") or "") == memory_id for item in memory_bank["items"]):
+                raise MemoryBankError(f"Memory item not found: {memory_id}")
+            checkpoint = self.store.create_checkpoint(label="pre_memory_lifecycle_update")
+            updated_items: list[dict[str, Any]] = []
+            result_item: dict[str, Any] | None = None
+            updated_at = utc_stamp()
+            for item in memory_bank["items"]:
+                item_id = str(item.get("memory_id") or item.get("id") or "")
+                if item_id == memory_id:
+                    item = {
+                        **item,
+                        "enabled": enabled,
+                        "lifecycle_status": "active" if enabled else "disabled",
+                        "lifecycle_reason_code": safe_reason_code,
+                        "updated_at": updated_at,
+                    }
+                    result_item = item
+                updated_items.append(item)
+            memory_bank["items"] = updated_items
+            memory_bank["updated_at"] = updated_at
+            self.store.write_json(self.store.data_file_path("memory_bank.json"), memory_bank)
+            return MemoryBankLifecycleResult(
+                memory_id=memory_id,
+                enabled=bool(result_item.get("enabled")),
+                lifecycle_status=str(result_item.get("lifecycle_status") or ""),
+                reason_code=str(result_item.get("lifecycle_reason_code") or ""),
+                checkpoint=checkpoint,
+                updated_at=updated_at,
+            )
+
     def _read_memory_bank(self) -> dict[str, Any]:
         value = self.store.read_json(
             self.store.data_file_path("memory_bank.json"),
@@ -119,6 +173,9 @@ def public_memory_item(item: dict[str, Any], *, include_text: bool) -> dict[str,
         "target": item.get("target"),
         "memory_weight": item.get("memory_weight"),
         "duplicate_risk": item.get("duplicate_risk"),
+        "enabled": item.get("enabled") if isinstance(item.get("enabled"), bool) else True,
+        "lifecycle_status": item.get("lifecycle_status") or "active",
+        "lifecycle_reason_code": item.get("lifecycle_reason_code") or "",
         "text_status": item.get("text_status"),
         "text_chars": len(text),
         "created_at": item.get("created_at"),
@@ -138,3 +195,14 @@ def validate_manual_memory_text(text: str) -> None:
     for pattern in SECRET_LIKE_PATTERNS:
         if pattern.search(value):
             raise MemoryBankError("Memory text appears to contain a secret-like value.")
+
+
+def validate_memory_reason_code(reason_code: str) -> str:
+    value = str(reason_code or "").strip()
+    if not value:
+        return ""
+    if len(value) > 80:
+        raise MemoryBankError("reason_code is too long.")
+    if not all(character.isascii() and (character.isalnum() or character in {"_", "-"}) for character in value):
+        raise MemoryBankError("reason_code must use ASCII letters, numbers, '_' or '-'.")
+    return value

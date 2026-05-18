@@ -39,6 +39,7 @@ Current safety hardening:
 - memory apply previews are metadata-only and do not write `memory_bank.json`.
 - memory apply commit gate writes only placeholder Memory Bank entries with empty text and `manual_text_required` status.
 - manual Memory Bank text fill/edit is explicit, checkpointed, bounded to 1200 characters, rejects secret-like values, and does not call Providers or auto-update RAG/export.
+- Memory Bank item lifecycle controls can explicitly disable/enable one item; disabled items remain on disk but are skipped by Context Assembler dry-run.
 - audit checks confirmed chapter consistency and revision request/generated draft consistency.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

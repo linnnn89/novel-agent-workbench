@@ -332,6 +332,14 @@ set-memory-text + pre_memory_text_update checkpoint + explicit include-text read
 
 This is the first allowed Memory Bank text write path. Text must be manually supplied, bounded, secret-scanned, checkpointed, and returned only through an explicit read flag. It must not auto-extract from chapters, call Providers, write world book, update RAG/export, mutate drafts/confirmed chapters, or auto-assemble prompt context.
 
+MVP-10.5 Memory Bank item lifecycle slice:
+
+```text
+disable-memory-item / enable-memory-item + pre_memory_lifecycle_update checkpoint.
+```
+
+Memory Bank items may be disabled without deleting or rewriting their text. Disabled items remain recoverable on disk and must be skipped by Context Assembler dry-run. This is metadata-only lifecycle control; it must not call Providers, update world book, update RAG/export, mutate drafts/confirmed chapters, or render final prompts.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:
