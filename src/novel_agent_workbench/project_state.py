@@ -6,6 +6,7 @@ from .chapters import ChapterWorkflowService
 from .context_previews import ContextUpdatePreviewService
 from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationService
+from .formal_context import FormalContextPlanService
 from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
 from .reviews import DraftReviewService
 from .revisions import RevisionRequestService
@@ -23,6 +24,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     chapter_service = ChapterWorkflowService(store)
     context_queue_service = ContextUpdateQueueService(store)
     context_preview_service = ContextUpdatePreviewService(store)
+    formal_context_plan_service = FormalContextPlanService(store)
     drafts = draft_service.list_drafts()
     reviews = review_service.list_reviews()
     revision_requests = revision_request_service.list_revision_requests()
@@ -30,6 +32,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     chapters = chapter_service.list_chapters()
     context_updates = context_queue_service.list_context_updates()
     context_previews = context_preview_service.list_context_previews()
+    formal_context_plans = formal_context_plan_service.list_formal_context_plans()
     store_state = store.public_state()
     config = store_state.get("config") if isinstance(store_state.get("config"), dict) else {}
     return {
@@ -45,6 +48,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "revision_request_count": len(revision_requests),
         "context_update_count": len(context_updates),
         "context_preview_count": len(context_previews),
+        "formal_context_plan_count": len(formal_context_plans),
         "chapter_count": len(chapters),
         "committed_chapter_count": len(confirmed),
         "latest_chapter": safe_chapter_summary(latest_by(chapters, "updated_at")),
@@ -53,6 +57,9 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "latest_revision_request": safe_revision_request_summary(latest_by(revision_requests, "created_at")),
         "latest_context_update": safe_context_update_summary(latest_by(context_updates, "updated_at")),
         "latest_context_preview": safe_context_preview_summary(latest_by(context_previews, "created_at")),
+        "latest_formal_context_plan": safe_formal_context_plan_summary(
+            latest_by(formal_context_plans, "created_at")
+        ),
         "latest_committed_chapter": safe_confirmed_summary(latest_by(confirmed, "committed_at")),
         "provider_roles": provider_roles_summary(store),
     }
@@ -178,6 +185,24 @@ def safe_context_preview_summary(item: dict[str, Any] | None) -> dict[str, Any] 
         "status": item.get("status"),
         "created_at": item.get("created_at"),
         "recommendation": item.get("recommendation"),
+    }
+
+
+def safe_formal_context_plan_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "plan_id": item.get("plan_id"),
+        "preview_id": item.get("preview_id"),
+        "update_id": item.get("update_id"),
+        "chapter_id": item.get("chapter_id"),
+        "title": item.get("title"),
+        "source_draft_id": item.get("source_draft_id"),
+        "confirmed_chapter_id": item.get("confirmed_chapter_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "recommendation": item.get("recommendation"),
+        "priority_order": item.get("priority_order") if isinstance(item.get("priority_order"), list) else [],
     }
 
 

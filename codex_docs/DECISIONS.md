@@ -357,3 +357,11 @@ This reflects the user-provided order:
 Reason: The system needs a stable policy before any Memory Bank/RAG update logic exists. Prioritizing world building and relationships first fits long-form novel continuity better than extracting every possible detail equally.
 
 Impact: `config.py` now includes `formal_context_policy` under `context_policy`, with `mode=manual_preview_first`, category metadata, and `auto_extract=false` for every category. Context preview artifacts include a policy priority snapshot in `target_plan.formal_context.priority_order`. No automatic extraction, Provider call, Memory Bank mutation, RAG mutation, export update, or UI work was added.
+
+## 2026-05-18: MVP-7.5 Formal Context Extraction Plan
+
+Decision: Add a metadata-only formal context extraction plan artifact after context preview.
+
+Reason: The project now has a confirmed-chapter queue, a preview artifact, and a user-approved priority order. Before any Memory Bank or RAG writes exist, the system needs a durable plan that future UI/operator steps can inspect category by category.
+
+Impact: `FormalContextPlanService` creates `data/formal_context_plans/*.json` plus `data/formal_context_plans_index.json` from a context preview. Plans include ids, source metadata, text statistics, priority order, category work items, safety flags, and `manual_extraction_required`. They do not store chapter text, prompt text, raw Provider responses, or plaintext secrets, and they do not mutate Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers. CLI commands `create-formal-context-plan`, `list-formal-context-plans`, and `read-formal-context-plan` expose the operation.

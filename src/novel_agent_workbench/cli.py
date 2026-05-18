@@ -166,6 +166,17 @@ def build_parser() -> argparse.ArgumentParser:
     read_context_preview.add_argument("project_id")
     read_context_preview.add_argument("preview_id")
 
+    create_formal_context_plan = subparsers.add_parser("create-formal-context-plan")
+    create_formal_context_plan.add_argument("project_id")
+    create_formal_context_plan.add_argument("preview_id")
+
+    list_formal_context_plans = subparsers.add_parser("list-formal-context-plans")
+    list_formal_context_plans.add_argument("project_id")
+
+    read_formal_context_plan = subparsers.add_parser("read-formal-context-plan")
+    read_formal_context_plan.add_argument("project_id")
+    read_formal_context_plan.add_argument("plan_id")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -314,6 +325,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_context_previews(args.project_id)
     if command == "read-context-preview":
         return app.read_context_preview(args.project_id, args.preview_id)
+    if command == "create-formal-context-plan":
+        return app.create_formal_context_plan(args.project_id, args.preview_id)
+    if command == "list-formal-context-plans":
+        return app.list_formal_context_plans(args.project_id)
+    if command == "read-formal-context-plan":
+        return app.read_formal_context_plan(args.project_id, args.plan_id)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

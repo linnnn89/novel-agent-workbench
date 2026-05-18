@@ -9,6 +9,7 @@ from .context_previews import ContextUpdatePreviewService
 from .chapters import ChapterWorkflowService
 from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationRequest, DraftGenerationService
+from .formal_context import FormalContextPlanService
 from .project_state import public_project_state
 from .providers import (
     ProviderRequest,
@@ -207,6 +208,15 @@ class WorkbenchApplicationService:
 
     def read_context_preview(self, project_id: str, preview_id: str) -> dict[str, Any]:
         return ContextUpdatePreviewService(self._open_store(project_id)).read_context_preview(preview_id)
+
+    def create_formal_context_plan(self, project_id: str, preview_id: str) -> dict[str, Any]:
+        return FormalContextPlanService(self._open_store(project_id)).create_formal_context_plan(preview_id).to_dict()
+
+    def list_formal_context_plans(self, project_id: str) -> list[dict[str, Any]]:
+        return FormalContextPlanService(self._open_store(project_id)).list_formal_context_plans()
+
+    def read_formal_context_plan(self, project_id: str, plan_id: str) -> dict[str, Any]:
+        return FormalContextPlanService(self._open_store(project_id)).read_formal_context_plan(plan_id)
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()

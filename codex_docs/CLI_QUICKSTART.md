@@ -320,6 +320,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Preview artifacts are plans only. They include text statistics and target placeholders, but they do not copy chapter text or update Memory Bank/RAG/export.
 
+Create and inspect a formal context extraction plan:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-formal-context-plan demo_project <preview_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-formal-context-plans demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-formal-context-plan demo_project <plan_id>
+```
+
+Formal context plans split future manual work by category and priority. They still do not extract chapter text, call Providers, or update Memory Bank/RAG/export.
+
 Current formal context priority:
 
 ```text

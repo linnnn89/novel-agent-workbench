@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from novel_agent_workbench import (
     ContextUpdatePreviewError,
     ContextUpdateQueueError,
+    FormalContextPlanError,
     WorkbenchApplicationService,
     audit_project,
 )
@@ -227,6 +228,98 @@ class ContextUpdateQueueTest(unittest.TestCase):
             self.assertEqual(json.loads(list_stdout)["result"][0]["preview_id"], preview_id)
             self.assertEqual(json.loads(read_stdout)["result"]["status"], "preview_ready")
             self.assertNotIn("private cli context preview prompt", combined)
+            self.assertNotIn("MOCK writer", combined)
+
+    def test_formal_context_plan_artifact_is_metadata_only_and_has_no_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_committed_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            store.update_secrets({"mock_key": "sk-formal-context-secret"})
+            memory_before = store.data_file_path("memory_bank.json").read_text(encoding="utf-8")
+            export_before = store.data_file_path("export_settings.json").read_text(encoding="utf-8")
+            confirmed = app.read_confirmed_chapter("demo", "chapter_001")
+            update = app.enqueue_context_updates("demo")["items"][0]
+            preview = app.create_context_preview("demo", update["update_id"])
+
+            result = app.create_formal_context_plan("demo", preview["preview_id"])
+            plans = app.list_formal_context_plans("demo")
+            plan = app.read_formal_context_plan("demo", result["plan_id"])
+            state = app.project_state("demo")
+            audit = audit_project(store)
+            safe_text = json.dumps(
+                {"result": result, "plans": plans, "plan": plan, "state": state, "audit": audit},
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(result["status"], "plan_ready")
+            self.assertEqual(plan["preview_id"], preview["preview_id"])
+            self.assertEqual(plan["priority_order"], FORMAL_CONTEXT_PRIORITY_ORDER)
+            self.assertEqual([item["category_id"] for item in plan["categories"]], FORMAL_CONTEXT_PRIORITY_ORDER)
+            self.assertTrue(all(item["auto_extract"] is False for item in plan["categories"]))
+            self.assertFalse(plan["safety"]["text_copied"])
+            self.assertFalse(plan["safety"]["memory_bank_written"])
+            self.assertEqual(state["formal_context_plan_count"], 1)
+            self.assertEqual(state["latest_formal_context_plan"]["priority_order"], FORMAL_CONTEXT_PRIORITY_ORDER)
+            self.assertTrue(audit["ok"], json.dumps(audit, ensure_ascii=False))
+            self.assertNotIn("private context queue prompt", safe_text)
+            self.assertNotIn(str(confirmed["content"]), safe_text)
+            self.assertNotIn("sk-formal-context-secret", safe_text)
+            self.assertEqual(memory_before, store.data_file_path("memory_bank.json").read_text(encoding="utf-8"))
+            self.assertEqual(export_before, store.data_file_path("export_settings.json").read_text(encoding="utf-8"))
+            self.assertFalse((store.root / "rag").exists())
+            self.assertFalse((store.root / "exports").exists())
+
+    def test_formal_context_plan_rejects_duplicate_and_missing_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_committed_app(temp)
+            update = app.enqueue_context_updates("demo")["items"][0]
+            preview = app.create_context_preview("demo", update["update_id"])
+            app.create_formal_context_plan("demo", preview["preview_id"])
+
+            with self.assertRaises(FormalContextPlanError):
+                app.create_formal_context_plan("demo", preview["preview_id"])
+            with self.assertRaises(ContextUpdatePreviewError):
+                app.create_formal_context_plan("demo", "missing_preview")
+
+    def test_formal_context_plan_cli_is_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            run_cli(["--projects-root", temp, "configure-mock-writer", "demo"])
+            _, draft_stdout, _ = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "generate-draft",
+                    "demo",
+                    "--chapter-id",
+                    "chapter_001",
+                    "--prompt",
+                    "private cli formal context prompt",
+                ]
+            )
+            draft_id = json.loads(draft_stdout)["result"]["draft_id"]
+            run_cli(["--projects-root", temp, "commit-draft", "demo", draft_id])
+            _, enqueue_stdout, _ = run_cli(["--projects-root", temp, "enqueue-context-updates", "demo"])
+            update_id = json.loads(enqueue_stdout)["result"]["items"][0]["update_id"]
+            _, preview_stdout, _ = run_cli(["--projects-root", temp, "create-context-preview", "demo", update_id])
+            preview_id = json.loads(preview_stdout)["result"]["preview_id"]
+
+            create_code, create_stdout, create_stderr = run_cli(
+                ["--projects-root", temp, "create-formal-context-plan", "demo", preview_id]
+            )
+            plan_id = json.loads(create_stdout)["result"]["plan_id"]
+            list_code, list_stdout, list_stderr = run_cli(["--projects-root", temp, "list-formal-context-plans", "demo"])
+            read_code, read_stdout, read_stderr = run_cli(
+                ["--projects-root", temp, "read-formal-context-plan", "demo", plan_id]
+            )
+            combined = create_stdout + list_stdout + read_stdout
+
+            self.assertEqual(create_code, 0, create_stderr)
+            self.assertEqual(list_code, 0, list_stderr)
+            self.assertEqual(read_code, 0, read_stderr)
+            self.assertEqual(json.loads(list_stdout)["result"][0]["plan_id"], plan_id)
+            self.assertEqual(json.loads(read_stdout)["result"]["priority_order"], FORMAL_CONTEXT_PRIORITY_ORDER)
+            self.assertNotIn("private cli formal context prompt", combined)
             self.assertNotIn("MOCK writer", combined)
 
 

@@ -70,6 +70,7 @@ review_count
 revision_request_count
 context_update_count
 context_preview_count
+formal_context_plan_count
 chapter_count
 committed_chapter_count
 latest_chapter
@@ -78,6 +79,7 @@ latest_review
 latest_revision_request
 latest_context_update
 latest_context_preview
+latest_formal_context_plan
 latest_committed_chapter
 provider_roles
 ```
@@ -700,6 +702,65 @@ Metadata-only. Must not return chapter text, prompt text, or plaintext secrets.
 Returns one context preview artifact.
 
 May return target placeholders, text statistics, safety flags, and recommendation. Must not return chapter text, prompt text, raw Provider responses, request bodies, or plaintext secrets.
+
+### create_formal_context_plan(project_id, preview_id)
+
+Creates a metadata-only formal context extraction plan from one context preview.
+
+Writes:
+
+```text
+data/formal_context_plans/*.json
+data/formal_context_plans_index.json
+```
+
+Returns:
+
+```text
+plan_id
+preview_id
+chapter_id
+status
+path
+created_at
+```
+
+The plan artifact may include:
+
+```text
+plan_id
+preview_id
+update_id
+chapter_id
+title
+source_draft_id
+confirmed_chapter_id
+status
+created_at
+priority_order
+categories
+text_stats
+safety
+recommendation
+```
+
+`categories` follow the project `formal_context_policy` priority order and are marked `auto_extract=false`.
+
+Must reject duplicate plans for the same preview.
+
+Must not return or store chapter text, prompt text, raw Provider responses, request bodies, or plaintext secrets. Must not update Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.
+
+### list_formal_context_plans(project_id)
+
+Returns formal context plan index metadata.
+
+Metadata-only. Must not return chapter text, prompt text, or plaintext secrets.
+
+### read_formal_context_plan(project_id, plan_id)
+
+Returns one formal context plan artifact.
+
+May return category work items, priority order, text statistics, safety flags, and recommendation. Must not return chapter text, prompt text, raw Provider responses, request bodies, or plaintext secrets.
 
 ### list_confirmed_chapters(project_id)
 

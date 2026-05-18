@@ -100,6 +100,16 @@ Context update preview tests currently cover:
 - audit/public/CLI outputs excluding prompt text, confirmed chapter text, and plaintext secrets,
 - CLI commands `create-context-preview`, `list-context-previews`, and `read-context-preview`.
 
+Formal context plan tests currently cover:
+
+- creating `data/formal_context_plans/*.json` and `data/formal_context_plans_index.json`,
+- category order following `formal_context_policy`,
+- duplicate and missing preview rejection,
+- public state `formal_context_plan_count` reporting,
+- no automatic Memory Bank, RAG, export, draft, confirmed chapter, or Provider side effects,
+- audit/public/CLI outputs excluding prompt text, confirmed chapter text, and plaintext secrets,
+- CLI commands `create-formal-context-plan`, `list-formal-context-plans`, and `read-formal-context-plan`.
+
 Checkpoint tests currently cover:
 
 - manifest creation,

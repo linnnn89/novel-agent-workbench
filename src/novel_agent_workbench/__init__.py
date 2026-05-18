@@ -12,6 +12,7 @@ from .drafts import (
     DraftGenerationResult,
     DraftGenerationService,
 )
+from .formal_context import FormalContextPlanError, FormalContextPlanResult, FormalContextPlanService
 from .providers import (
     CHUTES_PROVIDER_ID,
     ModelRoleConfig,
@@ -94,6 +95,9 @@ __all__ = [
     "DraftReviewError",
     "DraftReviewResult",
     "DraftReviewService",
+    "FormalContextPlanError",
+    "FormalContextPlanResult",
+    "FormalContextPlanService",
     "ReviewDecisionResult",
     "RevisionCandidateComparison",
     "RevisionCandidateError",

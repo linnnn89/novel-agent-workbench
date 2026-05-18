@@ -264,6 +264,14 @@ formal_context_policy priority schema: world_building > character_relationships 
 
 This is a policy schema only. It must guide future context previews and extraction planning, but it must not perform extraction, call Providers, or mutate Memory Bank/RAG/export automatically.
 
+MVP-7.5 formal context plan slice:
+
+```text
+create-formal-context-plan + formal_context_plans/*.json + category-level manual extraction plan.
+```
+
+Plans are metadata-only artifacts generated from context previews. They may record category ids, priority order, text statistics, and safety flags. They must not copy chapter text, prompt text, raw Provider responses, or plaintext secrets. They must not mutate Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:
