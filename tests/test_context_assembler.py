@@ -426,6 +426,88 @@ class ContextAssemblerTest(unittest.TestCase):
             with self.assertRaises(MemoryBankError):
                 app.set_memory_item_enabled("demo", memory_id, enabled=False, reason_code="bad reason")
 
+    def test_context_package_preview_defaults_to_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            store.update_secrets({"mock_key": "sk-context-package-secret"})
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: the eastern bridge collapses during red rain."
+            app.set_memory_text("demo", memory_id, manual_text)
+            confirmed = app.read_confirmed_chapter("demo", "chapter_001")
+
+            result = app.context_package_preview("demo", max_context_tokens=4096)
+            result_text = json.dumps(result, ensure_ascii=False)
+
+            self.assertEqual(result["mode"], "context_package_preview")
+            self.assertFalse(result["include_text"])
+            self.assertFalse(result["provider_api_boundary"]["provider_called"])
+            self.assertEqual(result["sections"][0]["source_id"], memory_id)
+            self.assertEqual(result["sections"][0]["selection_status"], "selected")
+            self.assertNotIn("text", result["sections"][0])
+            self.assertNotIn(manual_text, result_text)
+            self.assertNotIn("private assembler prompt", result_text)
+            self.assertNotIn(str(confirmed["content"]), result_text)
+            self.assertNotIn("sk-context-package-secret", result_text)
+
+    def test_context_package_preview_include_text_is_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: the regent keeps a silver oath token."
+            app.set_memory_text("demo", memory_id, manual_text)
+
+            result = app.context_package_preview("demo", max_context_tokens=4096, include_text=True)
+
+            self.assertTrue(result["include_text"])
+            self.assertEqual(result["sections"][0]["text"], manual_text)
+            self.assertTrue(result["sections"][0]["contains_text"])
+
+    def test_context_package_preview_skips_disabled_and_budget_exceeded_items(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            items = app.list_memory_items("demo")
+            disabled_id = items[0]["memory_id"]
+            budget_id = items[1]["memory_id"]
+            app.set_memory_text("demo", disabled_id, "Manual memory: disabled item should not be selected.")
+            app.set_memory_text("demo", budget_id, "Manual memory: this item exceeds a one token budget.")
+            app.set_memory_item_enabled("demo", disabled_id, enabled=False, reason_code="manual_suppress")
+
+            result = app.context_package_preview("demo", max_context_tokens=1, include_text=True)
+            disabled = [item for item in result["skipped"] if item.get("source_id") == disabled_id][0]
+            budget = [item for item in result["skipped"] if item.get("source_id") == budget_id][0]
+
+            self.assertEqual(disabled["skip_reason"], "memory_item_disabled")
+            self.assertEqual(budget["skip_reason"], "token_budget_exceeded")
+            self.assertEqual(result["sections"], [])
+
+    def test_context_package_preview_cli_is_safe_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: the sea tower signal means retreat."
+            app.set_memory_text("demo", memory_id, manual_text)
+
+            default_code, default_stdout, default_stderr = run_cli(
+                ["--projects-root", temp, "context-package-preview", "demo", "--max-context-tokens", "4096"]
+            )
+            include_code, include_stdout, include_stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "context-package-preview",
+                    "demo",
+                    "--max-context-tokens",
+                    "4096",
+                    "--include-text",
+                ]
+            )
+
+            self.assertEqual(default_code, 0, default_stderr)
+            self.assertEqual(include_code, 0, include_stderr)
+            self.assertNotIn(manual_text, default_stdout)
+            self.assertEqual(json.loads(include_stdout)["result"]["sections"][0]["text"], manual_text)
+
     def test_manual_memory_text_cli_is_metadata_only_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             app = configured_memory_bank_app(temp)

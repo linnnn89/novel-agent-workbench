@@ -421,3 +421,11 @@ Decision: Add explicit enable/disable controls for individual Memory Bank items.
 Reason: Manual Memory Bank text can still become stale, duplicated, or temporarily unsafe for context assembly. The system needs a reversible metadata switch before any real prompt rendering exists.
 
 Impact: `MemoryBankService.set_memory_item_enabled(...)` creates a `pre_memory_lifecycle_update` checkpoint and writes `enabled`, `lifecycle_status`, and `lifecycle_reason_code` metadata on the selected item. CLI commands `disable-memory-item` and `enable-memory-item` expose the operation. Disabled items are not deleted and their text is not returned by default outputs. `ContextAssemblerService.dry_run(...)` now reports disabled Memory Bank candidates as skipped with `skip_reason=memory_item_disabled`. The operation does not call Providers, alter Memory Bank text, write world book, update RAG/export, mutate drafts/confirmed chapters, or auto-render prompt context.
+
+## 2026-05-18: MVP-11 Context Package Preview
+
+Decision: Add a read-only local context package preview built from enabled manual Memory Bank text.
+
+Reason: The project needs to verify the practical Memory Bank priority and token-budget behavior before any final Provider prompt rendering or real generation depends on it. The safest next step is an operator-visible preview that can show which manual memory notes would be selected or skipped.
+
+Impact: `ContextAssemblerService.package_preview(...)` returns selected Memory Bank sections, skipped items, estimated token usage, and Provider boundary metadata. Default output remains metadata-only and does not include Memory Bank text. Text is returned only when `include_text=true`, for explicit human review. CLI command `context-package-preview` exposes the flow. The method is read-only; it writes no artifact, calls no Provider, logs no prompt, does not read chapter content, and does not update world book, RAG, exports, drafts, or confirmed chapters.

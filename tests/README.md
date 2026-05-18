@@ -120,6 +120,17 @@ Context assembler dry-run tests currently cover:
 - world-book overlap weight reflected in dry-run candidates,
 - CLI output excluding prompt text, confirmed chapter text, Memory Bank text, and plaintext secrets.
 
+Context package preview tests currently cover:
+
+- read-only preview from enabled manual Memory Bank text,
+- default metadata-only output excluding Memory Bank text,
+- explicit include-text output returning selected manual text for human review,
+- disabled Memory Bank items skipped with `memory_item_disabled`,
+- budget overflow skipped with `token_budget_exceeded`,
+- provider boundary reporting no Provider call and no final prompt rendering,
+- CLI output excluding manual text by default and including it only with `--include-text`,
+- output excluding prompt text, confirmed chapter text, and plaintext secrets.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

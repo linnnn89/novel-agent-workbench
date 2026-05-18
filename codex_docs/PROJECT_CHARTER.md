@@ -340,6 +340,14 @@ disable-memory-item / enable-memory-item + pre_memory_lifecycle_update checkpoin
 
 Memory Bank items may be disabled without deleting or rewriting their text. Disabled items remain recoverable on disk and must be skipped by Context Assembler dry-run. This is metadata-only lifecycle control; it must not call Providers, update world book, update RAG/export, mutate drafts/confirmed chapters, or render final prompts.
 
+MVP-11 context package preview slice:
+
+```text
+context-package-preview + enabled manual Memory Bank text selection + explicit include-text review.
+```
+
+This is a read-only preview layer before final prompt rendering. It may select enabled, ready, manual Memory Bank items and estimate token usage. Default output must be metadata-only; manual text may appear only with an explicit include-text option. It must not write artifacts, call Providers, read chapter content, write prompt logs, update world book, update RAG/export, mutate drafts/confirmed chapters, or generate text.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

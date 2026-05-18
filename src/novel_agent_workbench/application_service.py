@@ -227,6 +227,18 @@ class WorkbenchApplicationService:
             max_context_tokens=max_context_tokens,
         ).to_dict()
 
+    def context_package_preview(
+        self,
+        project_id: str,
+        *,
+        max_context_tokens: int | None = None,
+        include_text: bool = False,
+    ) -> dict[str, Any]:
+        return ContextAssemblerService(self._open_store(project_id)).package_preview(
+            max_context_tokens=max_context_tokens,
+            include_text=include_text,
+        ).to_dict()
+
     def enqueue_formal_context_tasks(self, project_id: str, plan_id: str) -> dict[str, Any]:
         return FormalContextTaskQueueService(self._open_store(project_id)).enqueue_plan_tasks(plan_id).to_dict()
 

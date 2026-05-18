@@ -181,6 +181,11 @@ def build_parser() -> argparse.ArgumentParser:
     context_assembly.add_argument("project_id")
     context_assembly.add_argument("--max-context-tokens", type=int, default=None)
 
+    context_package = subparsers.add_parser("context-package-preview")
+    context_package.add_argument("project_id")
+    context_package.add_argument("--max-context-tokens", type=int, default=None)
+    context_package.add_argument("--include-text", action="store_true")
+
     enqueue_formal_context_tasks = subparsers.add_parser("enqueue-formal-context-tasks")
     enqueue_formal_context_tasks.add_argument("project_id")
     enqueue_formal_context_tasks.add_argument("plan_id")
@@ -391,6 +396,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.read_formal_context_plan(args.project_id, args.plan_id)
     if command == "context-assembly-dry-run":
         return app.context_assembly_dry_run(args.project_id, max_context_tokens=args.max_context_tokens)
+    if command == "context-package-preview":
+        return app.context_package_preview(
+            args.project_id,
+            max_context_tokens=args.max_context_tokens,
+            include_text=args.include_text,
+        )
     if command == "enqueue-formal-context-tasks":
         return app.enqueue_formal_context_tasks(args.project_id, args.plan_id)
     if command == "list-formal-context-tasks":

@@ -27,6 +27,21 @@ class ContextAssemblyDryRunResult:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class ContextPackagePreviewResult:
+    project_id: str
+    mode: str
+    token_budget: dict[str, Any]
+    provider_api_boundary: dict[str, Any]
+    include_text: bool
+    sections: list[dict[str, Any]]
+    skipped: list[dict[str, Any]]
+    warnings: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class ContextAssemblerService:
     """Builds metadata-only previews of future Provider context assembly."""
 
@@ -77,6 +92,64 @@ class ContextAssemblerService:
             skipped=skipped,
             candidates=candidates,
             warnings=context_warnings(self.store),
+        )
+
+    def package_preview(
+        self,
+        *,
+        max_context_tokens: int | None = None,
+        include_text: bool = False,
+    ) -> ContextPackagePreviewResult:
+        self.store.initialize()
+        config = self.store.read_config()
+        context_policy = config.get("context_policy") if isinstance(config, dict) else {}
+        configured_budget = safe_int(context_policy.get("max_context_tokens"), default=32768)
+        budget = max_context_tokens if isinstance(max_context_tokens, int) and max_context_tokens > 0 else configured_budget
+        memory_items = memory_bank_package_candidates(self.store, include_text=include_text)
+        sections: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        used_tokens = 0
+        for item in sorted(memory_items, key=candidate_sort_key):
+            estimated_tokens = safe_int(item.get("estimated_tokens"), default=0)
+            if item.get("enabled") is False:
+                skipped.append({**item, "selection_status": "skipped", "skip_reason": "memory_item_disabled"})
+                continue
+            if not item.get("ready"):
+                skipped.append({**item, "selection_status": "skipped", "skip_reason": "manual_text_missing"})
+                continue
+            if estimated_tokens <= 0:
+                skipped.append({**item, "selection_status": "skipped", "skip_reason": "empty_or_metadata_only"})
+                continue
+            if used_tokens + estimated_tokens > budget:
+                skipped.append({**item, "selection_status": "skipped", "skip_reason": "token_budget_exceeded"})
+                continue
+            sections.append({**item, "selection_status": "selected", "skip_reason": ""})
+            used_tokens += estimated_tokens
+        return ContextPackagePreviewResult(
+            project_id=self.store.project_id,
+            mode="context_package_preview",
+            token_budget={
+                "max_context_tokens": budget,
+                "estimated_used_tokens": used_tokens,
+                "estimated_remaining_tokens": max(budget - used_tokens, 0),
+                "estimator": f"ceil(chars / {DEFAULT_CHARS_PER_TOKEN})",
+                "real_tokenizer": "not_implemented",
+            },
+            provider_api_boundary={
+                "provider_called": False,
+                "output_contains_prompt_text": False,
+                "output_contains_chapter_text": False,
+                "output_contains_plaintext_secrets": False,
+                "final_prompt_rendering": "not_implemented",
+            },
+            include_text=include_text,
+            sections=sections,
+            skipped=skipped,
+            warnings=context_warnings(self.store)
+            + [
+                "preview_only_no_provider_call",
+                "manual_memory_text_only",
+            ],
         )
 
 
@@ -150,6 +223,42 @@ def memory_bank_candidates(store: ProjectStore) -> list[dict[str, Any]]:
                 "lifecycle_status": item.get("lifecycle_status") or ("active" if enabled else "disabled"),
             }
         )
+    return candidates
+
+
+def memory_bank_package_candidates(store: ProjectStore, *, include_text: bool) -> list[dict[str, Any]]:
+    path = store.data_file_path("memory_bank.json")
+    raw = store.read_json(path, default={"items": []})
+    items = raw.get("items") if isinstance(raw, dict) and isinstance(raw.get("items"), list) else []
+    candidates: list[dict[str, Any]] = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "")
+        category_id = str(item.get("category_id") or item.get("category") or "")
+        enabled = item.get("enabled") if isinstance(item.get("enabled"), bool) else True
+        ready = bool(enabled and text.strip() and str(item.get("status") or "") == "ready")
+        memory_weight = safe_float(item.get("memory_weight"), default=1.0)
+        public = {
+            "source_type": "memory_bank",
+            "source_id": str(item.get("memory_id") or item.get("id") or f"memory_{index}"),
+            "source_path": "data/memory_bank.json",
+            "chapter_id": str(item.get("chapter_id") or ""),
+            "title": item.get("title"),
+            "category_id": category_id,
+            "priority": priority_rank(category_id),
+            "memory_weight": memory_weight,
+            "estimated_tokens": ceil((len(text) * memory_weight) / DEFAULT_CHARS_PER_TOKEN),
+            "char_count": len(text),
+            "text_status": item.get("text_status"),
+            "ready": ready,
+            "enabled": enabled,
+            "lifecycle_status": item.get("lifecycle_status") or ("active" if enabled else "disabled"),
+            "contains_text": include_text and ready,
+        }
+        if include_text and ready:
+            public["text"] = text
+        candidates.append(public)
     return candidates
 
 

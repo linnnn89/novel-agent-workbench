@@ -824,6 +824,50 @@ skip_reason=memory_item_disabled
 
 This method is read-only. It must not write artifacts, mutate Memory Bank, update RAG/export, create drafts, create confirmed chapters, or call Providers.
 
+### context_package_preview(project_id, max_context_tokens=None, include_text=False)
+
+Builds a read-only local context package preview from enabled manual Memory Bank items.
+
+Returns:
+
+```text
+project_id
+mode
+token_budget
+provider_api_boundary
+include_text
+sections
+skipped
+warnings
+```
+
+Default behavior:
+
+```text
+include_text=false
+```
+
+With default behavior, section output may include ids, category id, priority, memory weight, estimated tokens, character count, lifecycle metadata, and selection status, but must not include the Memory Bank `text` field.
+
+With `include_text=true`, selected sections may include manual Memory Bank text for explicit human review. This is not a Provider prompt and must not be logged as one.
+
+Selection rules:
+
+```text
+enabled=false -> skip_reason=memory_item_disabled
+status not ready or empty text -> skip_reason=manual_text_missing
+budget overflow -> skip_reason=token_budget_exceeded
+```
+
+Provider boundary:
+
+```text
+provider_called=false
+final_prompt_rendering=not_implemented
+```
+
+This method must not write artifacts, call Providers, read chapter content, write prompt logs, update world book, update RAG/export, create drafts, create confirmed chapters, or return plaintext secrets.
+
 ### enqueue_formal_context_tasks(project_id, plan_id)
 
 Creates metadata-only manual tasks from one formal context plan.

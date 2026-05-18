@@ -363,6 +363,22 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This command does not call a Provider and does not print chapter text, prompt text, Memory Bank text, or secrets. It previews candidate priority, estimated token use, selected/skipped status, and world-book overlap recommendations.
 
+Preview an actual local context package from enabled manual Memory Bank text:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test context-package-preview demo_project --max-context-tokens 4096
+```
+
+Default output is metadata-only and does not print Memory Bank text.
+
+To explicitly inspect selected manual Memory Bank text:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test context-package-preview demo_project --max-context-tokens 4096 --include-text
+```
+
+This preview is not a Provider prompt and does not call a model. Disabled items are skipped with `memory_item_disabled`; empty or not-ready items are skipped with `manual_text_missing`; budget overflow is skipped with `token_budget_exceeded`.
+
 Create manual formal context tasks:
 
 ```powershell
