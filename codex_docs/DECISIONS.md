@@ -327,3 +327,11 @@ Decision: Add an explicit metadata queue between confirmed chapters and future f
 Reason: Confirmed chapters are the only valid source for Memory Bank/RAG/export updates, but updating those systems automatically would be too risky before context policies and UI review exist.
 
 Impact: `ContextUpdateQueueService` writes `data/context_update_queue.json` with pending update metadata for confirmed chapters. Queue entries contain ids, status, target placeholders, and text statistics only. The queue can be listed and marked `pending`, `acknowledged`, or `skipped`, but it does not mutate Memory Bank, RAG, exports, confirmed chapters, drafts, or Providers. `public_project_state` now exposes `context_update_count` and `latest_context_update` metadata.
+
+## 2026-05-18: MVP-6.5 Context Update Preview
+
+Decision: Add metadata-only preview artifacts for queued formal context work.
+
+Reason: Before any Memory Bank/RAG/export mutation exists, the operator and future UI need a stable artifact that shows what would be considered for context work without copying chapter text or making irreversible updates.
+
+Impact: `ContextUpdatePreviewService` creates `data/context_update_previews/*.json` plus `data/context_update_previews_index.json` from context queue items. Previews include ids, text statistics, target operation placeholders, and safety flags. They do not store chapter text, prompt text, raw Provider responses, or plaintext secrets, and they do not mutate Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers. `public_project_state` now exposes `context_preview_count` and `latest_context_preview`.

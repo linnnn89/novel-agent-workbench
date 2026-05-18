@@ -248,6 +248,14 @@ enqueue-context-updates + context_update_queue.json + manual status marking.
 
 Only confirmed chapters may enter this queue. The queue is a metadata handoff layer for future Memory Bank/RAG/export updates; it is not the update itself. It must not store chapter content, prompt text, or plaintext secrets, and it must not automatically mutate Memory Bank, RAG, exports, drafts, or confirmed chapters.
 
+MVP-6.5 context update preview slice:
+
+```text
+create-context-preview + context_update_previews/*.json + metadata-only target plan.
+```
+
+Preview artifacts may record target placeholders, text statistics, and safety flags. They must not copy chapter text, prompt text, raw Provider responses, or plaintext secrets. They must not mutate Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

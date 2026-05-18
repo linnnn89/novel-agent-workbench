@@ -310,6 +310,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This queue is metadata-only. It does not update Memory Bank, RAG, exports, DOCX, or confirmed chapter content.
 
+Create and inspect a context update preview:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-context-preview demo_project <update_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-context-previews demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-context-preview demo_project <preview_id>
+```
+
+Preview artifacts are plans only. They include text statistics and target placeholders, but they do not copy chapter text or update Memory Bank/RAG/export.
+
 Read a confirmed chapter:
 
 ```powershell

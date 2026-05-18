@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .audit import audit_project
+from .context_previews import ContextUpdatePreviewService
 from .chapters import ChapterWorkflowService
 from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationRequest, DraftGenerationService
@@ -197,6 +198,15 @@ class WorkbenchApplicationService:
             status=status,
             reason_code=reason_code,
         )
+
+    def create_context_preview(self, project_id: str, update_id: str) -> dict[str, Any]:
+        return ContextUpdatePreviewService(self._open_store(project_id)).create_context_preview(update_id).to_dict()
+
+    def list_context_previews(self, project_id: str) -> list[dict[str, Any]]:
+        return ContextUpdatePreviewService(self._open_store(project_id)).list_context_previews()
+
+    def read_context_preview(self, project_id: str, preview_id: str) -> dict[str, Any]:
+        return ContextUpdatePreviewService(self._open_store(project_id)).read_context_preview(preview_id)
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()

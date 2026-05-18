@@ -3,6 +3,7 @@
 from .application_service import WorkbenchApplicationService
 from .audit import AuditFinding, audit_project
 from .chapters import ChapterWorkflowEntry, ChapterWorkflowError, ChapterWorkflowService
+from .context_previews import ContextUpdatePreviewError, ContextUpdatePreviewResult, ContextUpdatePreviewService
 from .context_queue import ContextUpdateQueueError, ContextUpdateQueueResult, ContextUpdateQueueService
 from .drafts import (
     DraftCommitResult,
@@ -78,6 +79,9 @@ __all__ = [
     "ContextUpdateQueueError",
     "ContextUpdateQueueResult",
     "ContextUpdateQueueService",
+    "ContextUpdatePreviewError",
+    "ContextUpdatePreviewResult",
+    "ContextUpdatePreviewService",
     "audit_project",
     "chutes_generate_once",
     "configure_provider_role",

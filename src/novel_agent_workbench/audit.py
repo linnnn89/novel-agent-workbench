@@ -87,6 +87,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
             ("possible_content_in_context_update_queue", CONTENT_PATTERNS),
         ],
     )
+    audit_context_previews(store, checked_paths=checked_paths, findings=findings)
     audit_reviews(store, checked_paths=checked_paths, findings=findings)
     audit_revision_requests(store, checked_paths=checked_paths, findings=findings)
     audit_revision_consistency(store, checked_paths=checked_paths, findings=findings)
@@ -157,6 +158,26 @@ def audit_revision_requests(store: ProjectStore, *, checked_paths: list[str], fi
     if not requests_dir.exists():
         return
     for path in sorted(requests_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+
+
+def audit_context_previews(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_context_preview", PROMPT_PATTERNS),
+        ("possible_secret_in_context_preview", SECRET_PATTERNS),
+        ("possible_content_in_context_preview", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "context_update_previews_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    previews_dir = store.data_dir / "context_update_previews"
+    checked_paths.append(str(previews_dir))
+    if not previews_dir.exists():
+        return
+    for path in sorted(previews_dir.glob("*.json")):
         check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
 
 

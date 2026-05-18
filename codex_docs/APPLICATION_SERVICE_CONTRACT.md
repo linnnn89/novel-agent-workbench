@@ -69,6 +69,7 @@ draft_count
 review_count
 revision_request_count
 context_update_count
+context_preview_count
 chapter_count
 committed_chapter_count
 latest_chapter
@@ -76,6 +77,7 @@ latest_draft
 latest_review
 latest_revision_request
 latest_context_update
+latest_context_preview
 latest_committed_chapter
 provider_roles
 ```
@@ -632,6 +634,62 @@ skipped
 `reason_code` must use safe ASCII letters, numbers, `_`, or `-`.
 
 This marks queue metadata only. It must not update Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.
+
+### create_context_preview(project_id, update_id)
+
+Creates a metadata-only preview artifact for one context update queue item.
+
+Writes:
+
+```text
+data/context_update_previews/*.json
+data/context_update_previews_index.json
+```
+
+Returns:
+
+```text
+preview_id
+update_id
+chapter_id
+status
+path
+created_at
+```
+
+The preview artifact may include:
+
+```text
+preview_id
+update_id
+chapter_id
+title
+source_draft_id
+confirmed_chapter_id
+status
+created_at
+source
+text_stats
+target_plan
+safety
+recommendation
+```
+
+Must reject skipped queue items and duplicate previews.
+
+Must not return or store chapter text, prompt text, raw Provider responses, request bodies, or plaintext secrets. Must not update Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.
+
+### list_context_previews(project_id)
+
+Returns context preview index metadata.
+
+Metadata-only. Must not return chapter text, prompt text, or plaintext secrets.
+
+### read_context_preview(project_id, preview_id)
+
+Returns one context preview artifact.
+
+May return target placeholders, text statistics, safety flags, and recommendation. Must not return chapter text, prompt text, raw Provider responses, request bodies, or plaintext secrets.
 
 ### list_confirmed_chapters(project_id)
 

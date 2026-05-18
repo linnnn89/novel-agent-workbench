@@ -89,6 +89,16 @@ Context update queue tests currently cover:
 - audit/public outputs excluding prompt text, confirmed chapter content, and plaintext secrets,
 - CLI commands `enqueue-context-updates`, `list-context-updates`, and `mark-context-update`.
 
+Context update preview tests currently cover:
+
+- creating `data/context_update_previews/*.json` and `data/context_update_previews_index.json`,
+- preview artifacts containing target placeholders, text statistics, and safety flags only,
+- duplicate, skipped, and missing queue item rejection,
+- public state `context_preview_count` reporting,
+- no automatic Memory Bank, RAG, export, draft, confirmed chapter, or Provider side effects,
+- audit/public/CLI outputs excluding prompt text, confirmed chapter text, and plaintext secrets,
+- CLI commands `create-context-preview`, `list-context-previews`, and `read-context-preview`.
+
 Checkpoint tests currently cover:
 
 - manifest creation,

@@ -155,6 +155,17 @@ def build_parser() -> argparse.ArgumentParser:
     mark_context.add_argument("--status", required=True, choices=["pending", "acknowledged", "skipped"])
     mark_context.add_argument("--reason-code", default="")
 
+    create_context_preview = subparsers.add_parser("create-context-preview")
+    create_context_preview.add_argument("project_id")
+    create_context_preview.add_argument("update_id")
+
+    list_context_previews = subparsers.add_parser("list-context-previews")
+    list_context_previews.add_argument("project_id")
+
+    read_context_preview = subparsers.add_parser("read-context-preview")
+    read_context_preview.add_argument("project_id")
+    read_context_preview.add_argument("preview_id")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -297,6 +308,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_context_updates(args.project_id, status=args.status)
     if command == "mark-context-update":
         return app.mark_context_update(args.project_id, args.update_id, status=args.status, reason_code=args.reason_code)
+    if command == "create-context-preview":
+        return app.create_context_preview(args.project_id, args.update_id)
+    if command == "list-context-previews":
+        return app.list_context_previews(args.project_id)
+    if command == "read-context-preview":
+        return app.read_context_preview(args.project_id, args.preview_id)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":
