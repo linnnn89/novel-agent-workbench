@@ -29,6 +29,19 @@ class MemoryApplyPreviewResult:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class MemoryApplyCommitResult:
+    preview_id: str
+    status: str
+    created_count: int
+    skipped_count: int
+    checkpoint: dict[str, Any]
+    committed_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class MemoryApplyPreviewService:
     """Creates metadata-only previews before any Memory Bank write exists."""
 
@@ -127,6 +140,47 @@ class MemoryApplyPreviewService:
             return value
         raise MemoryApplyPreviewError(f"Memory apply preview not found: {preview_id}")
 
+    def commit_memory_apply_preview(self, preview_id: str) -> MemoryApplyCommitResult:
+        self.store.initialize()
+        with self.store.lock():
+            preview = self.read_memory_apply_preview(preview_id)
+            if str(preview.get("status") or "") != "preview_ready":
+                raise MemoryApplyPreviewError(f"Memory apply preview is not ready: {preview_id}")
+            items = preview.get("items") if isinstance(preview.get("items"), list) else []
+            checkpoint = self.store.create_checkpoint(label="pre_memory_apply")
+            memory_bank = self._read_memory_bank()
+            existing_keys = {
+                memory_item_key(item)
+                for item in memory_bank["items"]
+                if isinstance(item, dict) and memory_item_key(item)
+            }
+            created: list[dict[str, Any]] = []
+            skipped_count = 0
+            committed_at = utc_stamp()
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                entry = memory_entry_from_preview_item(item, preview_id=preview_id, created_at=committed_at)
+                key = memory_item_key(entry)
+                if not key or key in existing_keys:
+                    skipped_count += 1
+                    continue
+                memory_bank["items"].append(entry)
+                existing_keys.add(key)
+                created.append(entry)
+            memory_bank["enabled"] = True
+            memory_bank["updated_at"] = committed_at
+            memory_bank["last_apply_preview_id"] = preview_id
+            self.store.write_json(self.store.data_file_path("memory_bank.json"), memory_bank)
+            return MemoryApplyCommitResult(
+                preview_id=preview_id,
+                status="committed" if created else "no_new_items",
+                created_count=len(created),
+                skipped_count=skipped_count,
+                checkpoint=checkpoint,
+                committed_at=committed_at,
+            )
+
     def _append_index_entry(self, entry: dict[str, Any]) -> None:
         index = self.store.read_json(self.index_path, default={"schema_version": 1, "previews": []})
         if not isinstance(index, dict):
@@ -134,6 +188,22 @@ class MemoryApplyPreviewService:
         items = index.get("previews") if isinstance(index.get("previews"), list) else []
         items.append(entry)
         self.store.write_json(self.index_path, {"schema_version": 1, "previews": items})
+
+    def _read_memory_bank(self) -> dict[str, Any]:
+        value = self.store.read_json(
+            self.store.data_file_path("memory_bank.json"),
+            default={"schema_version": 1, "enabled": False, "updated_to_chapter": 0, "items": []},
+        )
+        if not isinstance(value, dict):
+            value = {"schema_version": 1, "enabled": False, "updated_to_chapter": 0, "items": []}
+        items = value.get("items")
+        if not isinstance(items, list):
+            items = []
+        return {
+            **value,
+            "schema_version": int(value.get("schema_version") or 1),
+            "items": [item for item in items if isinstance(item, dict)],
+        }
 
 
 def preview_item_from_task(task: dict[str, Any], *, world_book_enabled: bool) -> dict[str, Any]:
@@ -172,3 +242,46 @@ def duplicate_risk(category_id: str, *, world_book_enabled: bool) -> str:
 
 def new_memory_apply_preview_id() -> str:
     return f"{utc_stamp()}_{uuid4().hex[:12]}"
+
+
+def memory_entry_from_preview_item(item: dict[str, Any], *, preview_id: str, created_at: str) -> dict[str, Any]:
+    category_id = str(item.get("category_id") or "")
+    chapter_id = str(item.get("chapter_id") or "")
+    task_id = str(item.get("task_id") or "")
+    return {
+        "memory_id": f"{preview_id}_{task_id}".strip("_"),
+        "schema_version": 1,
+        "entry_type": "formal_context_placeholder",
+        "status": "manual_text_required",
+        "source": "memory_apply_preview",
+        "source_preview_id": preview_id,
+        "source_task_id": task_id,
+        "chapter_id": chapter_id,
+        "title": str(item.get("title") or ""),
+        "category_id": category_id,
+        "priority": item.get("priority"),
+        "target": str(item.get("target") or "memory_bank"),
+        "memory_weight": item.get("memory_weight"),
+        "duplicate_risk": str(item.get("duplicate_risk") or ""),
+        "text": "",
+        "text_status": "not_extracted",
+        "created_at": created_at,
+        "updated_at": created_at,
+        "safety": {
+            "prompt_copied": False,
+            "text_copied": False,
+            "secret_copied": False,
+            "provider_called": False,
+        },
+    }
+
+
+def memory_item_key(item: dict[str, Any]) -> str:
+    source_task_id = str(item.get("source_task_id") or "")
+    category_id = str(item.get("category_id") or "")
+    chapter_id = str(item.get("chapter_id") or "")
+    if source_task_id:
+        return f"task:{source_task_id}"
+    if chapter_id and category_id:
+        return f"chapter_category:{chapter_id}:{category_id}"
+    return ""

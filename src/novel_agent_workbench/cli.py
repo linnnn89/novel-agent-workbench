@@ -206,6 +206,10 @@ def build_parser() -> argparse.ArgumentParser:
     read_memory_apply_preview.add_argument("project_id")
     read_memory_apply_preview.add_argument("preview_id")
 
+    commit_memory_apply_preview = subparsers.add_parser("commit-memory-apply-preview")
+    commit_memory_apply_preview.add_argument("project_id")
+    commit_memory_apply_preview.add_argument("preview_id")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -379,6 +383,8 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_memory_apply_previews(args.project_id)
     if command == "read-memory-apply-preview":
         return app.read_memory_apply_preview(args.project_id, args.preview_id)
+    if command == "commit-memory-apply-preview":
+        return app.commit_memory_apply_preview(args.project_id, args.preview_id)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

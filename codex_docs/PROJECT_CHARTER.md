@@ -316,6 +316,14 @@ create-memory-apply-preview + memory_apply_previews/*.json + candidate metadata 
 
 This preview shows what might later be written to Memory Bank. It must not write `memory_bank.json`, copy chapter text, copy prompt text, copy Memory Bank text, write world book, update RAG/export, mutate drafts/confirmed chapters, or call Providers.
 
+MVP-9.5 Memory Bank apply commit gate slice:
+
+```text
+commit-memory-apply-preview + pre_memory_apply checkpoint + placeholder Memory Bank entries.
+```
+
+This is the first allowed Memory Bank write path. It must be explicit and reversible. It may write only structured placeholder entries with empty `text` and `manual_text_required` status. It must not extract chapter text, copy prompt text, copy existing Memory Bank text, write world book, update RAG/export, mutate drafts/confirmed chapters, or call Providers.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

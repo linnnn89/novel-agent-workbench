@@ -89,6 +89,7 @@ MVP-0 first storage slice is implemented:
 - MVP-8 Context Assembler dry-run that previews local context selection, estimated token budget, and selected/skipped metadata before any Provider call.
 - MVP-8.5 Formal Context Task Queue that turns formal context plans into metadata-only manual tasks without applying Memory Bank/RAG/export updates.
 - MVP-9 Memory Apply Preview that shows future Memory Bank candidate writes as metadata only, without changing `memory_bank.json`.
+- MVP-9.5 Memory Bank Apply Commit Gate that explicitly commits preview metadata into placeholder Memory Bank entries with a pre-write checkpoint.
 - Unit tests.
 
 Verification command:

@@ -383,6 +383,14 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Memory apply previews do not write `memory_bank.json`. They show candidate category metadata, priority, weight, and duplicate-risk hints only.
 
+Explicitly commit placeholder Memory Bank entries:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test commit-memory-apply-preview demo_project <preview_id>
+```
+
+This creates a `pre_memory_apply` checkpoint and writes placeholder entries with empty `text` and `manual_text_required` status. It still does not extract chapter text or call a Provider.
+
 Read a confirmed chapter:
 
 ```powershell

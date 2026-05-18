@@ -73,6 +73,7 @@ context_preview_count
 formal_context_plan_count
 formal_context_task_count
 memory_apply_preview_count
+memory_bank_item_count
 chapter_count
 committed_chapter_count
 latest_chapter
@@ -84,6 +85,7 @@ latest_context_preview
 latest_formal_context_plan
 latest_formal_context_task
 latest_memory_apply_preview
+latest_memory_bank_item
 latest_committed_chapter
 provider_roles
 ```
@@ -938,6 +940,46 @@ Metadata-only. Must not return chapter text, prompt text, Memory Bank text, or p
 Returns one Memory Apply Preview artifact.
 
 May return candidate metadata, safety flags, duplicate-risk metadata, and recommendation. Must not return chapter text, prompt text, Memory Bank text, raw Provider responses, request bodies, or plaintext secrets.
+
+### commit_memory_apply_preview(project_id, preview_id)
+
+Explicitly commits one Memory Apply Preview into placeholder Memory Bank entries.
+
+Writes:
+
+```text
+data/memory_bank.json
+```
+
+Creates a pre-write checkpoint:
+
+```text
+label=pre_memory_apply
+```
+
+Returns:
+
+```text
+preview_id
+status
+created_count
+skipped_count
+checkpoint
+committed_at
+```
+
+Written entries must be placeholders only:
+
+```text
+entry_type=formal_context_placeholder
+status=manual_text_required
+text=""
+text_status=not_extracted
+```
+
+Repeated commits of the same preview must skip duplicate source tasks rather than writing duplicate Memory Bank entries.
+
+This method must not extract or copy chapter text, prompt text, existing Memory Bank text, raw Provider responses, request bodies, or plaintext secrets. It must not update world book, update RAG/export, create drafts, create confirmed chapters, or call Providers.
 
 ### list_confirmed_chapters(project_id)
 

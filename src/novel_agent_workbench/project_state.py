@@ -39,6 +39,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     formal_context_plans = formal_context_plan_service.list_formal_context_plans()
     formal_context_tasks = formal_context_task_service.list_tasks()
     memory_apply_previews = memory_apply_preview_service.list_memory_apply_previews()
+    memory_bank_items = safe_memory_bank_items(store)
     store_state = store.public_state()
     config = store_state.get("config") if isinstance(store_state.get("config"), dict) else {}
     return {
@@ -57,6 +58,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "formal_context_plan_count": len(formal_context_plans),
         "formal_context_task_count": len(formal_context_tasks),
         "memory_apply_preview_count": len(memory_apply_previews),
+        "memory_bank_item_count": len(memory_bank_items),
         "chapter_count": len(chapters),
         "committed_chapter_count": len(confirmed),
         "latest_chapter": safe_chapter_summary(latest_by(chapters, "updated_at")),
@@ -74,6 +76,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "latest_memory_apply_preview": safe_memory_apply_preview_summary(
             latest_by(memory_apply_previews, "created_at")
         ),
+        "latest_memory_bank_item": safe_memory_bank_item_summary(latest_by(memory_bank_items, "updated_at")),
         "latest_committed_chapter": safe_confirmed_summary(latest_by(confirmed, "committed_at")),
         "provider_roles": provider_roles_summary(store),
     }
@@ -251,6 +254,33 @@ def safe_memory_apply_preview_summary(item: dict[str, Any] | None) -> dict[str, 
         "task_status_filter": item.get("task_status_filter"),
         "task_count": item.get("task_count"),
         "recommendation": item.get("recommendation"),
+    }
+
+
+def safe_memory_bank_items(store: ProjectStore) -> list[dict[str, Any]]:
+    value = store.read_json(store.data_file_path("memory_bank.json"), default={"items": []})
+    items = value.get("items") if isinstance(value, dict) and isinstance(value.get("items"), list) else []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def safe_memory_bank_item_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "memory_id": item.get("memory_id") or item.get("id"),
+        "entry_type": item.get("entry_type"),
+        "status": item.get("status"),
+        "source_preview_id": item.get("source_preview_id"),
+        "source_task_id": item.get("source_task_id"),
+        "chapter_id": item.get("chapter_id"),
+        "title": item.get("title"),
+        "category_id": item.get("category_id"),
+        "priority": item.get("priority"),
+        "memory_weight": item.get("memory_weight"),
+        "duplicate_risk": item.get("duplicate_risk"),
+        "text_status": item.get("text_status"),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
     }
 
 

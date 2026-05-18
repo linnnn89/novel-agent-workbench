@@ -139,6 +139,16 @@ Memory apply preview tests currently cover:
 - no `memory_bank.json` mutation,
 - CLI/facade output excluding prompt text, confirmed chapter text, Memory Bank text, and plaintext secrets.
 
+Memory Bank apply commit gate tests currently cover:
+
+- explicit `commit-memory-apply-preview`,
+- `pre_memory_apply` checkpoint creation,
+- placeholder entries with empty `text` and `manual_text_required` status,
+- repeated commit duplicate skipping,
+- public state `memory_bank_item_count` reporting,
+- audit passing after placeholder Memory Bank writes,
+- CLI/facade output excluding prompt text, confirmed chapter text, and plaintext secrets.
+
 Checkpoint tests currently cover:
 
 - manifest creation,

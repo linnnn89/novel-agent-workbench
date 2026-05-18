@@ -87,6 +87,15 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
             ("possible_content_in_context_update_queue", CONTENT_PATTERNS),
         ],
     )
+    check_text_file(
+        store.data_dir / "memory_bank.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=[
+            ("possible_prompt_in_memory_bank", PROMPT_PATTERNS),
+            ("possible_secret_in_memory_bank", SECRET_PATTERNS),
+        ],
+    )
     audit_context_previews(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)

@@ -252,6 +252,9 @@ class WorkbenchApplicationService:
     def read_memory_apply_preview(self, project_id: str, preview_id: str) -> dict[str, Any]:
         return MemoryApplyPreviewService(self._open_store(project_id)).read_memory_apply_preview(preview_id)
 
+    def commit_memory_apply_preview(self, project_id: str, preview_id: str) -> dict[str, Any]:
+        return MemoryApplyPreviewService(self._open_store(project_id)).commit_memory_apply_preview(preview_id).to_dict()
+
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()
 

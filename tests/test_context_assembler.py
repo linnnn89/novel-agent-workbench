@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from novel_agent_workbench import WorkbenchApplicationService
+from novel_agent_workbench import audit_project
 from novel_agent_workbench.cli import main
 from novel_agent_workbench.storage import ProjectStore
 
@@ -216,6 +217,77 @@ class ContextAssemblerTest(unittest.TestCase):
             self.assertEqual(json.loads(read_stdout)["result"]["task_count"], 5)
             self.assertNotIn("private assembler prompt", combined)
             self.assertNotIn("MOCK writer", combined)
+
+    def test_commit_memory_apply_preview_writes_placeholder_entries_with_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_context_plan_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            store.update_secrets({"mock_key": "sk-memory-commit-secret"})
+            plan_id = app.list_formal_context_plans("demo")[0]["plan_id"]
+            app.enqueue_formal_context_tasks("demo", plan_id)
+            preview = app.create_memory_apply_preview("demo")
+            confirmed = app.read_confirmed_chapter("demo", "chapter_001")
+
+            result = app.commit_memory_apply_preview("demo", preview["preview_id"])
+            memory_bank = store.read_json(store.data_file_path("memory_bank.json"))
+            state = app.project_state("demo")
+            audit = audit_project(store)
+            result_text = json.dumps(
+                {"result": result, "memory_bank": memory_bank, "state": state, "audit": audit},
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(result["status"], "committed")
+            self.assertEqual(result["created_count"], 5)
+            self.assertEqual(result["skipped_count"], 0)
+            self.assertTrue(Path(result["checkpoint"]["path"]).exists())
+            self.assertTrue(memory_bank["enabled"])
+            self.assertEqual(len(memory_bank["items"]), 5)
+            self.assertEqual(memory_bank["items"][0]["entry_type"], "formal_context_placeholder")
+            self.assertEqual(memory_bank["items"][0]["status"], "manual_text_required")
+            self.assertEqual(memory_bank["items"][0]["text"], "")
+            self.assertEqual(state["memory_bank_item_count"], 5)
+            self.assertTrue(audit["ok"], json.dumps(audit, ensure_ascii=False))
+            self.assertNotIn("private assembler prompt", result_text)
+            self.assertNotIn(str(confirmed["content"]), result_text)
+            self.assertNotIn("sk-memory-commit-secret", result_text)
+
+    def test_commit_memory_apply_preview_is_duplicate_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_context_plan_app(temp)
+            plan_id = app.list_formal_context_plans("demo")[0]["plan_id"]
+            app.enqueue_formal_context_tasks("demo", plan_id)
+            preview = app.create_memory_apply_preview("demo")
+
+            first = app.commit_memory_apply_preview("demo", preview["preview_id"])
+            second = app.commit_memory_apply_preview("demo", preview["preview_id"])
+            memory_bank = ProjectStore.open(Path(temp), "demo").read_json(
+                ProjectStore.open(Path(temp), "demo").data_file_path("memory_bank.json")
+            )
+
+            self.assertEqual(first["created_count"], 5)
+            self.assertEqual(second["status"], "no_new_items")
+            self.assertEqual(second["created_count"], 0)
+            self.assertEqual(second["skipped_count"], 5)
+            self.assertEqual(len(memory_bank["items"]), 5)
+
+    def test_commit_memory_apply_preview_cli_is_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            configured_context_plan_app(temp)
+            app = WorkbenchApplicationService.open(Path(temp))
+            plan_id = app.list_formal_context_plans("demo")[0]["plan_id"]
+            app.enqueue_formal_context_tasks("demo", plan_id)
+            preview = app.create_memory_apply_preview("demo")
+
+            code, stdout, stderr = run_cli(
+                ["--projects-root", temp, "commit-memory-apply-preview", "demo", preview["preview_id"]]
+            )
+
+            self.assertEqual(code, 0, stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["result"]["created_count"], 5)
+            self.assertNotIn("private assembler prompt", stdout)
+            self.assertNotIn("MOCK writer", stdout)
 
 
 def configured_context_plan_app(temp: str, *, world_book_enabled: bool = False) -> WorkbenchApplicationService:

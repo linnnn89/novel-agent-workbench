@@ -397,3 +397,11 @@ Decision: Add a metadata-only preview before any Memory Bank write.
 Reason: The task queue identifies what category work should be done, but writing long-term memory is high-risk. A preview layer lets the operator and future UI inspect candidate writes, world-book overlap risk, and safety flags before `memory_bank.json` is changed.
 
 Impact: `MemoryApplyPreviewService.create_memory_apply_preview(...)` writes `data/memory_apply_previews/*.json` plus `data/memory_apply_previews_index.json`. Previews include task ids, categories, priority, target, memory weight, duplicate-risk metadata, safety flags, and `would_write_memory_bank=false`. CLI commands `create-memory-apply-preview`, `list-memory-apply-previews`, and `read-memory-apply-preview` expose the flow. The preview does not store chapter text, prompt text, Memory Bank text, raw Provider responses, or plaintext secrets, and does not write Memory Bank, world book, RAG, exports, drafts, confirmed chapters, or Providers.
+
+## 2026-05-18: MVP-9.5 Memory Bank Apply Commit Gate
+
+Decision: Add an explicit gate for committing Memory Apply Preview metadata into `memory_bank.json`.
+
+Reason: The system needs a reversible, auditable first Memory Bank write path, but it is still unsafe to auto-extract or store chapter text. The first write path should create empty placeholder entries that future manual fill/edit steps can populate.
+
+Impact: `MemoryApplyPreviewService.commit_memory_apply_preview(...)` creates a `pre_memory_apply` checkpoint, then writes only placeholder Memory Bank entries with `entry_type=formal_context_placeholder`, `status=manual_text_required`, and `text=""`. Duplicate source tasks are skipped on repeated commits. CLI command `commit-memory-apply-preview` exposes the explicit gate. The operation does not copy prompt text, chapter text, Memory Bank text, raw Provider responses, or plaintext secrets, and does not write world book, RAG, exports, drafts, confirmed chapters, or Providers.
