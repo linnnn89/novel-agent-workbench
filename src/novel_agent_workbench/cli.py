@@ -177,6 +177,10 @@ def build_parser() -> argparse.ArgumentParser:
     read_formal_context_plan.add_argument("project_id")
     read_formal_context_plan.add_argument("plan_id")
 
+    context_assembly = subparsers.add_parser("context-assembly-dry-run")
+    context_assembly.add_argument("project_id")
+    context_assembly.add_argument("--max-context-tokens", type=int, default=None)
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -331,6 +335,8 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_formal_context_plans(args.project_id)
     if command == "read-formal-context-plan":
         return app.read_formal_context_plan(args.project_id, args.plan_id)
+    if command == "context-assembly-dry-run":
+        return app.context_assembly_dry_run(args.project_id, max_context_tokens=args.max_context_tokens)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

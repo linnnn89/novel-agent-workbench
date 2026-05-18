@@ -15,6 +15,7 @@ novel_agent_workbench.chapters
 novel_agent_workbench.context_queue
 novel_agent_workbench.context_previews
 novel_agent_workbench.formal_context
+novel_agent_workbench.context_assembler
 novel_agent_workbench.audit
 novel_agent_workbench.application_service
 novel_agent_workbench.cli
@@ -30,6 +31,7 @@ Current safety hardening:
 - formal context policy priority is stored in config and copied into preview metadata only.
 - formal context extraction plans are metadata-only category work plans and do not extract or store chapter text.
 - world-building context has a world-book overlap policy that can reduce Memory Bank weight when the future world book is enabled.
+- context assembler dry-run is metadata-only and previews local token-budget selection before Provider calls.
 - audit checks confirmed chapter consistency and revision request/generated draft consistency.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

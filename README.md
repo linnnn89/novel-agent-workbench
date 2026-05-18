@@ -86,6 +86,7 @@ MVP-0 first storage slice is implemented:
 - MVP-7 Formal Context Policy schema with priority order: world building, character relationships, chapter summary, style memory, foreshadowing.
 - MVP-7.5 Formal Context Extraction Plan artifacts that turn context previews into metadata-only category work plans without extracting text or writing Memory Bank/RAG/export.
 - World-book overlap policy for world building context: when `world_book_enabled=true`, formal context plans reduce world-building Memory Bank weight by default to avoid duplicate tokens.
+- MVP-8 Context Assembler dry-run that previews local context selection, estimated token budget, and selected/skipped metadata before any Provider call.
 - Unit tests.
 
 Verification command:
@@ -107,4 +108,11 @@ Operator docs:
 codex_docs\CLI_QUICKSTART.md
 codex_docs\APPLICATION_SERVICE_CONTRACT.md
 codex_docs\PROVIDER_ADAPTER_CONTRACT.md
+codex_docs\IMPORTANT_OPEN_ISSUES.md
+```
+
+Current重点难题:
+
+```text
+Memory Bank priority must be implemented by local Context Assembler logic before Provider calls; LLM APIs will not enforce it natively.
 ```

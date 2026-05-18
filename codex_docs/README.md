@@ -6,5 +6,12 @@ Current documents:
 
 - `PROJECT_CHARTER.md`: product boundary and non-negotiable engineering rules.
 - `DECISIONS.md`: chronological decision log.
+- `IMPORTANT_OPEN_ISSUES.md`: high-priority architectural risks that must not be lost.
+
+Current high-priority architecture issue:
+
+```text
+OI-001 Memory Bank priority is local Context Assembler logic, not an LLM API feature.
+```
 
 Every meaningful design decision, file creation, implementation change, test result, or failure recovery must be written here or under `codex_logs/`.

@@ -280,6 +280,26 @@ world_building memory_weight=1.0 normally, reduced to 0.35 when world_book_enabl
 
 This prevents future world book and Memory Bank context from duplicating stable setting facts at full token weight. It is an option and recommendation surface only in this phase.
 
+Important open issue:
+
+```text
+Memory Bank priority is not an LLM API-native feature. It must be implemented in a local Context Assembler before ProviderRequest construction.
+```
+
+Track details in:
+
+```text
+codex_docs/IMPORTANT_OPEN_ISSUES.md
+```
+
+MVP-8 context assembler dry-run slice:
+
+```text
+context-assembly-dry-run + local candidate ranking preview + metadata-only token budget estimate.
+```
+
+This is a diagnostic surface for future Provider prompt assembly. It may read formal context plans and Memory Bank item metadata, but it must not return prompt text, chapter text, Memory Bank text, or plaintext secrets. It must not call Providers or write project data.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

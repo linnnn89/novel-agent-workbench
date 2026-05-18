@@ -781,6 +781,37 @@ Returns one formal context plan artifact.
 
 May return category work items, priority order, text statistics, safety flags, and recommendation. Must not return chapter text, prompt text, raw Provider responses, request bodies, or plaintext secrets.
 
+### context_assembly_dry_run(project_id, max_context_tokens=None)
+
+Builds a metadata-only preview of future local context assembly.
+
+Returns:
+
+```text
+project_id
+mode
+token_budget
+provider_api_boundary
+selected
+skipped
+candidates
+warnings
+```
+
+`provider_api_boundary` must show:
+
+```text
+llm_api_accepts_priority_fields=false
+requires_local_context_assembly=true
+provider_called=false
+output_contains_prompt_text=false
+output_contains_chapter_text=false
+```
+
+Candidate items may include source type, ids, category id, priority, memory weight, estimated tokens, character count, and reason. They must not include prompt text, chapter text, Memory Bank text, raw Provider responses, request bodies, or plaintext secrets.
+
+This method is read-only. It must not write artifacts, mutate Memory Bank, update RAG/export, create drafts, create confirmed chapters, or call Providers.
+
 ### list_confirmed_chapters(project_id)
 
 Returns confirmed chapter metadata from `data/confirmed_chapters.json`.

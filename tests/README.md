@@ -111,6 +111,15 @@ Formal context plan tests currently cover:
 - audit/public/CLI outputs excluding prompt text, confirmed chapter text, and plaintext secrets,
 - CLI commands `create-formal-context-plan`, `list-formal-context-plans`, and `read-formal-context-plan`.
 
+Context assembler dry-run tests currently cover:
+
+- metadata-only local context selection previews,
+- explicit `requires_local_context_assembly` API boundary,
+- category priority and memory weight ordering,
+- token-budget selected/skipped behavior,
+- world-book overlap weight reflected in dry-run candidates,
+- CLI output excluding prompt text, confirmed chapter text, Memory Bank text, and plaintext secrets.
+
 Checkpoint tests currently cover:
 
 - manifest creation,

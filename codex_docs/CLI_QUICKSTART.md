@@ -355,6 +355,14 @@ world_building memory_weight=0.35 when context_policy.world_book_enabled=true
 
 Meaning: if the future world book is enabled, world-building facts should mainly live there. Memory Bank should keep only compact continuity cues to avoid repeated tokens.
 
+Preview local context assembly:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test context-assembly-dry-run demo_project --max-context-tokens 4096
+```
+
+This command does not call a Provider and does not print chapter text, prompt text, Memory Bank text, or secrets. It previews candidate priority, estimated token use, selected/skipped status, and world-book overlap recommendations.
+
 Read a confirmed chapter:
 
 ```powershell

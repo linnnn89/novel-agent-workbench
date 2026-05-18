@@ -13,6 +13,7 @@ Each folder should contain a `README.md` with operation, files changed, verifica
 Recent log:
 
 ```text
+2026-05-18_mvp8_context_assembler_dry_run
 2026-05-18_mvp76_world_book_overlap_policy
 2026-05-18_mvp75_formal_context_plan
 2026-05-18_mvp7_formal_context_policy

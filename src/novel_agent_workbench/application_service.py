@@ -7,6 +7,7 @@ from typing import Any
 from .audit import audit_project
 from .context_previews import ContextUpdatePreviewService
 from .chapters import ChapterWorkflowService
+from .context_assembler import ContextAssemblerService
 from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .formal_context import FormalContextPlanService
@@ -217,6 +218,11 @@ class WorkbenchApplicationService:
 
     def read_formal_context_plan(self, project_id: str, plan_id: str) -> dict[str, Any]:
         return FormalContextPlanService(self._open_store(project_id)).read_formal_context_plan(plan_id)
+
+    def context_assembly_dry_run(self, project_id: str, *, max_context_tokens: int | None = None) -> dict[str, Any]:
+        return ContextAssemblerService(self._open_store(project_id)).dry_run(
+            max_context_tokens=max_context_tokens,
+        ).to_dict()
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()

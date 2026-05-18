@@ -373,3 +373,11 @@ Decision: World-building formal context has an explicit overlap policy with the 
 Reason: `world_building` is high priority, but a future world book will also store stable setting facts. If both Memory Bank and world book include the same facts at full strength, context assembly can waste tokens and increase contradiction risk.
 
 Impact: `formal_context_policy.categories.world_building` now stores `world_book_overlap_policy=reduce_memory_when_world_book_enabled`, `memory_weight=1.0`, and `world_book_enabled_memory_weight=0.35`. Formal context plan category items expose the effective `memory_weight`, `world_book_enabled`, `world_book_overlap_policy`, and a recommendation. When `context_policy.world_book_enabled=true`, world-building Memory Bank weight is reduced by default. This is still metadata only; no Memory Bank, world book, RAG, export, Provider, or UI write was added.
+
+## 2026-05-18: MVP-8 Context Assembler Dry-Run
+
+Decision: Add a metadata-only local Context Assembler dry-run before implementing Memory Bank writes or final Provider prompt rendering.
+
+Reason: Memory priority is not an LLM API-native capability. The project needs a local, testable surface that shows which context candidates would be selected, skipped, or reduced before real Provider calls depend on that behavior.
+
+Impact: `ContextAssemblerService.dry_run(...)` collects formal context plan categories and existing Memory Bank item metadata, estimates token usage with a simple character-based estimator, sorts by category priority and memory weight, and returns selected/skipped metadata. It exposes that LLM APIs do not accept priority fields and that local assembly is required. CLI command `context-assembly-dry-run` exposes the check. The dry-run writes no files, returns no chapter text, Memory Bank text, prompt text, or plaintext secrets, and does not call Providers.
