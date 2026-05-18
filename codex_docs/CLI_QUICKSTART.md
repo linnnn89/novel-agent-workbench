@@ -483,6 +483,8 @@ ok: true
 findings: []
 ```
 
+For context-aware drafts, audit validates `context_generation` metadata and drafts index consistency. It does not reject normal draft body text, because draft artifacts are allowed to contain generated content for human review.
+
 ## Safety And Cleanup Policy
 
 Do not hard delete real project files during early MVP.

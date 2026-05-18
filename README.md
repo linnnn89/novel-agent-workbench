@@ -95,6 +95,7 @@ MVP-0 first storage slice is implemented:
 - MVP-11 Context Package Preview that assembles enabled manual Memory Bank text into a local preview, remains read-only, calls no Provider, and defaults to metadata-only output unless `include_text` is explicit.
 - MVP-11.5 Prompt Render Dry-Run that combines an operator prompt with the context package in a no-write envelope, defaulting to redacted prompt/context output unless explicit include flags are used.
 - MVP-12 Mock-Only Context-Aware Draft Generation that uses the prompt render envelope to create a draft through the local mock writer only, with no real Provider, no auto-commit, and no Memory Bank/RAG/export side effects.
+- MVP-12.5 Audit checks for context-aware draft metadata consistency and prompt/context/secret leakage before real Providers are allowed to use assembled context.
 - Unit tests.
 
 Verification command:

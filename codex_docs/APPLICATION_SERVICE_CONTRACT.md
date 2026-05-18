@@ -1274,6 +1274,23 @@ Must not modify project files.
 
 Must not return prompt text, generated content, or plaintext secrets.
 
+Context-aware draft audit checks include:
+
+```text
+invalid_context_generation_draft_index_entry
+unsafe_context_generation_draft_path
+missing_context_generation_draft_artifact
+context_generation_metadata_missing
+context_generation_mode_invalid
+context_generation_text_flag_invalid
+context_generation_section_count_mismatch
+possible_secret_in_context_generation
+possible_prompt_in_context_generation
+context_generation_forbidden_metadata_key
+```
+
+Audit checks `context_generation` metadata and drafts index consistency. It does not flag normal draft `content` merely because draft artifacts are allowed to contain generated text for human review.
+
 ### provider_status(project_id, role)
 
 Runs a local Provider configuration check for one role.

@@ -278,6 +278,44 @@ class ProjectAuditTest(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertIn("revision_generated_draft_request_mismatch", {item["code"] for item in result["findings"]})
 
+    def test_audit_passes_context_generation_draft_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_context_generation_app(temp)
+
+            result = app.audit_project("demo")
+
+            self.assertTrue(result["ok"], json.dumps(result, ensure_ascii=False))
+
+    def test_audit_fails_on_context_generation_metadata_leak(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_context_generation_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            draft_entry = next(item for item in DraftGenerationService(store).list_drafts() if item.get("context_aware"))
+            draft = DraftGenerationService(store).read_draft(draft_entry["draft_id"])
+            draft["context_generation"]["text"] = "private leaked prompt"
+            store.write_json(str(draft_entry["path"]), draft)
+
+            result = audit_project(store)
+            codes = {item["code"] for item in result["findings"]}
+
+            self.assertFalse(result["ok"])
+            self.assertIn("context_generation_forbidden_metadata_key", codes)
+            self.assertIn("possible_prompt_in_context_generation", codes)
+
+    def test_audit_fails_on_context_generation_missing_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_context_generation_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            draft_entry = next(item for item in DraftGenerationService(store).list_drafts() if item.get("context_aware"))
+            draft = DraftGenerationService(store).read_draft(draft_entry["draft_id"])
+            draft.pop("context_generation")
+            store.write_json(str(draft_entry["path"]), draft)
+
+            result = audit_project(store)
+
+            self.assertFalse(result["ok"])
+            self.assertIn("context_generation_metadata_missing", {item["code"] for item in result["findings"]})
+
     def test_audit_is_read_only_for_uninitialized_project(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = ProjectStore.open(Path(temp), "demo")
@@ -307,6 +345,33 @@ def configured_revision_project(temp: str) -> tuple[ProjectStore, str, str]:
     request = app.create_revision_request("demo", review["review_id"])
     generated = app.generate_revision_draft("demo", request["revision_request_id"])
     return ProjectStore.open(Path(temp), "demo"), request["revision_request_id"], generated["draft_id"]
+
+
+def configured_context_generation_app(temp: str) -> WorkbenchApplicationService:
+    app = WorkbenchApplicationService.open(Path(temp))
+    app.create_project("demo")
+    app.configure_mock_writer("demo")
+    store = ProjectStore.open(Path(temp), "demo")
+    store.write_json(
+        store.data_file_path("memory_bank.json"),
+        {
+            "schema_version": 1,
+            "enabled": True,
+            "items": [
+                {
+                    "memory_id": "memory_context_audit",
+                    "category_id": "world_building",
+                    "status": "ready",
+                    "text_status": "manual",
+                    "text": "Manual memory: all winter gates use blue seals.",
+                    "memory_weight": 1.0,
+                    "enabled": True,
+                }
+            ],
+        },
+    )
+    app.generate_context_draft("demo", chapter_id="chapter_001", prompt="private audit context prompt")
+    return app
 
 
 if __name__ == "__main__":

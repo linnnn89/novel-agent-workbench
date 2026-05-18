@@ -103,6 +103,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     audit_reviews(store, checked_paths=checked_paths, findings=findings)
     audit_revision_requests(store, checked_paths=checked_paths, findings=findings)
     audit_revision_consistency(store, checked_paths=checked_paths, findings=findings)
+    audit_context_generation_drafts(store, checked_paths=checked_paths, findings=findings)
     audit_checkpoints(store, checked_paths=checked_paths, findings=findings)
     audit_provider_adapter_config(store, checked_paths=checked_paths, findings=findings)
     audit_draft_confirmed_consistency(store, checked_paths=checked_paths, findings=findings)
@@ -433,6 +434,146 @@ def audit_revision_consistency(store: ProjectStore, *, checked_paths: list[str],
                     message="Generated revision draft source_review_id does not match the request.",
                 )
             )
+
+
+CONTEXT_GENERATION_FORBIDDEN_KEYS = {
+    "text",
+    "content",
+    "prompt",
+    "prompt_text",
+    "system_prompt",
+    "memory_text",
+    "context_text",
+    "rendered_prompt",
+    "rendered_messages",
+    "request_body",
+    "raw_response",
+}
+
+
+def audit_context_generation_drafts(
+    store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]
+) -> None:
+    drafts_index_path = store.data_dir / "drafts_index.json"
+    drafts_index = read_json_file(drafts_index_path, checked_paths=checked_paths, findings=findings)
+    draft_entries = list_items(drafts_index, "drafts")
+    for entry in draft_entries:
+        if not entry.get("context_aware"):
+            continue
+        draft_id = str(entry.get("draft_id") or "")
+        path_value = entry.get("path")
+        if not isinstance(path_value, str) or not path_value:
+            findings.append(
+                AuditFinding(
+                    code="invalid_context_generation_draft_index_entry",
+                    path=str(drafts_index_path),
+                    message=f"Context-aware draft {draft_id or '<unknown>'} has no artifact path.",
+                )
+            )
+            continue
+        artifact_path = project_relative_artifact_path(store, path_value)
+        if artifact_path is None:
+            findings.append(
+                AuditFinding(
+                    code="unsafe_context_generation_draft_path",
+                    path=str(drafts_index_path),
+                    message=f"Context-aware draft {draft_id or '<unknown>'} artifact path escapes project root.",
+                )
+            )
+            continue
+        artifact = read_json_file(artifact_path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            findings.append(
+                AuditFinding(
+                    code="missing_context_generation_draft_artifact",
+                    path=str(artifact_path),
+                    message=f"Context-aware draft {draft_id or '<unknown>'} artifact is missing.",
+                )
+            )
+            continue
+        metadata = artifact.get("context_generation")
+        if not isinstance(metadata, dict):
+            findings.append(
+                AuditFinding(
+                    code="context_generation_metadata_missing",
+                    path=str(artifact_path),
+                    message=f"Context-aware draft {draft_id or '<unknown>'} has no context_generation metadata.",
+                )
+            )
+            continue
+        if str(metadata.get("mode") or "") != "mock_context_aware_generation":
+            findings.append(
+                AuditFinding(
+                    code="context_generation_mode_invalid",
+                    path=str(artifact_path),
+                    message="Context generation metadata mode is not the approved mock-only mode.",
+                )
+            )
+        if metadata.get("text_in_artifact_metadata") is not False:
+            findings.append(
+                AuditFinding(
+                    code="context_generation_text_flag_invalid",
+                    path=str(artifact_path),
+                    message="Context generation metadata must explicitly record text_in_artifact_metadata=false.",
+                )
+            )
+        index_count = entry.get("context_section_count")
+        metadata_count = metadata.get("context_section_count")
+        if isinstance(index_count, int) and isinstance(metadata_count, int) and index_count != metadata_count:
+            findings.append(
+                AuditFinding(
+                    code="context_generation_section_count_mismatch",
+                    path=str(artifact_path),
+                    message="Context generation section count does not match drafts index.",
+                )
+            )
+        audit_context_generation_metadata_text(metadata, path=str(artifact_path), findings=findings)
+        audit_context_generation_forbidden_keys(metadata, path=str(artifact_path), findings=findings)
+
+
+def audit_context_generation_metadata_text(
+    metadata: dict[str, Any], *, path: str, findings: list[AuditFinding]
+) -> None:
+    text = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+    for pattern in SECRET_PATTERNS:
+        if pattern.search(text):
+            findings.append(
+                AuditFinding(
+                    code="possible_secret_in_context_generation",
+                    path=path,
+                    message=f"Matched {pattern.pattern}",
+                )
+            )
+            break
+    for pattern in PROMPT_PATTERNS:
+        if pattern.search(text):
+            findings.append(
+                AuditFinding(
+                    code="possible_prompt_in_context_generation",
+                    path=path,
+                    message=f"Matched {pattern.pattern}",
+                )
+            )
+            break
+
+
+def audit_context_generation_forbidden_keys(
+    value: object, *, path: str, findings: list[AuditFinding]
+) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in CONTEXT_GENERATION_FORBIDDEN_KEYS:
+                findings.append(
+                    AuditFinding(
+                        code="context_generation_forbidden_metadata_key",
+                        path=path,
+                        message=f"Context generation metadata contains forbidden key: {key}",
+                    )
+                )
+            audit_context_generation_forbidden_keys(item, path=path, findings=findings)
+    elif isinstance(value, list):
+        for item in value:
+            audit_context_generation_forbidden_keys(item, path=path, findings=findings)
 
 
 def audit_checkpoints(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:

@@ -364,6 +364,14 @@ generate-context-draft + prompt render envelope + local mock writer only.
 
 This is the first draft generation path that consumes assembled manual Memory Bank context. It must remain mock-only, metadata-safe, and explicit. It may create a draft artifact with generated mock content and safe context-generation summary. It must not call real Providers, auto-commit, write prompt logs, store operator prompt or Memory Bank text in metadata, update world book, update RAG/export, create DOCX, or mutate confirmed chapters.
 
+MVP-12.5 context generation audit slice:
+
+```text
+audit-project + context_generation metadata checks + draft index consistency.
+```
+
+Audit must validate context-aware draft metadata before any real Provider uses assembled context. It should check metadata, indexes, and leak-prone fields without treating normal draft body content as an error. It must remain read-only.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

@@ -445,3 +445,11 @@ Decision: Add context-aware draft generation through the local `mock` writer onl
 Reason: The context package and prompt render dry-run now prove the local assembly boundary. The next safe step is to verify the end-to-end draft path without introducing real Provider risk or automatic commit.
 
 Impact: `DraftGenerationService.generate_context_draft(...)` builds a local prompt render dry-run with explicit local text inclusion, renders a combined in-memory prompt, and sends it only to the configured `mock` writer. Draft artifacts may store generated mock content and safe `context_generation` metadata, including context source ids and counts, but not operator prompt text or Memory Bank text. CLI command `generate-context-draft` exposes the flow. It does not allow real Providers, auto-commit, update Memory Bank, update world book, update RAG/export, create DOCX, or write prompt logs.
+
+## 2026-05-18: MVP-12.5 Context Generation Audit
+
+Decision: Extend `audit-project` to validate context-aware draft metadata before real Providers can consume assembled context.
+
+Reason: Draft artifacts may contain generated content, so audit must not blindly scan every draft body as a leak. The safer boundary is to audit the `context_generation` metadata and drafts index consistency.
+
+Impact: `audit-project` now checks context-aware draft index entries, artifact paths, required `context_generation` metadata, approved mock-only mode, text-safety flags, section-count consistency, forbidden metadata keys, and prompt/secret-like strings inside `context_generation`. It does not treat the normal draft `content` field as an audit failure. This preserves the draft review workflow while catching accidental prompt/context leakage in metadata.

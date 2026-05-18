@@ -342,6 +342,9 @@ Audit tests currently cover:
 - Chutes real-generation-enabled config with the expected disabled-adapter finding but no secret leak.
 - real-generation-enabled missing secret findings.
 - revision request/generated draft consistency failures.
+- context-aware draft metadata consistency,
+- context-aware draft metadata missing detection,
+- context-aware draft prompt/context leakage detection without treating normal draft body text as an error.
 
 Secret storage hardening tests currently cover:
 
