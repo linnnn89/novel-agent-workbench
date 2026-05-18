@@ -405,3 +405,11 @@ Decision: Add an explicit gate for committing Memory Apply Preview metadata into
 Reason: The system needs a reversible, auditable first Memory Bank write path, but it is still unsafe to auto-extract or store chapter text. The first write path should create empty placeholder entries that future manual fill/edit steps can populate.
 
 Impact: `MemoryApplyPreviewService.commit_memory_apply_preview(...)` creates a `pre_memory_apply` checkpoint, then writes only placeholder Memory Bank entries with `entry_type=formal_context_placeholder`, `status=manual_text_required`, and `text=""`. Duplicate source tasks are skipped on repeated commits. CLI command `commit-memory-apply-preview` exposes the explicit gate. The operation does not copy prompt text, chapter text, Memory Bank text, raw Provider responses, or plaintext secrets, and does not write world book, RAG, exports, drafts, confirmed chapters, or Providers.
+
+## 2026-05-18: MVP-10 Manual Memory Bank Text Fill/Edit
+
+Decision: Add an explicit manual text fill/edit workflow for placeholder Memory Bank entries.
+
+Reason: The project now has a safe metadata path from confirmed chapters to manual context tasks and placeholder Memory Bank entries. The next safest step is human-authored Memory Bank text, not automatic extraction. This keeps the difficult context-priority problem visible while avoiding silent prompt/content copying.
+
+Impact: `MemoryBankService.set_memory_text(...)` creates a `pre_memory_text_update` checkpoint, validates nonempty text, rejects text longer than 1200 characters, rejects obvious secret-like values, and writes the text only into the selected `memory_bank.json` item with `status=ready` and `text_status=manual`. Default list/read/project-state surfaces remain metadata-only; the actual Memory Bank text is returned only by an explicit `include_text=true` read. CLI commands `list-memory-items`, `read-memory-item`, and `set-memory-text` expose the flow. The operation does not call Providers, extract chapter text, write world book, update RAG/export, mutate drafts/confirmed chapters, or auto-assemble Provider prompts.

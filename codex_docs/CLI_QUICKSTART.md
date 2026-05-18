@@ -391,6 +391,24 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This creates a `pre_memory_apply` checkpoint and writes placeholder entries with empty `text` and `manual_text_required` status. It still does not extract chapter text or call a Provider.
 
+List and fill Memory Bank items manually:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-memory-items demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test set-memory-text demo_project <memory_id> --text "Manual continuity note goes here."
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-memory-item demo_project <memory_id>
+```
+
+Default list/read output is metadata-only. It shows `text_chars`, not the note itself.
+
+To explicitly inspect the manual Memory Bank text:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-memory-item demo_project <memory_id> --include-text
+```
+
+Manual Memory Bank text writes create a `pre_memory_text_update` checkpoint, reject empty text, reject text longer than 1200 characters, and reject obvious secret-like values. They do not call Providers, update world book, update RAG/export, mutate drafts/confirmed chapters, or auto-assemble Provider prompts.
+
 Read a confirmed chapter:
 
 ```powershell
@@ -549,3 +567,11 @@ DraftGenerationError: Unsafe chapter_id
 ```
 
 Use ASCII letters, numbers, `_`, and `-` for `chapter_id`. Put Chinese or long human-readable names in `--title` / `--chapter-title`.
+
+Manual Memory Bank text is too long or secret-like:
+
+```text
+MemoryBankError
+```
+
+Meaning: keep each manual Memory Bank item compact, and never paste API keys or provider credentials into Memory Bank text.

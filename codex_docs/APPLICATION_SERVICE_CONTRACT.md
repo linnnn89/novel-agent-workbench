@@ -981,6 +981,82 @@ Repeated commits of the same preview must skip duplicate source tasks rather tha
 
 This method must not extract or copy chapter text, prompt text, existing Memory Bank text, raw Provider responses, request bodies, or plaintext secrets. It must not update world book, update RAG/export, create drafts, create confirmed chapters, or call Providers.
 
+### list_memory_items(project_id, include_text=False)
+
+Returns Memory Bank item metadata from:
+
+```text
+data/memory_bank.json
+```
+
+Default output is metadata-only and excludes the `text` field. It may include:
+
+```text
+memory_id
+entry_type
+status
+source ids
+chapter_id
+category_id
+priority
+target
+memory_weight
+duplicate_risk
+text_status
+text_chars
+created_at
+updated_at
+```
+
+`include_text=True` is reserved for explicit human review surfaces. It must not be used by default state, list, or audit-style outputs.
+
+### read_memory_item(project_id, memory_id, include_text=False)
+
+Returns one Memory Bank item.
+
+Default output excludes `text`. With `include_text=True`, this method may return the manual Memory Bank text for human review.
+
+Must not return prompt text, chapter text, raw Provider responses, request bodies, or plaintext secrets.
+
+### set_memory_text(project_id, memory_id, text)
+
+Explicitly writes manual text into one Memory Bank placeholder item.
+
+Creates a pre-write checkpoint:
+
+```text
+label=pre_memory_text_update
+```
+
+Validation:
+
+```text
+text must be nonempty after trimming
+text length <= 1200 characters
+obvious sk-/cpk_-style secret strings are rejected
+```
+
+Returns metadata only:
+
+```text
+memory_id
+status
+text_chars
+checkpoint
+updated_at
+```
+
+The returned value must not include the written text. The operation may set:
+
+```text
+status=ready
+text_status=manual
+safety.manual_text=true
+safety.provider_called=false
+```
+
+This method must not call Providers, auto-extract from chapters, update world book, update RAG/export, create drafts, create confirmed chapters, or auto-assemble Provider prompts.
+
 ### list_confirmed_chapters(project_id)
 
 Returns confirmed chapter metadata from `data/confirmed_chapters.json`.

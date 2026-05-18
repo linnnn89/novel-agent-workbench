@@ -324,6 +324,14 @@ commit-memory-apply-preview + pre_memory_apply checkpoint + placeholder Memory B
 
 This is the first allowed Memory Bank write path. It must be explicit and reversible. It may write only structured placeholder entries with empty `text` and `manual_text_required` status. It must not extract chapter text, copy prompt text, copy existing Memory Bank text, write world book, update RAG/export, mutate drafts/confirmed chapters, or call Providers.
 
+MVP-10 manual Memory Bank text fill/edit slice:
+
+```text
+set-memory-text + pre_memory_text_update checkpoint + explicit include-text read.
+```
+
+This is the first allowed Memory Bank text write path. Text must be manually supplied, bounded, secret-scanned, checkpointed, and returned only through an explicit read flag. It must not auto-extract from chapters, call Providers, write world book, update RAG/export, mutate drafts/confirmed chapters, or auto-assemble prompt context.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

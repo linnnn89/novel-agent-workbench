@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from novel_agent_workbench import WorkbenchApplicationService
 from novel_agent_workbench import audit_project
+from novel_agent_workbench import MemoryBankError
 from novel_agent_workbench.cli import main
 from novel_agent_workbench.storage import ProjectStore
 
@@ -289,6 +290,88 @@ class ContextAssemblerTest(unittest.TestCase):
             self.assertNotIn("private assembler prompt", stdout)
             self.assertNotIn("MOCK writer", stdout)
 
+    def test_manual_memory_text_fill_is_explicit_and_default_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            store.update_secrets({"mock_key": "sk-memory-fill-secret"})
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "本章新增王城禁书区规则，后续冲突围绕通行许可展开。"
+
+            result = app.set_memory_text("demo", memory_id, manual_text)
+            listed = app.list_memory_items("demo")
+            read_default = app.read_memory_item("demo", memory_id)
+            read_with_text = app.read_memory_item("demo", memory_id, include_text=True)
+            state = app.project_state("demo")
+            audit = audit_project(store)
+            default_text = json.dumps(
+                {"result": result, "listed": listed, "read_default": read_default, "state": state, "audit": audit},
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(result["status"], "ready")
+            self.assertEqual(result["text_chars"], len(manual_text))
+            self.assertTrue(Path(result["checkpoint"]["path"]).exists())
+            self.assertEqual(listed[0]["text_chars"], len(manual_text))
+            self.assertNotIn("text", read_default)
+            self.assertEqual(read_with_text["text"], manual_text)
+            self.assertEqual(state["latest_memory_bank_item"]["text_status"], "manual")
+            self.assertTrue(audit["ok"], json.dumps(audit, ensure_ascii=False))
+            self.assertNotIn(manual_text, default_text)
+            self.assertNotIn("sk-memory-fill-secret", default_text)
+
+    def test_manual_memory_text_rejects_secret_like_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+
+            with self.assertRaises(MemoryBankError):
+                app.set_memory_text("demo", memory_id, "cpk_fake_secret_value_123456789")
+
+    def test_manual_memory_text_rejects_oversized_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+
+            with self.assertRaises(MemoryBankError):
+                app.set_memory_text("demo", memory_id, "x" * 1201)
+
+    def test_manual_memory_text_missing_item_does_not_create_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            checkpoint_dir = store.backups_dir / "checkpoints"
+            before = sorted(checkpoint_dir.glob("*.zip"))
+
+            with self.assertRaises(MemoryBankError):
+                app.set_memory_text("demo", "missing_memory_id", "Manual memory note.")
+
+            after = sorted(checkpoint_dir.glob("*.zip"))
+            self.assertEqual(before, after)
+
+    def test_manual_memory_text_cli_is_metadata_only_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "人物关系更新：阿宁开始怀疑导师隐瞒旧案。"
+
+            set_code, set_stdout, set_stderr = run_cli(
+                ["--projects-root", temp, "set-memory-text", "demo", memory_id, "--text", manual_text]
+            )
+            list_code, list_stdout, list_stderr = run_cli(["--projects-root", temp, "list-memory-items", "demo"])
+            read_code, read_stdout, read_stderr = run_cli(["--projects-root", temp, "read-memory-item", "demo", memory_id])
+            include_code, include_stdout, include_stderr = run_cli(
+                ["--projects-root", temp, "read-memory-item", "demo", memory_id, "--include-text"]
+            )
+            default_combined = set_stdout + list_stdout + read_stdout
+
+            self.assertEqual(set_code, 0, set_stderr)
+            self.assertEqual(list_code, 0, list_stderr)
+            self.assertEqual(read_code, 0, read_stderr)
+            self.assertEqual(include_code, 0, include_stderr)
+            self.assertNotIn(manual_text, default_combined)
+            self.assertEqual(json.loads(include_stdout)["result"]["text"], manual_text)
+
 
 def configured_context_plan_app(temp: str, *, world_book_enabled: bool = False) -> WorkbenchApplicationService:
     app = WorkbenchApplicationService.open(Path(temp))
@@ -304,6 +387,15 @@ def configured_context_plan_app(temp: str, *, world_book_enabled: bool = False) 
     update = app.enqueue_context_updates("demo")["items"][0]
     preview = app.create_context_preview("demo", update["update_id"])
     app.create_formal_context_plan("demo", preview["preview_id"])
+    return app
+
+
+def configured_memory_bank_app(temp: str) -> WorkbenchApplicationService:
+    app = configured_context_plan_app(temp)
+    plan_id = app.list_formal_context_plans("demo")[0]["plan_id"]
+    app.enqueue_formal_context_tasks("demo", plan_id)
+    preview = app.create_memory_apply_preview("demo")
+    app.commit_memory_apply_preview("demo", preview["preview_id"])
     return app
 
 

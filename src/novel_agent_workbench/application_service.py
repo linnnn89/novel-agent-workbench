@@ -13,6 +13,7 @@ from .drafts import DraftGenerationRequest, DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
 from .memory_apply_preview import MemoryApplyPreviewService
+from .memory_bank import MemoryBankService
 from .project_state import public_project_state
 from .providers import (
     ProviderRequest,
@@ -254,6 +255,15 @@ class WorkbenchApplicationService:
 
     def commit_memory_apply_preview(self, project_id: str, preview_id: str) -> dict[str, Any]:
         return MemoryApplyPreviewService(self._open_store(project_id)).commit_memory_apply_preview(preview_id).to_dict()
+
+    def list_memory_items(self, project_id: str, *, include_text: bool = False) -> list[dict[str, Any]]:
+        return MemoryBankService(self._open_store(project_id)).list_memory_items(include_text=include_text)
+
+    def read_memory_item(self, project_id: str, memory_id: str, *, include_text: bool = False) -> dict[str, Any]:
+        return MemoryBankService(self._open_store(project_id)).read_memory_item(memory_id, include_text=include_text)
+
+    def set_memory_text(self, project_id: str, memory_id: str, text: str) -> dict[str, Any]:
+        return MemoryBankService(self._open_store(project_id)).set_memory_text(memory_id, text).to_dict()
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()

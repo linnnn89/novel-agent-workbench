@@ -18,6 +18,7 @@ novel_agent_workbench.formal_context
 novel_agent_workbench.formal_context_tasks
 novel_agent_workbench.context_assembler
 novel_agent_workbench.memory_apply_preview
+novel_agent_workbench.memory_bank
 novel_agent_workbench.audit
 novel_agent_workbench.application_service
 novel_agent_workbench.cli
@@ -37,6 +38,7 @@ Current safety hardening:
 - formal context task queue is metadata-only and does not apply Memory Bank/RAG/export updates.
 - memory apply previews are metadata-only and do not write `memory_bank.json`.
 - memory apply commit gate writes only placeholder Memory Bank entries with empty text and `manual_text_required` status.
+- manual Memory Bank text fill/edit is explicit, checkpointed, bounded to 1200 characters, rejects secret-like values, and does not call Providers or auto-update RAG/export.
 - audit checks confirmed chapter consistency and revision request/generated draft consistency.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

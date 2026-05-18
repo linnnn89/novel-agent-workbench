@@ -149,6 +149,19 @@ Memory Bank apply commit gate tests currently cover:
 - audit passing after placeholder Memory Bank writes,
 - CLI/facade output excluding prompt text, confirmed chapter text, and plaintext secrets.
 
+Manual Memory Bank text tests currently cover:
+
+- explicit `set-memory-text` writes into existing placeholder items,
+- `pre_memory_text_update` checkpoint creation,
+- item status moving to `ready` with `text_status=manual`,
+- default list/read/state output returning metadata and `text_chars` but not text,
+- explicit `read-memory-item --include-text` returning the manual text,
+- secret-like text rejection,
+- oversized text rejection,
+- missing item rejection without creating a pointless checkpoint,
+- audit passing after safe manual Memory Bank text,
+- CLI/facade output excluding prompt text, confirmed chapter text, manual text by default, and plaintext secrets.
+
 Checkpoint tests currently cover:
 
 - manifest creation,

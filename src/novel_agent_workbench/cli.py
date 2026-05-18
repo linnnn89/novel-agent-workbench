@@ -210,6 +210,21 @@ def build_parser() -> argparse.ArgumentParser:
     commit_memory_apply_preview.add_argument("project_id")
     commit_memory_apply_preview.add_argument("preview_id")
 
+    list_memory_items = subparsers.add_parser("list-memory-items")
+    list_memory_items.add_argument("project_id")
+
+    read_memory_item = subparsers.add_parser("read-memory-item")
+    read_memory_item.add_argument("project_id")
+    read_memory_item.add_argument("memory_id")
+    read_memory_item.add_argument("--include-text", action="store_true")
+
+    set_memory_text = subparsers.add_parser("set-memory-text")
+    set_memory_text.add_argument("project_id")
+    set_memory_text.add_argument("memory_id")
+    text_group = set_memory_text.add_mutually_exclusive_group(required=True)
+    text_group.add_argument("--text")
+    text_group.add_argument("--text-stdin", action="store_true")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -385,6 +400,13 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.read_memory_apply_preview(args.project_id, args.preview_id)
     if command == "commit-memory-apply-preview":
         return app.commit_memory_apply_preview(args.project_id, args.preview_id)
+    if command == "list-memory-items":
+        return app.list_memory_items(args.project_id)
+    if command == "read-memory-item":
+        return app.read_memory_item(args.project_id, args.memory_id, include_text=args.include_text)
+    if command == "set-memory-text":
+        text = sys.stdin.read().strip() if args.text_stdin else args.text
+        return app.set_memory_text(args.project_id, args.memory_id, text)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":
