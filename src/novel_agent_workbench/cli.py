@@ -133,6 +133,15 @@ def build_parser() -> argparse.ArgumentParser:
     generate_revision_draft.add_argument("project_id")
     generate_revision_draft.add_argument("revision_request_id")
 
+    list_revision_candidates = subparsers.add_parser("list-revision-candidates")
+    list_revision_candidates.add_argument("project_id")
+    list_revision_candidates.add_argument("revision_request_id")
+
+    compare_revision_candidate = subparsers.add_parser("compare-revision-candidate")
+    compare_revision_candidate.add_argument("project_id")
+    compare_revision_candidate.add_argument("revision_request_id")
+    compare_revision_candidate.add_argument("candidate_draft_id")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -265,6 +274,10 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.read_revision_request(args.project_id, args.revision_request_id)
     if command == "generate-revision-draft":
         return app.generate_revision_draft(args.project_id, args.revision_request_id)
+    if command == "list-revision-candidates":
+        return app.list_revision_candidates(args.project_id, args.revision_request_id)
+    if command == "compare-revision-candidate":
+        return app.compare_revision_candidate(args.project_id, args.revision_request_id, args.candidate_draft_id)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

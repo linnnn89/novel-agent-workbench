@@ -232,6 +232,14 @@ secret no-backup writes + explicit mock-only revision gate + revision consistenc
 
 Secret rotation must not leave old plaintext values in `.bak` files. Revision draft generation remains mock-only even if future real Provider configs are present. Audit should catch missing or mismatched revision request/generated draft artifacts before later UI or automation layers depend on them.
 
+MVP-5.5 revision candidate comparison slice:
+
+```text
+list-revision-candidates + compare-revision-candidate metadata read-model.
+```
+
+The comparison surface is read-only. It may compute length/count deltas and validate links between source draft, review, revision request, and candidate draft. It must not return draft content, prompt text, or plaintext secrets; it must not choose, overwrite, auto-commit, or mutate Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

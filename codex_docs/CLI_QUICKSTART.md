@@ -279,6 +279,15 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This creates a new draft candidate in `data/drafts/`. It does not overwrite the source draft and does not create a confirmed chapter. Use `read-draft <new_draft_id>` to inspect the mock candidate content.
 
+List and compare revision candidates without returning content:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-revision-candidates demo_project <revision_request_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test compare-revision-candidate demo_project <revision_request_id> <candidate_draft_id>
+```
+
+These commands are read-only. They return ids, provider/model/usage, character/word/line counts, deltas, and link checks. They do not return draft body text, prompt text, API keys, or make a commit decision.
+
 Explicitly commit a draft:
 
 ```powershell

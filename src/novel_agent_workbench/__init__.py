@@ -41,6 +41,12 @@ from .providers import (
 from .project_state import public_project_state
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
 from .reviews import DraftReviewError, DraftReviewResult, DraftReviewService, ReviewDecisionResult
+from .revision_candidates import (
+    RevisionCandidateComparison,
+    RevisionCandidateError,
+    RevisionCandidateService,
+    RevisionCandidateSummary,
+)
 from .revisions import RevisionRequestError, RevisionRequestResult, RevisionRequestService
 from .storage import InvalidProjectIdError, ProjectLockError, ProjectRegistry, ProjectStore, StorageError
 
@@ -81,6 +87,10 @@ __all__ = [
     "DraftReviewResult",
     "DraftReviewService",
     "ReviewDecisionResult",
+    "RevisionCandidateComparison",
+    "RevisionCandidateError",
+    "RevisionCandidateService",
+    "RevisionCandidateSummary",
     "RevisionRequestError",
     "RevisionRequestResult",
     "RevisionRequestService",

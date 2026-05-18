@@ -509,6 +509,62 @@ Must not overwrite or mutate the source draft, create confirmed chapters, auto-c
 
 CLI/facade output, indexes, logs, public state, and audit output must not return source draft content, candidate draft content, original prompt text, raw Provider responses, request bodies, or plaintext secrets.
 
+### list_revision_candidates(project_id, revision_request_id)
+
+Returns a read-only metadata view of revision draft candidates linked to one revision request.
+
+Returns:
+
+```text
+revision_request_id
+chapter_id
+source_draft_id
+candidate_count
+candidates
+```
+
+Each candidate summary may include:
+
+```text
+draft_id
+chapter_id
+title
+status
+created_at
+provider
+model
+usage
+char_count
+word_count
+line_count
+```
+
+Must not write project files, choose a candidate, auto-commit, update Memory Bank, update RAG, create exports, create DOCX, call Providers, return draft content, return prompt text, or return plaintext secrets.
+
+### compare_revision_candidate(project_id, revision_request_id, candidate_draft_id)
+
+Returns a read-only metadata comparison between the source draft and one linked revision candidate.
+
+Returns:
+
+```text
+revision_request_id
+chapter_id
+source_draft
+candidate_draft
+deltas
+link_check
+recommendation
+```
+
+`recommendation` is currently:
+
+```text
+manual_review_required
+```
+
+This is not an automatic decision. It must not choose a winner, overwrite drafts, auto-commit, update Memory Bank, update RAG, create exports, create DOCX, call Providers, return draft content, return prompt text, or return plaintext secrets.
+
 ### list_confirmed_chapters(project_id)
 
 Returns confirmed chapter metadata from `data/confirmed_chapters.json`.

@@ -68,6 +68,16 @@ Mock revision draft tests currently cover:
 - safe facade/CLI output excluding prompt text, source draft content, candidate content, and plaintext secrets,
 - CLI command `generate-revision-draft`.
 
+Revision candidate comparison tests currently cover:
+
+- listing revision candidates for one revision request,
+- comparing source draft vs candidate draft with metadata-only summaries,
+- link checks for source draft, source review, revision request, and chapter id,
+- rejection of unlinked draft comparisons,
+- no automatic confirmed chapter, Memory Bank, RAG, export, or Provider side effects,
+- facade and CLI commands `list-revision-candidates` and `compare-revision-candidate`,
+- output excluding prompt text, source draft content, candidate content, and plaintext secrets.
+
 Checkpoint tests currently cover:
 
 - manifest creation,

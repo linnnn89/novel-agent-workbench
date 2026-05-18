@@ -21,6 +21,7 @@ from .providers import (
 )
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
 from .reviews import DraftReviewService
+from .revision_candidates import RevisionCandidateService
 from .revisions import RevisionRequestService
 from .storage import ProjectRegistry, ProjectStore
 
@@ -167,6 +168,18 @@ class WorkbenchApplicationService:
 
     def generate_revision_draft(self, project_id: str, revision_request_id: str) -> dict[str, Any]:
         result = RevisionRequestService(self._open_store(project_id)).generate_revision_draft(revision_request_id)
+        return result.to_dict()
+
+    def list_revision_candidates(self, project_id: str, revision_request_id: str) -> dict[str, Any]:
+        return RevisionCandidateService(self._open_store(project_id)).list_revision_candidates(revision_request_id)
+
+    def compare_revision_candidate(
+        self, project_id: str, revision_request_id: str, candidate_draft_id: str
+    ) -> dict[str, Any]:
+        result = RevisionCandidateService(self._open_store(project_id)).compare_revision_candidate(
+            revision_request_id,
+            candidate_draft_id,
+        )
         return result.to_dict()
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:

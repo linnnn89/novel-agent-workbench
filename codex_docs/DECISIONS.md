@@ -311,3 +311,11 @@ Decision: Close three review findings before starting the next feature layer.
 Reason: The project had grown enough that recovery and audit edges mattered more than adding another workflow step. Secret rotation must not leave old plaintext keys in backup files; MVP-5 revision draft generation must remain mock-only even if a future real `reviser` role is configured; and audit should detect broken revision request/generated draft links.
 
 Impact: `ProjectStore.write_secrets(...)` now uses atomic write without `.bak` backup. Normal JSON files still keep backup behavior. `RevisionRequestService.generate_revision_draft(...)` rejects non-`mock` reviser configs before reading source content or creating a candidate. `audit-project` now validates revision request artifacts, request index entries, generated draft existence, and generated draft back-links to the source draft/review/request.
+
+## 2026-05-18: MVP-5.5 Revision Candidate Comparison Read-Model
+
+Decision: Add a read-only revision candidate comparison surface after mock revision draft generation.
+
+Reason: Once a revision candidate exists, the operator and future UI need a stable way to compare the source draft and candidate without opening raw content everywhere or making an automatic choice.
+
+Impact: `RevisionCandidateService` lists candidates for a revision request and compares one candidate to its source using metadata-only summaries: ids, status, provider/model/usage, character count, word count, line count, link checks, and `manual_review_required`. It writes no files, returns no draft content or prompt text, does not choose a winner, does not commit, does not update Memory Bank/RAG/export, and does not call Providers.

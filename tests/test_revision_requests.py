@@ -15,6 +15,8 @@ from novel_agent_workbench import (
     DraftGenerationService,
     DraftReviewService,
     ProjectStore,
+    RevisionCandidateError,
+    RevisionCandidateService,
     RevisionRequestError,
     RevisionRequestService,
     WorkbenchApplicationService,
@@ -395,6 +397,121 @@ class RevisionRequestServiceTest(unittest.TestCase):
             self.assertEqual(json.loads(stdout)["result"]["provider"], "mock")
             self.assertNotIn("private cli revision draft prompt", stdout)
             self.assertNotIn("MOCK reviser", stdout)
+
+    def test_revision_candidate_comparison_is_metadata_only_and_read_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store(temp)
+            store.update_secrets({"mock_key": "sk-candidate-secret"})
+            memory_before = store.data_file_path("memory_bank.json").read_text(encoding="utf-8")
+            export_before = store.data_file_path("export_settings.json").read_text(encoding="utf-8")
+            review_id, source_draft_id = create_review_decision(
+                store,
+                "chapter_001",
+                decision="needs_revision",
+                prompt="private candidate compare prompt",
+            )
+            request = RevisionRequestService(store).create_revision_request(review_id)
+            generated = RevisionRequestService(store).generate_revision_draft(request.revision_request_id)
+            source = DraftGenerationService(store).read_draft(source_draft_id)
+            candidate = DraftGenerationService(store).read_draft(generated.draft_id)
+
+            service = RevisionCandidateService(store)
+            listed = service.list_revision_candidates(request.revision_request_id)
+            comparison = service.compare_revision_candidate(request.revision_request_id, generated.draft_id).to_dict()
+            safe_text = json.dumps({"listed": listed, "comparison": comparison, "audit": audit_project(store)}, ensure_ascii=False)
+
+            self.assertEqual(listed["candidate_count"], 1)
+            self.assertEqual(listed["candidates"][0]["draft_id"], generated.draft_id)
+            self.assertEqual(comparison["source_draft"]["draft_id"], source_draft_id)
+            self.assertEqual(comparison["candidate_draft"]["draft_id"], generated.draft_id)
+            self.assertEqual(comparison["recommendation"], "manual_review_required")
+            self.assertTrue(all(comparison["link_check"].values()))
+            self.assertNotIn("private candidate compare prompt", safe_text)
+            self.assertNotIn(str(source["content"]), safe_text)
+            self.assertNotIn(str(candidate["content"]), safe_text)
+            self.assertNotIn("sk-candidate-secret", safe_text)
+            self.assertEqual(DraftGenerationService(store).list_confirmed_chapters(), [])
+            self.assertEqual(memory_before, store.data_file_path("memory_bank.json").read_text(encoding="utf-8"))
+            self.assertEqual(export_before, store.data_file_path("export_settings.json").read_text(encoding="utf-8"))
+            self.assertFalse((store.root / "rag").exists())
+            self.assertFalse((store.root / "exports").exists())
+
+    def test_revision_candidate_comparison_rejects_unlinked_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store(temp)
+            review_id, _ = create_review_decision(store, "chapter_001", decision="needs_revision")
+            request = RevisionRequestService(store).create_revision_request(review_id)
+            other = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_002", prompt="private unrelated prompt")
+            )
+
+            with self.assertRaises(RevisionCandidateError):
+                RevisionCandidateService(store).compare_revision_candidate(request.revision_request_id, other.draft_id)
+
+    def test_revision_candidate_facade_and_cli_are_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_project("demo")
+            app.configure_mock_writer("demo")
+            app.configure_provider_role("demo", "scorer", provider="mock", model="mock-scorer")
+            app.configure_provider_role("demo", "reviser", provider="mock", model="mock-reviser")
+            draft = app.generate_draft("demo", chapter_id="chapter_001", prompt="private facade candidate prompt")
+            review = app.review_draft("demo", draft["draft_id"])
+            app.decide_review("demo", review["review_id"], decision="needs_revision", reason_code="manual_fix")
+            request = app.create_revision_request("demo", review["review_id"])
+            candidate = app.generate_revision_draft("demo", request["revision_request_id"])
+
+            listed = app.list_revision_candidates("demo", request["revision_request_id"])
+            comparison = app.compare_revision_candidate("demo", request["revision_request_id"], candidate["draft_id"])
+            result_text = json.dumps({"listed": listed, "comparison": comparison}, ensure_ascii=False)
+
+            self.assertEqual(listed["candidate_count"], 1)
+            self.assertEqual(comparison["candidate_draft"]["draft_id"], candidate["draft_id"])
+            self.assertNotIn("private facade candidate prompt", result_text)
+            self.assertNotIn("MOCK writer", result_text)
+            self.assertNotIn("MOCK reviser", result_text)
+
+        with tempfile.TemporaryDirectory() as temp:
+            run_cli(["--projects-root", temp, "create-project", "demo"])
+            run_cli(["--projects-root", temp, "configure-mock-writer", "demo"])
+            run_cli(["--projects-root", temp, "configure-provider-role", "demo", "scorer", "--provider", "mock", "--model", "mock-scorer"])
+            run_cli(["--projects-root", temp, "configure-provider-role", "demo", "reviser", "--provider", "mock", "--model", "mock-reviser"])
+            _, draft_stdout, _ = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "generate-draft",
+                    "demo",
+                    "--chapter-id",
+                    "chapter_001",
+                    "--prompt",
+                    "private cli candidate prompt",
+                ]
+            )
+            draft_id = json.loads(draft_stdout)["result"]["draft_id"]
+            _, review_stdout, _ = run_cli(["--projects-root", temp, "review-draft", "demo", draft_id])
+            review_id = json.loads(review_stdout)["result"]["review_id"]
+            run_cli(["--projects-root", temp, "decide-review", "demo", review_id, "--decision", "needs_revision"])
+            _, request_stdout, _ = run_cli(["--projects-root", temp, "create-revision-request", "demo", review_id])
+            request_id = json.loads(request_stdout)["result"]["revision_request_id"]
+            _, candidate_stdout, _ = run_cli(["--projects-root", temp, "generate-revision-draft", "demo", request_id])
+            candidate_id = json.loads(candidate_stdout)["result"]["draft_id"]
+
+            list_code, list_stdout, list_stderr = run_cli(
+                ["--projects-root", temp, "list-revision-candidates", "demo", request_id]
+            )
+            compare_code, compare_stdout, compare_stderr = run_cli(
+                ["--projects-root", temp, "compare-revision-candidate", "demo", request_id, candidate_id]
+            )
+            combined = list_stdout + compare_stdout
+
+            self.assertEqual(list_code, 0, list_stderr)
+            self.assertEqual(compare_code, 0, compare_stderr)
+            self.assertEqual(json.loads(list_stdout)["result"]["candidate_count"], 1)
+            self.assertEqual(json.loads(compare_stdout)["result"]["candidate_draft"]["draft_id"], candidate_id)
+            self.assertNotIn("private cli candidate prompt", combined)
+            self.assertNotIn("MOCK writer", combined)
+            self.assertNotIn("MOCK reviser", combined)
 
 
 def configured_store(temp: str) -> ProjectStore:
