@@ -152,12 +152,14 @@ class FormalContextPlanService:
 def plan_categories(store: ProjectStore, priority_order: list[str]) -> list[dict[str, Any]]:
     config = store.read_config()
     context_policy = config.get("context_policy") if isinstance(config, dict) else {}
+    world_book_enabled = bool(context_policy.get("world_book_enabled")) if isinstance(context_policy, dict) else False
     formal = context_policy.get("formal_context_policy") if isinstance(context_policy, dict) else {}
     raw_categories = formal.get("categories") if isinstance(formal, dict) else {}
     categories: list[dict[str, Any]] = []
     for index, category_id in enumerate(priority_order, start=1):
         raw = raw_categories.get(category_id) if isinstance(raw_categories, dict) else {}
         raw = raw if isinstance(raw, dict) else {}
+        memory_weight = category_memory_weight(category_id, raw, world_book_enabled)
         categories.append(
             {
                 "category_id": category_id,
@@ -166,11 +168,51 @@ def plan_categories(store: ProjectStore, priority_order: list[str]) -> list[dict
                 "target": str(raw.get("target") or "memory_bank"),
                 "enabled": bool(raw.get("enabled", True)),
                 "auto_extract": False,
+                "memory_weight": memory_weight,
+                "world_book_enabled": world_book_enabled,
+                "world_book_overlap_policy": str(raw.get("world_book_overlap_policy") or ""),
                 "operation": "manual_extract_plan_only",
                 "state": "not_started",
+                "recommendation": category_recommendation(category_id, raw, world_book_enabled, memory_weight),
             }
         )
     return categories
+
+
+def category_memory_weight(category_id: str, raw: dict[str, Any], world_book_enabled: bool) -> float:
+    normal_weight = safe_float(raw.get("memory_weight"), default=1.0)
+    if category_id != "world_building" or not world_book_enabled:
+        return normal_weight
+    policy = str(raw.get("world_book_overlap_policy") or "")
+    if policy == "reduce_memory_when_world_book_enabled":
+        return safe_float(raw.get("world_book_enabled_memory_weight"), default=0.35)
+    if policy == "disable_memory_when_world_book_enabled":
+        return 0.0
+    return normal_weight
+
+
+def category_recommendation(
+    category_id: str,
+    raw: dict[str, Any],
+    world_book_enabled: bool,
+    memory_weight: float,
+) -> str:
+    if category_id != "world_building" or not world_book_enabled:
+        return "manual_extract_required"
+    policy = str(raw.get("world_book_overlap_policy") or "")
+    if policy == "reduce_memory_when_world_book_enabled":
+        return "reduce_memory_weight_world_book_enabled"
+    if policy == "disable_memory_when_world_book_enabled" or memory_weight == 0.0:
+        return "prefer_world_book_no_memory_bank_copy"
+    return "manual_duplicate_check_required"
+
+
+def safe_float(value: Any, *, default: float) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    return default
 
 
 def default_category_label(category_id: str) -> str:

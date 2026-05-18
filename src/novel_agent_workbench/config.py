@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 
-CURRENT_CONFIG_SCHEMA_VERSION = 2
+CURRENT_CONFIG_SCHEMA_VERSION = 3
 
 FORMAL_CONTEXT_PRIORITY_ORDER = [
     "world_building",
@@ -112,6 +112,9 @@ def default_formal_context_policy() -> dict[str, Any]:
                 "target": "memory_bank",
                 "enabled": True,
                 "auto_extract": False,
+                "memory_weight": 1.0,
+                "world_book_overlap_policy": "reduce_memory_when_world_book_enabled",
+                "world_book_enabled_memory_weight": 0.35,
             },
             "character_relationships": {
                 "label": "Character Relationships",

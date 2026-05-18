@@ -365,3 +365,11 @@ Decision: Add a metadata-only formal context extraction plan artifact after cont
 Reason: The project now has a confirmed-chapter queue, a preview artifact, and a user-approved priority order. Before any Memory Bank or RAG writes exist, the system needs a durable plan that future UI/operator steps can inspect category by category.
 
 Impact: `FormalContextPlanService` creates `data/formal_context_plans/*.json` plus `data/formal_context_plans_index.json` from a context preview. Plans include ids, source metadata, text statistics, priority order, category work items, safety flags, and `manual_extraction_required`. They do not store chapter text, prompt text, raw Provider responses, or plaintext secrets, and they do not mutate Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers. CLI commands `create-formal-context-plan`, `list-formal-context-plans`, and `read-formal-context-plan` expose the operation.
+
+## 2026-05-18: MVP-7.6 World Book Overlap Policy
+
+Decision: World-building formal context has an explicit overlap policy with the future world book.
+
+Reason: `world_building` is high priority, but a future world book will also store stable setting facts. If both Memory Bank and world book include the same facts at full strength, context assembly can waste tokens and increase contradiction risk.
+
+Impact: `formal_context_policy.categories.world_building` now stores `world_book_overlap_policy=reduce_memory_when_world_book_enabled`, `memory_weight=1.0`, and `world_book_enabled_memory_weight=0.35`. Formal context plan category items expose the effective `memory_weight`, `world_book_enabled`, `world_book_overlap_policy`, and a recommendation. When `context_policy.world_book_enabled=true`, world-building Memory Bank weight is reduced by default. This is still metadata only; no Memory Bank, world book, RAG, export, Provider, or UI write was added.

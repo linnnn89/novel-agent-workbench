@@ -31,6 +31,10 @@ class ProjectFoundationTest(unittest.TestCase):
                 set(config["context_policy"]["formal_context_policy"]["categories"]),
                 set(FORMAL_CONTEXT_PRIORITY_ORDER),
             )
+            world_building = config["context_policy"]["formal_context_policy"]["categories"]["world_building"]
+            self.assertEqual(world_building["world_book_overlap_policy"], "reduce_memory_when_world_book_enabled")
+            self.assertEqual(world_building["memory_weight"], 1.0)
+            self.assertEqual(world_building["world_book_enabled_memory_weight"], 0.35)
             self.assertEqual(
                 {item["id"] for item in config["workflow_presets"]},
                 {"classic_direct", "manual_studio", "auto_pipeline"},
@@ -55,6 +59,12 @@ class ProjectFoundationTest(unittest.TestCase):
             self.assertEqual(
                 config["context_policy"]["formal_context_policy"]["priority_order"],
                 FORMAL_CONTEXT_PRIORITY_ORDER,
+            )
+            self.assertEqual(
+                config["context_policy"]["formal_context_policy"]["categories"]["world_building"][
+                    "world_book_overlap_policy"
+                ],
+                "reduce_memory_when_world_book_enabled",
             )
             self.assertIn("writer", config["model_roles"])
             self.assertTrue(result["checkpoint"]["path"].endswith(".zip"))

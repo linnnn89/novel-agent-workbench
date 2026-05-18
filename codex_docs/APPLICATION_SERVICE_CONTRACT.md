@@ -746,6 +746,25 @@ recommendation
 
 `categories` follow the project `formal_context_policy` priority order and are marked `auto_extract=false`.
 
+Category items may include:
+
+```text
+memory_weight
+world_book_enabled
+world_book_overlap_policy
+recommendation
+```
+
+For `world_building`, default behavior is:
+
+```text
+memory_weight=1.0
+world_book_overlap_policy=reduce_memory_when_world_book_enabled
+world_book_enabled_memory_weight=0.35
+```
+
+When `context_policy.world_book_enabled=true`, the effective plan item for `world_building` uses `memory_weight=0.35` and recommends reducing Memory Bank duplication.
+
 Must reject duplicate plans for the same preview.
 
 Must not return or store chapter text, prompt text, raw Provider responses, request bodies, or plaintext secrets. Must not update Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.

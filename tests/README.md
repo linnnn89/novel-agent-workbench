@@ -104,6 +104,7 @@ Formal context plan tests currently cover:
 
 - creating `data/formal_context_plans/*.json` and `data/formal_context_plans_index.json`,
 - category order following `formal_context_policy`,
+- world-building Memory Bank weight reducing when `world_book_enabled=true`,
 - duplicate and missing preview rejection,
 - public state `formal_context_plan_count` reporting,
 - no automatic Memory Bank, RAG, export, draft, confirmed chapter, or Provider side effects,
@@ -139,7 +140,8 @@ Foundation tests currently cover:
 - missing project metadata repair,
 - secrets isolation and masked public state,
 - checkpoint exclusion of secrets, backups, and `.trash` files,
-- formal context policy defaults and migration fill-in with priority order `world_building`, `character_relationships`, `chapter_summary`, `style_memory`, `foreshadowing`.
+- formal context policy defaults and migration fill-in with priority order `world_building`, `character_relationships`, `chapter_summary`, `style_memory`, `foreshadowing`,
+- world-book overlap defaults for world-building context.
 
 Provider config tests currently cover:
 

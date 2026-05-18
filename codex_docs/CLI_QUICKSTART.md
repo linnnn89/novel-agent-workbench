@@ -346,6 +346,15 @@ This maps to:
 世界观设定 > 人物关系 > 章节摘要 > 文风记忆 > 剧情伏笔
 ```
 
+World book overlap option:
+
+```text
+world_building memory_weight=1.0 normally
+world_building memory_weight=0.35 when context_policy.world_book_enabled=true
+```
+
+Meaning: if the future world book is enabled, world-building facts should mainly live there. Memory Bank should keep only compact continuity cues to avoid repeated tokens.
+
 Read a confirmed chapter:
 
 ```powershell

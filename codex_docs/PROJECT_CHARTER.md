@@ -272,6 +272,14 @@ create-formal-context-plan + formal_context_plans/*.json + category-level manual
 
 Plans are metadata-only artifacts generated from context previews. They may record category ids, priority order, text statistics, and safety flags. They must not copy chapter text, prompt text, raw Provider responses, or plaintext secrets. They must not mutate Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.
 
+World-book overlap policy:
+
+```text
+world_building memory_weight=1.0 normally, reduced to 0.35 when world_book_enabled=true.
+```
+
+This prevents future world book and Memory Bank context from duplicating stable setting facts at full token weight. It is an option and recommendation surface only in this phase.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

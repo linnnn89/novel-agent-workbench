@@ -85,6 +85,7 @@ MVP-0 first storage slice is implemented:
 - MVP-6.5 Context Update Preview artifacts that turn queue items into metadata-only plans for future formal context work without copying chapter text.
 - MVP-7 Formal Context Policy schema with priority order: world building, character relationships, chapter summary, style memory, foreshadowing.
 - MVP-7.5 Formal Context Extraction Plan artifacts that turn context previews into metadata-only category work plans without extracting text or writing Memory Bank/RAG/export.
+- World-book overlap policy for world building context: when `world_book_enabled=true`, formal context plans reduce world-building Memory Bank weight by default to avoid duplicate tokens.
 - Unit tests.
 
 Verification command:

@@ -256,6 +256,7 @@ class ContextUpdateQueueTest(unittest.TestCase):
             self.assertEqual(plan["priority_order"], FORMAL_CONTEXT_PRIORITY_ORDER)
             self.assertEqual([item["category_id"] for item in plan["categories"]], FORMAL_CONTEXT_PRIORITY_ORDER)
             self.assertTrue(all(item["auto_extract"] is False for item in plan["categories"]))
+            self.assertEqual(plan["categories"][0]["memory_weight"], 1.0)
             self.assertFalse(plan["safety"]["text_copied"])
             self.assertFalse(plan["safety"]["memory_bank_written"])
             self.assertEqual(state["formal_context_plan_count"], 1)
@@ -321,6 +322,26 @@ class ContextUpdateQueueTest(unittest.TestCase):
             self.assertEqual(json.loads(read_stdout)["result"]["priority_order"], FORMAL_CONTEXT_PRIORITY_ORDER)
             self.assertNotIn("private cli formal context prompt", combined)
             self.assertNotIn("MOCK writer", combined)
+
+    def test_formal_context_plan_reduces_world_building_memory_weight_when_world_book_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_committed_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            config = store.read_config()
+            config["context_policy"]["world_book_enabled"] = True
+            store.write_config(config)
+            update = app.enqueue_context_updates("demo")["items"][0]
+            preview = app.create_context_preview("demo", update["update_id"])
+
+            result = app.create_formal_context_plan("demo", preview["preview_id"])
+            plan = app.read_formal_context_plan("demo", result["plan_id"])
+            world_building = plan["categories"][0]
+
+            self.assertEqual(world_building["category_id"], "world_building")
+            self.assertTrue(world_building["world_book_enabled"])
+            self.assertEqual(world_building["world_book_overlap_policy"], "reduce_memory_when_world_book_enabled")
+            self.assertEqual(world_building["memory_weight"], 0.35)
+            self.assertEqual(world_building["recommendation"], "reduce_memory_weight_world_book_enabled")
 
 
 def configured_committed_app(temp: str) -> WorkbenchApplicationService:
