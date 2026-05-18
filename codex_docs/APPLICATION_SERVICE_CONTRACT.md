@@ -305,6 +305,56 @@ On successful draft generation, chapter workflow state may update to `draft_read
 
 On generation failure, chapter workflow state may update to `blocked` with metadata-only error summary.
 
+### generate_context_draft(...)
+
+Inputs:
+
+```text
+project_id
+chapter_id
+prompt
+title
+system_prompt
+temperature
+max_tokens
+max_context_tokens
+metadata
+```
+
+Current phase requirement:
+
+```text
+writer provider must be mock
+```
+
+This method builds a prompt render dry-run with local text inclusion internally, renders a combined in-memory prompt, and sends it to the local mock writer only.
+
+Returns draft metadata:
+
+```text
+draft_id
+chapter_id
+title
+path
+provider
+model
+usage
+```
+
+The draft artifact may include:
+
+```text
+context_generation.mode
+context_generation.context_section_count
+context_generation.skipped_context_count
+context_generation.context_source_ids
+context_generation.prompt_summary
+```
+
+It must not store operator prompt text, Memory Bank text, raw Provider responses, request bodies, or plaintext secrets in artifact metadata, indexes, logs, facade output, CLI output, or public state.
+
+It must not call real Providers, auto-commit, update Memory Bank text, update world book, update RAG/export, create DOCX, or mutate confirmed chapters.
+
 ### list_drafts(project_id)
 
 Returns draft metadata from `data/drafts_index.json`.

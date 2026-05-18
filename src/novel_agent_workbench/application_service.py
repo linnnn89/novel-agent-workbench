@@ -135,6 +135,35 @@ class WorkbenchApplicationService:
         )
         return result.to_dict()
 
+    def generate_context_draft(
+        self,
+        project_id: str,
+        *,
+        chapter_id: str,
+        prompt: str,
+        title: str = "",
+        system_prompt: str = "",
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        max_context_tokens: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        store = self._open_store(project_id)
+        service = DraftGenerationService(store)
+        result = service.generate_context_draft(
+            DraftGenerationRequest(
+                chapter_id=chapter_id,
+                title=title,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                metadata=metadata or {},
+            ),
+            max_context_tokens=max_context_tokens,
+        )
+        return result.to_dict()
+
     def list_drafts(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_drafts()
 

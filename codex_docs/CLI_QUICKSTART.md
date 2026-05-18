@@ -395,6 +395,20 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This is still a dry-run. It does not call a Provider, write prompt logs, create drafts, or update confirmed chapters/Memory Bank/RAG/export.
 
+Generate a context-aware draft through the local mock writer:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test generate-context-draft demo_project --chapter-id chapter_002 --title "Second Scene" --prompt "Draft the next scene." --max-context-tokens 4096
+```
+
+Current phase requirement:
+
+```text
+writer provider must be mock
+```
+
+The command creates a normal draft artifact and marks chapter workflow as `draft_ready`. It does not call real Providers, does not auto-commit, does not print operator prompt text or Memory Bank text, and does not update Memory Bank/world book/RAG/export.
+
 Create manual formal context tasks:
 
 ```powershell

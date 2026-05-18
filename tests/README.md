@@ -139,6 +139,16 @@ Prompt render dry-run tests currently cover:
 - no Memory Bank mutation,
 - CLI default output excluding operator prompt, system prompt, Memory Bank text, confirmed chapter text, and plaintext secrets.
 
+Mock-only context-aware draft generation tests currently cover:
+
+- generating a draft from the prompt render envelope through `mock` writer only,
+- draft artifact `context_generation` safe metadata,
+- rejection of non-mock writer roles without creating drafts,
+- no automatic commit,
+- no Memory Bank mutation,
+- no export folder creation,
+- provider logs, draft artifact, public state, audit, facade output, and CLI output excluding operator prompt text, Memory Bank text, confirmed chapter text, and plaintext secrets.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

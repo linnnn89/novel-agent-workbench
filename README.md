@@ -94,6 +94,7 @@ MVP-0 first storage slice is implemented:
 - MVP-10.5 Memory Bank Item Lifecycle Controls that allow explicit enable/disable with checkpointing and make Context Assembler dry-run skip disabled memory items.
 - MVP-11 Context Package Preview that assembles enabled manual Memory Bank text into a local preview, remains read-only, calls no Provider, and defaults to metadata-only output unless `include_text` is explicit.
 - MVP-11.5 Prompt Render Dry-Run that combines an operator prompt with the context package in a no-write envelope, defaulting to redacted prompt/context output unless explicit include flags are used.
+- MVP-12 Mock-Only Context-Aware Draft Generation that uses the prompt render envelope to create a draft through the local mock writer only, with no real Provider, no auto-commit, and no Memory Bank/RAG/export side effects.
 - Unit tests.
 
 Verification command:

@@ -42,6 +42,7 @@ Current safety hardening:
 - Memory Bank item lifecycle controls can explicitly disable/enable one item; disabled items remain on disk but are skipped by Context Assembler dry-run.
 - context package preview is read-only, uses enabled manual Memory Bank text only, and defaults to metadata-only output unless text inclusion is explicit.
 - prompt render dry-run is read-only and redacts operator prompt/context text by default while reporting the future message envelope shape.
+- context-aware draft generation is mock-only in this phase and stores only safe context generation metadata in draft artifacts and indexes.
 - audit checks confirmed chapter consistency and revision request/generated draft consistency.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

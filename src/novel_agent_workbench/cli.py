@@ -90,6 +90,16 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--max-tokens", type=int, default=None)
     generate.add_argument("--temperature", type=float, default=None)
 
+    generate_context = subparsers.add_parser("generate-context-draft")
+    generate_context.add_argument("project_id")
+    generate_context.add_argument("--chapter-id", required=True)
+    generate_context.add_argument("--prompt", required=True)
+    generate_context.add_argument("--title", default="")
+    generate_context.add_argument("--system-prompt", default="")
+    generate_context.add_argument("--max-context-tokens", type=int, default=None)
+    generate_context.add_argument("--max-tokens", type=int, default=None)
+    generate_context.add_argument("--temperature", type=float, default=None)
+
     list_drafts = subparsers.add_parser("list-drafts")
     list_drafts.add_argument("project_id")
 
@@ -350,6 +360,17 @@ def run_command(args: argparse.Namespace) -> Any:
             title=args.title,
             prompt=args.prompt,
             system_prompt=args.system_prompt,
+            max_tokens=args.max_tokens,
+            temperature=args.temperature,
+        )
+    if command == "generate-context-draft":
+        return app.generate_context_draft(
+            args.project_id,
+            chapter_id=args.chapter_id,
+            title=args.title,
+            prompt=args.prompt,
+            system_prompt=args.system_prompt,
+            max_context_tokens=args.max_context_tokens,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
         )

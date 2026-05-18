@@ -437,3 +437,11 @@ Decision: Add a no-write prompt render dry-run envelope before final Provider pr
 Reason: Before connecting context assembly to draft generation, the operator needs to see the shape of the future message payload and token estimates without leaking prompt/context text by default or calling a model.
 
 Impact: `ContextAssemblerService.prompt_render_dry_run(...)` combines an operator prompt, optional system prompt, and the context package preview into a redacted message envelope. Default output reports character counts, selected context metadata, and Provider boundary flags only. Prompt text and context text appear only with explicit include flags. CLI command `prompt-render-dry-run` exposes the flow. The method writes no files, calls no Provider, does not read chapter content, does not create prompt logs, and does not update world book, RAG, exports, drafts, or confirmed chapters.
+
+## 2026-05-18: MVP-12 Mock-Only Context-Aware Draft Generation
+
+Decision: Add context-aware draft generation through the local `mock` writer only.
+
+Reason: The context package and prompt render dry-run now prove the local assembly boundary. The next safe step is to verify the end-to-end draft path without introducing real Provider risk or automatic commit.
+
+Impact: `DraftGenerationService.generate_context_draft(...)` builds a local prompt render dry-run with explicit local text inclusion, renders a combined in-memory prompt, and sends it only to the configured `mock` writer. Draft artifacts may store generated mock content and safe `context_generation` metadata, including context source ids and counts, but not operator prompt text or Memory Bank text. CLI command `generate-context-draft` exposes the flow. It does not allow real Providers, auto-commit, update Memory Bank, update world book, update RAG/export, create DOCX, or write prompt logs.

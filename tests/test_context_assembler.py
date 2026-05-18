@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from novel_agent_workbench import WorkbenchApplicationService
 from novel_agent_workbench import audit_project
+from novel_agent_workbench import DraftGenerationError
 from novel_agent_workbench import MemoryBankError
 from novel_agent_workbench.cli import main
 from novel_agent_workbench.storage import ProjectStore
@@ -611,6 +612,92 @@ class ContextAssemblerTest(unittest.TestCase):
             self.assertNotIn(manual_text, default_stdout)
             self.assertIn(prompt, include_stdout)
             self.assertIn(manual_text, include_stdout)
+
+    def test_generate_context_draft_is_mock_only_and_metadata_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            store = ProjectStore.open(Path(temp), "demo")
+            store.update_secrets({"mock_key": "sk-context-draft-secret"})
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: the eclipse bell forces all gates shut."
+            prompt = "Draft the escape scene with private context."
+            app.set_memory_text("demo", memory_id, manual_text)
+            memory_before = store.data_file_path("memory_bank.json").read_text(encoding="utf-8")
+
+            result = app.generate_context_draft(
+                "demo",
+                chapter_id="chapter_002",
+                title="Escape",
+                prompt=prompt,
+                max_context_tokens=4096,
+            )
+            draft = app.read_draft("demo", result["draft_id"])
+            state = app.project_state("demo")
+            provider_log = store.read_json(store.data_dir / "provider_call_log.json")
+            audit = audit_project(store)
+            result_text = json.dumps(
+                {"result": result, "draft": draft, "state": state, "provider_log": provider_log, "audit": audit},
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(result["provider"], "mock")
+            self.assertEqual(draft["context_generation"]["mode"], "mock_context_aware_generation")
+            self.assertEqual(draft["context_generation"]["context_section_count"], 1)
+            self.assertTrue(app.chapter_status("demo", "chapter_002")["latest_draft_id"])
+            self.assertEqual(state["committed_chapter_count"], 1)
+            self.assertTrue(audit["ok"], json.dumps(audit, ensure_ascii=False))
+            self.assertNotIn(prompt, result_text)
+            self.assertNotIn(manual_text, result_text)
+            self.assertNotIn("sk-context-draft-secret", result_text)
+            self.assertEqual(memory_before, store.data_file_path("memory_bank.json").read_text(encoding="utf-8"))
+            self.assertFalse((store.data_dir / "exports").exists())
+
+    def test_generate_context_draft_rejects_non_mock_writer_without_draft_side_effect(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            app.set_project_secret("demo", "deepseek_key", "sk-disabled-context-secret")
+            app.configure_provider_role(
+                "demo",
+                "writer",
+                provider="deepseek",
+                model="deepseek-chat",
+                api_key_ref="project_secret.deepseek_key",
+            )
+            draft_count = len(app.list_drafts("demo"))
+
+            with self.assertRaises(DraftGenerationError):
+                app.generate_context_draft("demo", chapter_id="chapter_002", prompt="private blocked prompt")
+
+            self.assertEqual(len(app.list_drafts("demo")), draft_count)
+
+    def test_generate_context_draft_cli_is_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            app = configured_memory_bank_app(temp)
+            memory_id = app.list_memory_items("demo")[0]["memory_id"]
+            manual_text = "Manual memory: the glass road bends toward the old fort."
+            prompt = "Draft with private CLI context."
+            app.set_memory_text("demo", memory_id, manual_text)
+
+            code, stdout, stderr = run_cli(
+                [
+                    "--projects-root",
+                    temp,
+                    "generate-context-draft",
+                    "demo",
+                    "--chapter-id",
+                    "chapter_002",
+                    "--prompt",
+                    prompt,
+                    "--max-context-tokens",
+                    "4096",
+                ]
+            )
+
+            self.assertEqual(code, 0, stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["result"]["provider"], "mock")
+            self.assertNotIn(prompt, stdout)
+            self.assertNotIn(manual_text, stdout)
 
     def test_manual_memory_text_cli_is_metadata_only_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

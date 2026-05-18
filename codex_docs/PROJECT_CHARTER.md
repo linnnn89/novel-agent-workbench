@@ -356,6 +356,14 @@ prompt-render-dry-run + redacted message envelope + explicit prompt/context text
 
 This is a no-write envelope preview before Provider calls. It may combine an operator prompt, optional system prompt, and selected context package metadata. Default output must redact prompt text and context text. Text may appear only with explicit include flags. It must not write prompt logs, call Providers, create drafts, read chapter content, update world book, update RAG/export, or mutate confirmed chapters.
 
+MVP-12 mock-only context-aware draft slice:
+
+```text
+generate-context-draft + prompt render envelope + local mock writer only.
+```
+
+This is the first draft generation path that consumes assembled manual Memory Bank context. It must remain mock-only, metadata-safe, and explicit. It may create a draft artifact with generated mock content and safe context-generation summary. It must not call real Providers, auto-commit, write prompt logs, store operator prompt or Memory Bank text in metadata, update world book, update RAG/export, create DOCX, or mutate confirmed chapters.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

@@ -6,7 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from .chapters import ChapterWorkflowService
-from .providers import ProviderRequest, generate_with_provider
+from .providers import MOCK_PROVIDER_ID, ProviderRequest, generate_with_provider, get_model_role_config
 from .storage import ProjectStore, safe_filename, utc_stamp
 
 
@@ -173,6 +173,38 @@ class DraftGenerationService:
                 model=response.model,
                 usage=response.usage,
             )
+
+    def generate_context_draft(
+        self,
+        request: DraftGenerationRequest,
+        *,
+        max_context_tokens: int | None = None,
+    ) -> DraftGenerationResult:
+        from .context_assembler import ContextAssemblerService
+
+        role_config = get_model_role_config(self.store, "writer")
+        if role_config.provider != MOCK_PROVIDER_ID:
+            raise DraftGenerationError("Context-aware draft generation is mock-only in this phase.")
+        render = ContextAssemblerService(self.store).prompt_render_dry_run(
+            prompt=request.prompt,
+            system_prompt=request.system_prompt,
+            max_context_tokens=max_context_tokens,
+            include_prompt_text=True,
+            include_context_text=True,
+        ).to_dict()
+        rendered_prompt = render_context_prompt(render)
+        context_request = DraftGenerationRequest(
+            chapter_id=request.chapter_id,
+            title=request.title,
+            prompt=rendered_prompt,
+            system_prompt=request.system_prompt,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            metadata={**request.metadata, "context_aware_generation": True},
+        )
+        result = self.generate_draft(context_request)
+        self._write_context_generation_summary(result.draft_id, render)
+        return result
 
     def list_drafts(self) -> list[dict[str, Any]]:
         index = self.store.read_json(self.index_path, default={"schema_version": 1, "drafts": []})
@@ -364,9 +396,71 @@ class DraftGenerationService:
         commits.append(entry)
         self.store.write_json(self.commit_log_path, {"schema_version": 1, "commits": commits})
 
+    def _write_context_generation_summary(self, draft_id: str, render: dict[str, Any]) -> None:
+        draft_entry = self._draft_index_entry(draft_id)
+        draft = self.read_draft(draft_id)
+        package = render.get("context_package") if isinstance(render.get("context_package"), dict) else {}
+        sections = package.get("sections") if isinstance(package.get("sections"), list) else []
+        skipped = package.get("skipped") if isinstance(package.get("skipped"), list) else []
+        summary = {
+            "mode": "mock_context_aware_generation",
+            "prompt_render_mode": render.get("mode"),
+            "context_section_count": len(sections),
+            "skipped_context_count": len(skipped),
+            "context_source_ids": [str(item.get("source_id") or "") for item in sections if isinstance(item, dict)],
+            "prompt_summary": render.get("prompt_summary") if isinstance(render.get("prompt_summary"), dict) else {},
+            "provider_called_by_render": False,
+            "text_in_artifact_metadata": False,
+        }
+        draft["context_generation"] = summary
+        self.store.write_json(str(draft_entry["path"]), draft)
+
+        index = self.store.read_json(self.index_path, default={"schema_version": 1, "drafts": []})
+        drafts = index.get("drafts") if isinstance(index, dict) and isinstance(index.get("drafts"), list) else []
+        updated: list[dict[str, Any]] = []
+        for item in drafts:
+            if isinstance(item, dict) and item.get("draft_id") == draft_id:
+                item = {
+                    **item,
+                    "context_aware": True,
+                    "context_section_count": summary["context_section_count"],
+                }
+            if isinstance(item, dict):
+                updated.append(item)
+        self.store.write_json(self.index_path, {"schema_version": 1, "drafts": updated})
+
 
 def new_draft_id() -> str:
     return f"{utc_stamp()}_{uuid4().hex[:12]}"
+
+
+def render_context_prompt(render: dict[str, Any]) -> str:
+    package = render.get("context_package") if isinstance(render.get("context_package"), dict) else {}
+    sections = package.get("sections") if isinstance(package.get("sections"), list) else []
+    lines: list[str] = ["Context package:"]
+    for item in sections:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        category_id = str(item.get("category_id") or "uncategorized")
+        source_id = str(item.get("source_id") or "")
+        lines.append(f"[{category_id} {source_id}]")
+        lines.append(text)
+    prompt_message = next(
+        (
+            item
+            for item in render.get("rendered_messages", [])
+            if isinstance(item, dict) and item.get("label") == "draft_prompt"
+        ),
+        {},
+    )
+    prompt = str(prompt_message.get("content") or "").strip()
+    lines.append("")
+    lines.append("Draft request:")
+    lines.append(prompt)
+    return "\n".join(lines).strip()
 
 
 def validate_chapter_id(chapter_id: str) -> None:
