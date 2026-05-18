@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from .chapters import ChapterWorkflowService
 from .drafts import DraftGenerationResult, DraftGenerationService, new_draft_id, validate_chapter_id
-from .providers import ProviderRequest, generate_with_provider
+from .providers import MOCK_PROVIDER_ID, ProviderRequest, generate_with_provider, get_model_role_config
 from .reviews import DraftReviewService
 from .storage import ProjectStore, safe_filename, utc_stamp
 
@@ -138,6 +138,9 @@ class RevisionRequestService:
             review_id = str(request_artifact.get("review_id") or request_entry.get("review_id") or "")
             chapter_id = str(request_artifact.get("chapter_id") or request_entry.get("chapter_id") or "")
             validate_chapter_id(chapter_id)
+            role_config = get_model_role_config(self.store, "reviser")
+            if role_config.provider != MOCK_PROVIDER_ID:
+                raise RevisionRequestError("Revision draft generation is mock-only in this phase.")
             source_draft = DraftGenerationService(self.store).read_draft(draft_id)
             source_content = str(source_draft.get("content") or "")
             title = str(source_draft.get("title") or "")

@@ -417,6 +417,23 @@ Fix:
 py -3.13 -m novel_agent_workbench.cli --projects-root <root> configure-provider-role <project_id> reviser --provider mock --model mock-reviser
 ```
 
+Non-mock reviser role:
+
+```text
+RevisionRequestError: Revision draft generation is mock-only in this phase.
+```
+
+Meaning: revision draft candidates are intentionally limited to the local `mock` Provider. Configure `reviser --provider mock --model mock-reviser` before using `generate-revision-draft`.
+
+Revision audit inconsistency:
+
+```text
+revision_request_generated_draft_missing
+revision_generated_draft_request_mismatch
+```
+
+Meaning: `audit-project` found a broken link between a revision request and its generated draft candidate. Do not build UI automation on that project state until the artifact/index mismatch is investigated.
+
 Unsafe project id:
 
 ```text

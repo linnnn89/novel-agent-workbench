@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from novel_agent_workbench import WorkbenchApplicationService, audit_project
+from novel_agent_workbench import RevisionRequestService, WorkbenchApplicationService, audit_project
 from novel_agent_workbench.drafts import DraftGenerationRequest, DraftGenerationService
 from novel_agent_workbench.providers import (
     configure_provider_role,
@@ -249,6 +249,35 @@ class ProjectAuditTest(unittest.TestCase):
             self.assertIn("confirmed_source_draft_not_committed", codes)
             self.assertIn("confirmed_without_commit_log", codes)
 
+    def test_audit_fails_on_missing_revision_generated_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store, request_id, _ = configured_revision_project(temp)
+            service = RevisionRequestService(store)
+            request_entry = next(item for item in service.list_revision_requests() if item["revision_request_id"] == request_id)
+            artifact = service.read_revision_request(request_id)
+            artifact["generated_draft_id"] = "missing_revision_draft"
+            store.write_json(str(request_entry["path"]), artifact)
+
+            result = audit_project(store)
+
+            self.assertFalse(result["ok"])
+            self.assertIn("revision_request_generated_draft_missing", {item["code"] for item in result["findings"]})
+
+    def test_audit_fails_on_revision_generated_draft_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store, request_id, generated_draft_id = configured_revision_project(temp)
+            draft_entry = next(
+                item for item in DraftGenerationService(store).list_drafts() if item["draft_id"] == generated_draft_id
+            )
+            draft_artifact = DraftGenerationService(store).read_draft(generated_draft_id)
+            draft_artifact["revision"]["revision_request_id"] = "other_request"
+            store.write_json(str(draft_entry["path"]), draft_artifact)
+
+            result = audit_project(store)
+
+            self.assertFalse(result["ok"])
+            self.assertIn("revision_generated_draft_request_mismatch", {item["code"] for item in result["findings"]})
+
     def test_audit_is_read_only_for_uninitialized_project(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = ProjectStore.open(Path(temp), "demo")
@@ -264,6 +293,20 @@ def configured_store(temp: str) -> ProjectStore:
     store.initialize()
     set_model_role_config(store, "writer", {"provider": "mock", "model": "mock-writer"})
     return store
+
+
+def configured_revision_project(temp: str) -> tuple[ProjectStore, str, str]:
+    app = WorkbenchApplicationService.open(Path(temp))
+    app.create_project("demo")
+    app.configure_mock_writer("demo")
+    app.configure_provider_role("demo", "scorer", provider="mock", model="mock-scorer")
+    app.configure_provider_role("demo", "reviser", provider="mock", model="mock-reviser")
+    draft = app.generate_draft("demo", chapter_id="chapter_001", prompt="private revision audit prompt")
+    review = app.review_draft("demo", draft["draft_id"])
+    app.decide_review("demo", review["review_id"], decision="needs_revision", reason_code="manual_fix")
+    request = app.create_revision_request("demo", review["review_id"])
+    generated = app.generate_revision_draft("demo", request["revision_request_id"])
+    return ProjectStore.open(Path(temp), "demo"), request["revision_request_id"], generated["draft_id"]
 
 
 if __name__ == "__main__":

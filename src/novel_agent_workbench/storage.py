@@ -226,7 +226,8 @@ class ProjectStore:
         return self.read_json(self.secrets_path, default={})
 
     def write_secrets(self, data: dict[str, Any]) -> None:
-        self.write_json(self.secrets_path, data)
+        target = self._resolve_owned_path(self.secrets_path)
+        atomic_write_json_file(target, data)
 
     def update_secrets(self, updates: dict[str, Any]) -> dict[str, Any]:
         secrets = self.read_secrets()

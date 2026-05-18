@@ -224,6 +224,14 @@ generate-revision-draft + mock reviser output -> new draft candidate.
 
 Mock revision draft generation may create a new draft artifact and draft index entry only. It must preserve the source draft unchanged, keep explicit commit as the only confirmed-chapter path, use only the local mock Provider, and avoid Memory Bank/RAG/export/DOCX side effects.
 
+MVP-5 quality hardening slice:
+
+```text
+secret no-backup writes + explicit mock-only revision gate + revision consistency audit.
+```
+
+Secret rotation must not leave old plaintext values in `.bak` files. Revision draft generation remains mock-only even if future real Provider configs are present. Audit should catch missing or mismatched revision request/generated draft artifacts before later UI or automation layers depend on them.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

@@ -63,7 +63,7 @@ Mock revision draft tests currently cover:
 - revision metadata linking source draft, review, and revision request,
 - revision request status moving to `draft_created`,
 - chapter state moving to `revision_draft_ready`,
-- rejection of missing, non-requested, duplicate, and missing-reviser cases,
+- rejection of missing, non-requested, duplicate, missing-reviser, and non-mock-reviser cases,
 - no automatic confirmed chapter, Memory Bank, RAG, export, or Provider real-network side effects,
 - safe facade/CLI output excluding prompt text, source draft content, candidate content, and plaintext secrets,
 - CLI command `generate-revision-draft`.
@@ -207,3 +207,9 @@ Audit tests currently cover:
 - audit after provider dry-run excluding prompt text and plaintext secrets.
 - Chutes real-generation-enabled config with the expected disabled-adapter finding but no secret leak.
 - real-generation-enabled missing secret findings.
+- revision request/generated draft consistency failures.
+
+Secret storage hardening tests currently cover:
+
+- repeated `secrets.local.json` writes keeping the latest value,
+- secret updates not creating plaintext `.bak` backups under `backups/`.

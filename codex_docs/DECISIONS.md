@@ -303,3 +303,11 @@ Decision: Add a mock-only revision draft candidate generator from revision reque
 Reason: The workflow now needs a concrete way to create a new candidate draft after `needs_revision`, but still must avoid overwriting source drafts, auto-committing, or introducing real Provider risk.
 
 Impact: `RevisionRequestService.generate_revision_draft(...)` accepts only `requested` revision requests, calls the configured `reviser` role through the local `mock` Provider, writes a new `data/drafts/*.json` artifact, appends `data/drafts_index.json`, and updates the revision request to `draft_created` with `generated_draft_id`. The new draft contains `revision` metadata pointing to the source draft, review, and revision request. The operation does not overwrite source drafts, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, call real Providers, or store source prompt/content/secrets in metadata surfaces.
+
+## 2026-05-18: MVP-5 Quality Hardening After Review
+
+Decision: Close three review findings before starting the next feature layer.
+
+Reason: The project had grown enough that recovery and audit edges mattered more than adding another workflow step. Secret rotation must not leave old plaintext keys in backup files; MVP-5 revision draft generation must remain mock-only even if a future real `reviser` role is configured; and audit should detect broken revision request/generated draft links.
+
+Impact: `ProjectStore.write_secrets(...)` now uses atomic write without `.bak` backup. Normal JSON files still keep backup behavior. `RevisionRequestService.generate_revision_draft(...)` rejects non-`mock` reviser configs before reading source content or creating a candidate. `audit-project` now validates revision request artifacts, request index entries, generated draft existence, and generated draft back-links to the source draft/review/request.

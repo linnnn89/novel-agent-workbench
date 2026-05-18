@@ -54,6 +54,23 @@ class ProjectStoreTest(unittest.TestCase):
             self.assertEqual(store.read_secrets(), {"api_key": "sk-test-secret"})
             self.assertNotIn("sk-test-secret", store.config_path.read_text(encoding="utf-8"))
 
+    def test_secret_updates_do_not_create_plaintext_backups(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+
+            store.write_secrets({"api_key": "sk-first-secret"})
+            store.write_secrets({"api_key": "sk-second-secret"})
+
+            self.assertEqual(store.read_secrets(), {"api_key": "sk-second-secret"})
+            backup_text = "\n".join(
+                item.read_text(encoding="utf-8", errors="ignore")
+                for item in store.backups_dir.rglob("*")
+                if item.is_file()
+            )
+            self.assertNotIn("sk-first-secret", backup_text)
+            self.assertFalse(any("secrets.local.json" in item.name for item in store.backups_dir.rglob("*.bak")))
+
     def test_rejects_unsafe_project_ids(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             for project_id in ["", ".", "..", "../evil", r"..\evil", "evil/project", "evil:project", "bad name"]:

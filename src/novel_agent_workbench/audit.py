@@ -79,6 +79,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     )
     audit_reviews(store, checked_paths=checked_paths, findings=findings)
     audit_revision_requests(store, checked_paths=checked_paths, findings=findings)
+    audit_revision_consistency(store, checked_paths=checked_paths, findings=findings)
     audit_checkpoints(store, checked_paths=checked_paths, findings=findings)
     audit_provider_adapter_config(store, checked_paths=checked_paths, findings=findings)
     audit_draft_confirmed_consistency(store, checked_paths=checked_paths, findings=findings)
@@ -147,6 +148,195 @@ def audit_revision_requests(store: ProjectStore, *, checked_paths: list[str], fi
         return
     for path in sorted(requests_dir.glob("*.json")):
         check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+
+
+def audit_revision_consistency(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    requests_index_path = store.data_dir / "revision_requests_index.json"
+    drafts_index_path = store.data_dir / "drafts_index.json"
+    requests_dir = store.data_dir / "revision_requests"
+    requests_index = read_json_file(requests_index_path, checked_paths=checked_paths, findings=findings)
+    drafts_index = read_json_file(drafts_index_path, checked_paths=checked_paths, findings=findings)
+    request_entries = list_items(requests_index, "revision_requests")
+    draft_entries = list_items(drafts_index, "drafts")
+    draft_by_id = {str(item.get("draft_id")): item for item in draft_entries if item.get("draft_id")}
+    request_paths = {normalize_project_path(str(item.get("path"))) for item in request_entries if item.get("path")}
+
+    checked_paths.append(str(requests_dir))
+    if requests_dir.exists():
+        for artifact_path in sorted(requests_dir.glob("*.json")):
+            relative = artifact_path.relative_to(store.root).as_posix()
+            checked_paths.append(str(artifact_path))
+            if relative not in request_paths:
+                findings.append(
+                    AuditFinding(
+                        code="orphan_revision_request_artifact",
+                        path=str(artifact_path),
+                        message="Revision request artifact is not referenced by data/revision_requests_index.json.",
+                    )
+                )
+
+    for entry in request_entries:
+        revision_request_id = str(entry.get("revision_request_id") or "")
+        review_id = str(entry.get("review_id") or "")
+        source_draft_id = str(entry.get("draft_id") or "")
+        chapter_id = str(entry.get("chapter_id") or "")
+        path_value = entry.get("path")
+        if not revision_request_id or not isinstance(path_value, str) or not path_value:
+            findings.append(
+                AuditFinding(
+                    code="invalid_revision_request_index_entry",
+                    path=str(requests_index_path),
+                    message="Revision request index entry is missing revision_request_id or artifact path.",
+                )
+            )
+            continue
+        artifact_path = project_relative_artifact_path(store, path_value)
+        if artifact_path is None:
+            findings.append(
+                AuditFinding(
+                    code="unsafe_revision_request_artifact_path",
+                    path=str(requests_index_path),
+                    message=f"Revision request {revision_request_id} artifact path escapes project root.",
+                )
+            )
+            continue
+        artifact = read_json_file(artifact_path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            findings.append(
+                AuditFinding(
+                    code="missing_revision_request_artifact",
+                    path=str(artifact_path),
+                    message=f"Revision request {revision_request_id} artifact is missing.",
+                )
+            )
+            continue
+        if str(artifact.get("revision_request_id") or "") != revision_request_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_request_id_mismatch",
+                    path=str(artifact_path),
+                    message="Revision request artifact id does not match index entry.",
+                )
+            )
+        if str(artifact.get("review_id") or "") != review_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_request_review_mismatch",
+                    path=str(artifact_path),
+                    message="Revision request artifact review_id does not match index entry.",
+                )
+            )
+        if str(artifact.get("draft_id") or "") != source_draft_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_request_source_draft_mismatch",
+                    path=str(artifact_path),
+                    message="Revision request artifact draft_id does not match index entry.",
+                )
+            )
+        if str(artifact.get("chapter_id") or "") != chapter_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_request_chapter_mismatch",
+                    path=str(artifact_path),
+                    message="Revision request artifact chapter_id does not match index entry.",
+                )
+            )
+        if source_draft_id and source_draft_id not in draft_by_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_request_source_draft_missing",
+                    path=str(requests_index_path),
+                    message=f"Revision request {revision_request_id} references missing source draft {source_draft_id}.",
+                )
+            )
+
+        status = str(artifact.get("status") or entry.get("status") or "")
+        generated_draft_id = str(artifact.get("generated_draft_id") or entry.get("generated_draft_id") or "")
+        if status == "draft_created" and not generated_draft_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_request_generated_draft_missing",
+                    path=str(artifact_path),
+                    message=f"Revision request {revision_request_id} is draft_created but has no generated_draft_id.",
+                )
+            )
+            continue
+        if not generated_draft_id:
+            continue
+        generated_entry = draft_by_id.get(generated_draft_id)
+        if generated_entry is None:
+            findings.append(
+                AuditFinding(
+                    code="revision_request_generated_draft_missing",
+                    path=str(drafts_index_path),
+                    message=f"Revision request {revision_request_id} references missing generated draft {generated_draft_id}.",
+                )
+            )
+            continue
+        generated_path_value = generated_entry.get("path")
+        if not isinstance(generated_path_value, str) or not generated_path_value:
+            findings.append(
+                AuditFinding(
+                    code="invalid_revision_generated_draft_index_entry",
+                    path=str(drafts_index_path),
+                    message=f"Generated draft {generated_draft_id} has no artifact path.",
+                )
+            )
+            continue
+        generated_path = project_relative_artifact_path(store, generated_path_value)
+        if generated_path is None:
+            findings.append(
+                AuditFinding(
+                    code="unsafe_revision_generated_draft_path",
+                    path=str(drafts_index_path),
+                    message=f"Generated draft {generated_draft_id} artifact path escapes project root.",
+                )
+            )
+            continue
+        generated_artifact = read_json_file(generated_path, checked_paths=checked_paths, findings=findings)
+        if generated_artifact is None:
+            findings.append(
+                AuditFinding(
+                    code="missing_revision_generated_draft_artifact",
+                    path=str(generated_path),
+                    message=f"Generated draft {generated_draft_id} artifact is missing.",
+                )
+            )
+            continue
+        revision_meta = generated_artifact.get("revision") if isinstance(generated_artifact.get("revision"), dict) else {}
+        if str(generated_artifact.get("draft_id") or "") != generated_draft_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_generated_draft_id_mismatch",
+                    path=str(generated_path),
+                    message="Generated revision draft artifact id does not match drafts index.",
+                )
+            )
+        if str(revision_meta.get("revision_request_id") or "") != revision_request_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_generated_draft_request_mismatch",
+                    path=str(generated_path),
+                    message="Generated revision draft does not point back to the revision request.",
+                )
+            )
+        if str(revision_meta.get("source_draft_id") or "") != source_draft_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_generated_draft_source_mismatch",
+                    path=str(generated_path),
+                    message="Generated revision draft source_draft_id does not match the request.",
+                )
+            )
+        if str(revision_meta.get("source_review_id") or "") != review_id:
+            findings.append(
+                AuditFinding(
+                    code="revision_generated_draft_review_mismatch",
+                    path=str(generated_path),
+                    message="Generated revision draft source_review_id does not match the request.",
+                )
+            )
 
 
 def audit_checkpoints(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
@@ -437,6 +627,15 @@ def list_items(source: dict[str, Any] | None, key: str) -> list[dict[str, Any]]:
 
 def normalize_project_path(value: str) -> str:
     return value.replace("\\", "/")
+
+
+def project_relative_artifact_path(store: ProjectStore, value: str) -> Path | None:
+    try:
+        path = (store.root / value).resolve()
+        path.relative_to(store.root.resolve())
+    except (OSError, ValueError):
+        return None
+    return path
 
 
 def audit_public_state(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:

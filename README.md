@@ -79,6 +79,7 @@ MVP-0 first storage slice is implemented:
 - Manual review decision skeleton for `accepted`, `needs_revision`, and `blocked` decisions. Decisions update review/chapter metadata only and still do not commit or revise drafts automatically.
 - Revision Request skeleton that can create metadata-only `requested` artifacts from `needs_revision` decisions only; it does not call LLMs, mutate drafts, create confirmed chapters, or update Memory Bank/RAG/export.
 - Mock Revision Draft Service that creates a new draft candidate from a revision request using only the local mock reviser; it never overwrites the source draft and never auto-commits.
+- MVP-5 quality hardening: secret writes no longer create plaintext `.bak` backups, revision draft generation now has an explicit mock-only reviser gate, and `audit-project` checks revision request/generated draft consistency.
 - Unit tests.
 
 Verification command:

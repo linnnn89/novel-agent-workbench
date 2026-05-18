@@ -296,6 +296,21 @@ class RevisionRequestServiceTest(unittest.TestCase):
             self.assertNotIn("generated_draft_id", request_after)
             self.assertEqual(len(DraftGenerationService(store).list_drafts()), 1)
 
+    def test_generate_revision_draft_requires_mock_reviser(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store(temp)
+            review_id, _ = create_review_decision(store, "chapter_001", decision="needs_revision")
+            request = RevisionRequestService(store).create_revision_request(review_id)
+            set_model_role_config(store, "reviser", {"provider": "deepseek", "model": "deepseek-chat"})
+
+            with self.assertRaises(RevisionRequestError):
+                RevisionRequestService(store).generate_revision_draft(request.revision_request_id)
+
+            request_after = RevisionRequestService(store).read_revision_request(request.revision_request_id)
+            self.assertEqual(request_after["status"], "requested")
+            self.assertNotIn("generated_draft_id", request_after)
+            self.assertEqual(len(DraftGenerationService(store).list_drafts()), 1)
+
     def test_generate_revision_draft_outputs_and_audit_are_safe(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = configured_store(temp)
