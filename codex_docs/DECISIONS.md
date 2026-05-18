@@ -319,3 +319,11 @@ Decision: Add a read-only revision candidate comparison surface after mock revis
 Reason: Once a revision candidate exists, the operator and future UI need a stable way to compare the source draft and candidate without opening raw content everywhere or making an automatic choice.
 
 Impact: `RevisionCandidateService` lists candidates for a revision request and compares one candidate to its source using metadata-only summaries: ids, status, provider/model/usage, character count, word count, line count, link checks, and `manual_review_required`. It writes no files, returns no draft content or prompt text, does not choose a winner, does not commit, does not update Memory Bank/RAG/export, and does not call Providers.
+
+## 2026-05-18: MVP-6 Confirmed Context Update Queue
+
+Decision: Add an explicit metadata queue between confirmed chapters and future formal context updates.
+
+Reason: Confirmed chapters are the only valid source for Memory Bank/RAG/export updates, but updating those systems automatically would be too risky before context policies and UI review exist.
+
+Impact: `ContextUpdateQueueService` writes `data/context_update_queue.json` with pending update metadata for confirmed chapters. Queue entries contain ids, status, target placeholders, and text statistics only. The queue can be listed and marked `pending`, `acknowledged`, or `skipped`, but it does not mutate Memory Bank, RAG, exports, confirmed chapters, drafts, or Providers. `public_project_state` now exposes `context_update_count` and `latest_context_update` metadata.

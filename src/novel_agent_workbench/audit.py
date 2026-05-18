@@ -77,6 +77,16 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
             ("possible_content_in_chapter_workflow", CONTENT_PATTERNS),
         ],
     )
+    check_text_file(
+        store.data_dir / "context_update_queue.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=[
+            ("possible_prompt_in_context_update_queue", PROMPT_PATTERNS),
+            ("possible_secret_in_context_update_queue", SECRET_PATTERNS),
+            ("possible_content_in_context_update_queue", CONTENT_PATTERNS),
+        ],
+    )
     audit_reviews(store, checked_paths=checked_paths, findings=findings)
     audit_revision_requests(store, checked_paths=checked_paths, findings=findings)
     audit_revision_consistency(store, checked_paths=checked_paths, findings=findings)

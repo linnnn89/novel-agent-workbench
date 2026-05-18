@@ -300,6 +300,16 @@ List confirmed chapters:
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-confirmed demo_project
 ```
 
+Queue confirmed chapters for future formal context updates:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test enqueue-context-updates demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-context-updates demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test mark-context-update demo_project <update_id> --status acknowledged --reason-code manual_done
+```
+
+This queue is metadata-only. It does not update Memory Bank, RAG, exports, DOCX, or confirmed chapter content.
+
 Read a confirmed chapter:
 
 ```powershell

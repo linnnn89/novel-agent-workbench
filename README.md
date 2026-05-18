@@ -81,6 +81,7 @@ MVP-0 first storage slice is implemented:
 - Mock Revision Draft Service that creates a new draft candidate from a revision request using only the local mock reviser; it never overwrites the source draft and never auto-commits.
 - MVP-5 quality hardening: secret writes no longer create plaintext `.bak` backups, revision draft generation now has an explicit mock-only reviser gate, and `audit-project` checks revision request/generated draft consistency.
 - MVP-5.5 Revision Candidate Comparison read-model for listing and comparing source draft vs revision draft candidate metadata without returning content or making workflow decisions.
+- MVP-6 Confirmed Context Update Queue that explicitly queues confirmed chapters for future manual Memory Bank/RAG/export work without updating those systems automatically.
 - Unit tests.
 
 Verification command:

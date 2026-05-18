@@ -6,6 +6,7 @@ from typing import Any
 
 from .audit import audit_project
 from .chapters import ChapterWorkflowService
+from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .project_state import public_project_state
 from .providers import (
@@ -181,6 +182,21 @@ class WorkbenchApplicationService:
             candidate_draft_id,
         )
         return result.to_dict()
+
+    def enqueue_context_updates(self, project_id: str) -> dict[str, Any]:
+        return ContextUpdateQueueService(self._open_store(project_id)).enqueue_confirmed_chapters().to_dict()
+
+    def list_context_updates(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return ContextUpdateQueueService(self._open_store(project_id)).list_context_updates(status=status)
+
+    def mark_context_update(
+        self, project_id: str, update_id: str, *, status: str, reason_code: str = ""
+    ) -> dict[str, Any]:
+        return ContextUpdateQueueService(self._open_store(project_id)).mark_context_update(
+            update_id,
+            status=status,
+            reason_code=reason_code,
+        )
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()

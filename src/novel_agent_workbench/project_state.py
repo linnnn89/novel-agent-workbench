@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .chapters import ChapterWorkflowService
+from .context_queue import ContextUpdateQueueService
 from .drafts import DraftGenerationService
 from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
 from .reviews import DraftReviewService
@@ -19,11 +20,13 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     review_service = DraftReviewService(store)
     revision_request_service = RevisionRequestService(store)
     chapter_service = ChapterWorkflowService(store)
+    context_queue_service = ContextUpdateQueueService(store)
     drafts = draft_service.list_drafts()
     reviews = review_service.list_reviews()
     revision_requests = revision_request_service.list_revision_requests()
     confirmed = draft_service.list_confirmed_chapters()
     chapters = chapter_service.list_chapters()
+    context_updates = context_queue_service.list_context_updates()
     store_state = store.public_state()
     config = store_state.get("config") if isinstance(store_state.get("config"), dict) else {}
     return {
@@ -37,12 +40,14 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "draft_count": len(drafts),
         "review_count": len(reviews),
         "revision_request_count": len(revision_requests),
+        "context_update_count": len(context_updates),
         "chapter_count": len(chapters),
         "committed_chapter_count": len(confirmed),
         "latest_chapter": safe_chapter_summary(latest_by(chapters, "updated_at")),
         "latest_draft": safe_draft_summary(latest_by(drafts, "created_at")),
         "latest_review": safe_review_summary(latest_by(reviews, "created_at")),
         "latest_revision_request": safe_revision_request_summary(latest_by(revision_requests, "created_at")),
+        "latest_context_update": safe_context_update_summary(latest_by(context_updates, "updated_at")),
         "latest_committed_chapter": safe_confirmed_summary(latest_by(confirmed, "committed_at")),
         "provider_roles": provider_roles_summary(store),
     }
@@ -136,6 +141,22 @@ def safe_revision_request_summary(item: dict[str, Any] | None) -> dict[str, Any]
         "created_at": item.get("created_at"),
         "source_decision": item.get("source_decision") if isinstance(item.get("source_decision"), dict) else {},
         "revision_policy": item.get("revision_policy"),
+    }
+
+
+def safe_context_update_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "update_id": item.get("update_id"),
+        "chapter_id": item.get("chapter_id"),
+        "title": item.get("title"),
+        "source_draft_id": item.get("source_draft_id"),
+        "confirmed_chapter_id": item.get("confirmed_chapter_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+        "targets": item.get("targets") if isinstance(item.get("targets"), dict) else {},
     }
 
 

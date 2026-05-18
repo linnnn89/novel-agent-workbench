@@ -142,6 +142,19 @@ def build_parser() -> argparse.ArgumentParser:
     compare_revision_candidate.add_argument("revision_request_id")
     compare_revision_candidate.add_argument("candidate_draft_id")
 
+    enqueue_context = subparsers.add_parser("enqueue-context-updates")
+    enqueue_context.add_argument("project_id")
+
+    list_context = subparsers.add_parser("list-context-updates")
+    list_context.add_argument("project_id")
+    list_context.add_argument("--status", default="")
+
+    mark_context = subparsers.add_parser("mark-context-update")
+    mark_context.add_argument("project_id")
+    mark_context.add_argument("update_id")
+    mark_context.add_argument("--status", required=True, choices=["pending", "acknowledged", "skipped"])
+    mark_context.add_argument("--reason-code", default="")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -278,6 +291,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_revision_candidates(args.project_id, args.revision_request_id)
     if command == "compare-revision-candidate":
         return app.compare_revision_candidate(args.project_id, args.revision_request_id, args.candidate_draft_id)
+    if command == "enqueue-context-updates":
+        return app.enqueue_context_updates(args.project_id)
+    if command == "list-context-updates":
+        return app.list_context_updates(args.project_id, status=args.status)
+    if command == "mark-context-update":
+        return app.mark_context_update(args.project_id, args.update_id, status=args.status, reason_code=args.reason_code)
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)
     if command == "read-confirmed":

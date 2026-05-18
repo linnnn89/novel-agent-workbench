@@ -240,6 +240,14 @@ list-revision-candidates + compare-revision-candidate metadata read-model.
 
 The comparison surface is read-only. It may compute length/count deltas and validate links between source draft, review, revision request, and candidate draft. It must not return draft content, prompt text, or plaintext secrets; it must not choose, overwrite, auto-commit, or mutate Memory Bank/RAG/export.
 
+MVP-6 confirmed context update queue slice:
+
+```text
+enqueue-context-updates + context_update_queue.json + manual status marking.
+```
+
+Only confirmed chapters may enter this queue. The queue is a metadata handoff layer for future Memory Bank/RAG/export updates; it is not the update itself. It must not store chapter content, prompt text, or plaintext secrets, and it must not automatically mutate Memory Bank, RAG, exports, drafts, or confirmed chapters.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

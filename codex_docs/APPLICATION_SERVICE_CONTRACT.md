@@ -68,12 +68,14 @@ secrets
 draft_count
 review_count
 revision_request_count
+context_update_count
 chapter_count
 committed_chapter_count
 latest_chapter
 latest_draft
 latest_review
 latest_revision_request
+latest_context_update
 latest_committed_chapter
 provider_roles
 ```
@@ -564,6 +566,72 @@ manual_review_required
 ```
 
 This is not an automatic decision. It must not choose a winner, overwrite drafts, auto-commit, update Memory Bank, update RAG, create exports, create DOCX, call Providers, return draft content, return prompt text, or return plaintext secrets.
+
+### enqueue_context_updates(project_id)
+
+Scans confirmed chapter metadata and creates missing pending context update queue entries.
+
+Writes:
+
+```text
+data/context_update_queue.json
+```
+
+Returns:
+
+```text
+created_count
+total_count
+items
+```
+
+Each item may include:
+
+```text
+update_id
+chapter_id
+title
+source_draft_id
+confirmed_chapter_id
+status
+created_at
+updated_at
+source
+text_stats
+targets
+```
+
+This is idempotent by `chapter_id`. It must not return chapter content, prompt text, or plaintext secrets. It must not update Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.
+
+### list_context_updates(project_id, status="")
+
+Returns context update queue metadata.
+
+Optional `status` filter:
+
+```text
+pending
+acknowledged
+skipped
+```
+
+Must not return chapter content, prompt text, or plaintext secrets.
+
+### mark_context_update(project_id, update_id, status, reason_code="")
+
+Updates one context update queue item status.
+
+Allowed statuses:
+
+```text
+pending
+acknowledged
+skipped
+```
+
+`reason_code` must use safe ASCII letters, numbers, `_`, or `-`.
+
+This marks queue metadata only. It must not update Memory Bank, RAG, exports, drafts, confirmed chapters, or Providers.
 
 ### list_confirmed_chapters(project_id)
 

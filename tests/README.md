@@ -78,6 +78,17 @@ Revision candidate comparison tests currently cover:
 - facade and CLI commands `list-revision-candidates` and `compare-revision-candidate`,
 - output excluding prompt text, source draft content, candidate content, and plaintext secrets.
 
+Context update queue tests currently cover:
+
+- enqueueing confirmed chapters into `data/context_update_queue.json`,
+- idempotent enqueue behavior,
+- listing and filtering context update queue items,
+- marking queue items `pending`, `acknowledged`, or `skipped`,
+- rejection of invalid status and missing update ids,
+- no automatic Memory Bank, RAG, export, draft, confirmed chapter, or Provider side effects,
+- audit/public outputs excluding prompt text, confirmed chapter content, and plaintext secrets,
+- CLI commands `enqueue-context-updates`, `list-context-updates`, and `mark-context-update`.
+
 Checkpoint tests currently cover:
 
 - manifest creation,
