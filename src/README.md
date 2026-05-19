@@ -25,6 +25,7 @@ novel_agent_workbench.corpus_profiles
 novel_agent_workbench.corpus_samples
 novel_agent_workbench.publication
 novel_agent_workbench.self_style
+novel_agent_workbench.manual_rewrite_comparison
 novel_agent_workbench.audit
 novel_agent_workbench.application_service
 novel_agent_workbench.cli
@@ -62,5 +63,6 @@ Current safety hardening:
 - manual style suggestion decisions update only the suggestion artifact/index `decision` metadata. They do not apply edits, create revision requests, mutate drafts, commit chapters, or update Memory Bank/RAG/export.
 - manual rewrite tasks live under `data/manual_rewrite_tasks/` and are created only from `needs_manual_rewrite` style suggestion decisions. They are human workspace metadata only; they do not call Providers, create drafts, modify existing drafts, commit chapters, or update Memory Bank/RAG/export.
 - manual rewrite draft submission creates a new draft candidate from explicit human text. It marks the source task `done` and records `submitted_draft_id`; it does not overwrite source drafts, call Providers, auto-commit, create revision requests, or update Memory Bank/RAG/export.
+- manual rewrite comparisons live under `data/manual_rewrite_comparisons/` and store only ids, structural metrics, deltas, link checks, safety flags, and explicit selection decisions. They do not store source/submitted draft text, call Providers, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

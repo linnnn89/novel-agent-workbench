@@ -425,6 +425,7 @@ CLI tests currently cover:
 - `chutes-generate-once` requiring `--allow-network`, using mocked HTTP for success, cleaning secrets, disabling the gate, and excluding prompt/key/generated content.
 - `chutes-generate-once` mocked success leaving zero file hits for the fake key after cleanup.
 - `chutes-generate-once` audit-gate blocking without network or draft side effects.
+- manual rewrite candidate comparison creation, duplicate rejection, decision states, CLI/facade output safety, audit blocking of text-field contamination, and no Provider/confirmed/Memory Bank/RAG/export side effects.
 
 Audit tests currently cover:
 

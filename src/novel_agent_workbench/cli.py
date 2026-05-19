@@ -162,6 +162,28 @@ def build_parser() -> argparse.ArgumentParser:
     text_group.add_argument("--text")
     text_group.add_argument("--text-stdin", action="store_true")
 
+    compare_manual_rewrite = subparsers.add_parser("compare-manual-rewrite-candidate")
+    compare_manual_rewrite.add_argument("project_id")
+    compare_manual_rewrite.add_argument("task_id")
+
+    list_manual_rewrite_comparisons = subparsers.add_parser("list-manual-rewrite-comparisons")
+    list_manual_rewrite_comparisons.add_argument("project_id")
+    list_manual_rewrite_comparisons.add_argument("--status", default="")
+
+    read_manual_rewrite_comparison = subparsers.add_parser("read-manual-rewrite-comparison")
+    read_manual_rewrite_comparison.add_argument("project_id")
+    read_manual_rewrite_comparison.add_argument("comparison_id")
+
+    decide_manual_rewrite_comparison = subparsers.add_parser("decide-manual-rewrite-comparison")
+    decide_manual_rewrite_comparison.add_argument("project_id")
+    decide_manual_rewrite_comparison.add_argument("comparison_id")
+    decide_manual_rewrite_comparison.add_argument(
+        "--decision",
+        required=True,
+        choices=["selected_for_review", "rejected", "needs_more_manual_work"],
+    )
+    decide_manual_rewrite_comparison.add_argument("--reason-code", default="")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -529,6 +551,19 @@ def run_command(args: argparse.Namespace) -> Any:
     if command == "submit-manual-rewrite-draft":
         text = sys.stdin.read() if args.text_stdin else args.text
         return app.submit_manual_rewrite_draft(args.project_id, args.task_id, text=text)
+    if command == "compare-manual-rewrite-candidate":
+        return app.compare_manual_rewrite_candidate(args.project_id, args.task_id)
+    if command == "list-manual-rewrite-comparisons":
+        return app.list_manual_rewrite_comparisons(args.project_id, status=args.status)
+    if command == "read-manual-rewrite-comparison":
+        return app.read_manual_rewrite_comparison(args.project_id, args.comparison_id)
+    if command == "decide-manual-rewrite-comparison":
+        return app.decide_manual_rewrite_comparison(
+            args.project_id,
+            args.comparison_id,
+            decision=args.decision,
+            reason_code=args.reason_code,
+        )
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":

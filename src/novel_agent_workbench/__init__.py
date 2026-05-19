@@ -35,6 +35,12 @@ from .manual_rewrite import (
     ManualRewriteTaskService,
     ManualRewriteTaskStatusResult,
 )
+from .manual_rewrite_comparison import (
+    ManualRewriteComparisonDecisionResult,
+    ManualRewriteComparisonError,
+    ManualRewriteComparisonResult,
+    ManualRewriteComparisonService,
+)
 from .memory_apply_preview import (
     MemoryApplyCommitResult,
     MemoryApplyPreviewError,
@@ -163,6 +169,10 @@ __all__ = [
     "FormalContextTaskQueueService",
     "ManualRewriteTaskError",
     "ManualRewriteDraftSubmissionResult",
+    "ManualRewriteComparisonDecisionResult",
+    "ManualRewriteComparisonError",
+    "ManualRewriteComparisonResult",
+    "ManualRewriteComparisonService",
     "ManualRewriteTaskResult",
     "ManualRewriteTaskService",
     "ManualRewriteTaskStatusResult",

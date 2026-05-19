@@ -557,3 +557,11 @@ Decision: Allow a manual rewrite task to explicitly submit human text as a new d
 Rationale: Manual rewrite work needs a safe persistence target. The target should be a new draft artifact, not a mutation of the source draft or an automatic commit.
 
 Impact: `ManualRewriteTaskService.submit_manual_rewrite_draft(...)` and `submit-manual-rewrite-draft` write a new `data/drafts/*.json` artifact, append `data/drafts_index.json`, and update the source manual rewrite task with `submitted_draft_id`. The new draft records `manual_rewrite_task_id`, `source_suggestion_id`, `source_check_id`, and `source_draft_id`. Empty text, skipped tasks, and duplicate submissions are rejected. This path does not call Providers, overwrite source drafts, create revision requests, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
+## 2026-05-19: MVP-18 Manual Rewrite Candidate Comparison / Selection Gate
+
+Decision: Add a metadata-only comparison and selection gate for human-submitted manual rewrite draft candidates.
+
+Rationale: After a human rewrite task creates a new draft candidate, the operator needs a stable decision point before any review or commit workflow. The comparison should help identify structural changes without storing or exposing the source/submitted draft bodies.
+
+Impact: `ManualRewriteComparisonService`, `compare-manual-rewrite-candidate`, `list-manual-rewrite-comparisons`, `read-manual-rewrite-comparison`, and `decide-manual-rewrite-comparison` write/read `data/manual_rewrite_comparisons/*.json` plus `data/manual_rewrite_comparisons_index.json`. Comparisons are created from a manual rewrite task's `draft_id` and `submitted_draft_id`, store only ids, structural metrics, deltas, link checks, safety flags, and one explicit decision: `selected_for_review`, `rejected`, or `needs_more_manual_work`. This path does not store draft text, prompt text, raw Provider responses, or plaintext secrets. It does not call Providers, overwrite drafts, create revision requests, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.

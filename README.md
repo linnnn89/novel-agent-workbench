@@ -109,6 +109,7 @@ MVP-0 first storage slice is implemented:
 - MVP-16.9 Manual Suggestion Decision that records explicit operator decisions on style suggestions without applying edits automatically.
 - MVP-17 Manual Rewrite Workspace Skeleton that turns `needs_manual_rewrite` style suggestions into metadata-only human rewrite tasks, without editing drafts or generating candidates.
 - MVP-17.5 Manual Rewrite Draft Submission that lets a human rewrite task explicitly create a new draft candidate without overwriting old drafts or auto-committing.
+- MVP-18 Manual Rewrite Candidate Comparison / Selection Gate that compares source vs submitted manual draft candidates with metadata-only structural metrics and explicit `selected_for_review` / `rejected` / `needs_more_manual_work` decisions.
 - Unit tests.
 
 Verification command:

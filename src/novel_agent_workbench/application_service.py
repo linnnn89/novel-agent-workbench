@@ -17,6 +17,7 @@ from .drafts import DraftGenerationRequest, DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
 from .manual_rewrite import ManualRewriteTaskService
+from .manual_rewrite_comparison import ManualRewriteComparisonService
 from .memory_apply_preview import MemoryApplyPreviewService
 from .memory_bank import MemoryBankService
 from .project_state import public_project_state
@@ -209,6 +210,29 @@ class WorkbenchApplicationService:
         return ManualRewriteTaskService(self._open_store(project_id)).submit_manual_rewrite_draft(
             task_id,
             text=text,
+        ).to_dict()
+
+    def compare_manual_rewrite_candidate(self, project_id: str, task_id: str) -> dict[str, Any]:
+        return ManualRewriteComparisonService(self._open_store(project_id)).create_comparison(task_id).to_dict()
+
+    def list_manual_rewrite_comparisons(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return ManualRewriteComparisonService(self._open_store(project_id)).list_comparisons(status=status)
+
+    def read_manual_rewrite_comparison(self, project_id: str, comparison_id: str) -> dict[str, Any]:
+        return ManualRewriteComparisonService(self._open_store(project_id)).read_comparison(comparison_id)
+
+    def decide_manual_rewrite_comparison(
+        self,
+        project_id: str,
+        comparison_id: str,
+        *,
+        decision: str,
+        reason_code: str = "",
+    ) -> dict[str, Any]:
+        return ManualRewriteComparisonService(self._open_store(project_id)).decide_comparison(
+            comparison_id,
+            decision=decision,
+            reason_code=reason_code,
         ).to_dict()
 
     def project_state(self, project_id: str) -> dict[str, Any]:

@@ -104,6 +104,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     audit_draft_style_checks(store, checked_paths=checked_paths, findings=findings)
     audit_style_suggestions(store, checked_paths=checked_paths, findings=findings)
     audit_manual_rewrite_tasks(store, checked_paths=checked_paths, findings=findings)
+    audit_manual_rewrite_comparisons(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_memory_apply_previews(store, checked_paths=checked_paths, findings=findings)
@@ -522,6 +523,74 @@ def audit_manual_rewrite_tasks(store: ProjectStore, *, checked_paths: list[str],
                     code="manual_rewrite_task_side_effect_flag_invalid",
                     path=str(path),
                     message="Manual rewrite tasks must not auto-apply, auto-generate, or auto-commit.",
+                )
+            )
+
+
+def audit_manual_rewrite_comparisons(
+    store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]
+) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_manual_rewrite_comparison", PROMPT_PATTERNS),
+        ("possible_secret_in_manual_rewrite_comparison", SECRET_PATTERNS),
+        ("possible_content_in_manual_rewrite_comparison", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "manual_rewrite_comparisons_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    comparisons_dir = store.data_dir / "manual_rewrite_comparisons"
+    checked_paths.append(str(comparisons_dir))
+    if not comparisons_dir.exists():
+        return
+    for path in sorted(comparisons_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_self_style_text(artifact):
+            findings.append(
+                AuditFinding(
+                    code="manual_rewrite_comparison_text_stored",
+                    path=str(path),
+                    message="Manual rewrite comparisons must not store draft, prompt, or corpus text.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        if safety.get("provider_called") is not False or safety.get("external_corpus_used") is not False:
+            findings.append(
+                AuditFinding(
+                    code="manual_rewrite_comparison_boundary_invalid",
+                    path=str(path),
+                    message="Manual rewrite comparisons must be local-only and must not use Providers or external corpora.",
+                )
+            )
+        if (
+            safety.get("auto_apply") is not False
+            or safety.get("auto_generate_draft") is not False
+            or safety.get("auto_revision_request") is not False
+            or safety.get("auto_commit") is not False
+        ):
+            findings.append(
+                AuditFinding(
+                    code="manual_rewrite_comparison_side_effect_flag_invalid",
+                    path=str(path),
+                    message="Manual rewrite comparisons must not auto-apply, auto-generate, auto-revise, or auto-commit.",
+                )
+            )
+        if (
+            safety.get("confirmed_touched") is not False
+            or safety.get("memory_bank_touched") is not False
+            or safety.get("rag_touched") is not False
+            or safety.get("exports_touched") is not False
+        ):
+            findings.append(
+                AuditFinding(
+                    code="manual_rewrite_comparison_formal_context_flag_invalid",
+                    path=str(path),
+                    message="Manual rewrite comparisons must not touch confirmed chapters, Memory Bank, RAG, or exports.",
                 )
             )
 

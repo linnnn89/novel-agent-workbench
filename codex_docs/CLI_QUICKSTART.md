@@ -752,3 +752,28 @@ MemoryBankError
 ```
 
 Meaning: keep each manual Memory Bank item compact, and never paste API keys or provider credentials into Memory Bank text.
+
+## Manual Rewrite Candidate Comparison
+
+After `submit-manual-rewrite-draft`, compare the human candidate against the source draft without returning either draft body:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> compare-manual-rewrite-candidate <project_id> <task_id>
+```
+
+List or read comparisons:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> list-manual-rewrite-comparisons <project_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> read-manual-rewrite-comparison <project_id> <comparison_id>
+```
+
+Record the explicit gate decision:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> decide-manual-rewrite-comparison <project_id> <comparison_id> --decision selected_for_review --reason-code manual_gate
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> decide-manual-rewrite-comparison <project_id> <comparison_id> --decision rejected --reason-code manual_gate
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> decide-manual-rewrite-comparison <project_id> <comparison_id> --decision needs_more_manual_work --reason-code manual_gate
+```
+
+These commands write only metadata under `data/manual_rewrite_comparisons/`. They do not call LLMs, expose prompt/body text in command output, commit drafts, create confirmed chapters, or update Memory Bank/RAG/export.

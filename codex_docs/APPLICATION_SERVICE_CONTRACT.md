@@ -1906,3 +1906,56 @@ network_error
 invalid_response
 empty_response
 ```
+
+## Manual Rewrite Comparison Facade
+
+### compare_manual_rewrite_candidate(project_id, task_id)
+
+Creates a metadata-only comparison between a manual rewrite task's source draft and submitted draft candidate.
+
+Writes:
+
+```text
+data/manual_rewrite_comparisons/*.json
+data/manual_rewrite_comparisons_index.json
+```
+
+Returns metadata only:
+
+```text
+comparison_id
+task_id
+suggestion_id
+check_id
+chapter_id
+source_draft_id
+submitted_draft_id
+char_count_delta
+paragraph_count_delta
+path
+created_at
+```
+
+It does not return source or submitted draft text.
+
+### list_manual_rewrite_comparisons(project_id, status="")
+
+Returns index metadata only. It may be filtered by `comparison_ready`, `selected_for_review`, `rejected`, or `needs_more_manual_work`.
+
+### read_manual_rewrite_comparison(project_id, comparison_id)
+
+Returns the comparison artifact. The artifact contains ids, structural metrics, deltas, link checks, safety flags, and decision metadata. It must not contain draft text, prompt text, Provider raw output, or plaintext secrets.
+
+### decide_manual_rewrite_comparison(project_id, comparison_id, decision, reason_code="")
+
+Records a one-time operator decision.
+
+Allowed decisions:
+
+```text
+selected_for_review
+rejected
+needs_more_manual_work
+```
+
+The `reason_code` is optional short ASCII metadata. This method does not call Providers, modify draft bodies, create revision requests, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
