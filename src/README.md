@@ -60,5 +60,6 @@ Current safety hardening:
 - style check policy lives in `config.json` under `context_policy.style_check_policy`, so the future UI can disable style checks, disable calibration, hide hints, and keep auto-revision off.
 - style suggestions convert a style check into manual advice metadata under `data/style_suggestions/`. They do not call Providers, read external corpora, modify drafts, create revision requests, commit chapters, or update Memory Bank/RAG/export.
 - manual style suggestion decisions update only the suggestion artifact/index `decision` metadata. They do not apply edits, create revision requests, mutate drafts, commit chapters, or update Memory Bank/RAG/export.
+- manual rewrite tasks live under `data/manual_rewrite_tasks/` and are created only from `needs_manual_rewrite` style suggestion decisions. They are human workspace metadata only; they do not call Providers, create drafts, modify existing drafts, commit chapters, or update Memory Bank/RAG/export.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

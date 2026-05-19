@@ -541,3 +541,11 @@ Decision: Add explicit one-time operator decisions for style suggestion artifact
 Rationale: Style suggestions should support human workflow tracking without silently becoming rewrite instructions. The operator can mark suggestions as accepted, ignored, or needing manual rewrite, while the system still avoids automatic draft mutation.
 
 Impact: `SelfStyleBaselineService.decide_style_suggestion(...)` and `decide-style-suggestion` update only the style suggestion artifact and index `decision` metadata. Supported decisions are `accepted`, `ignored`, and `needs_manual_rewrite`. Duplicate decisions are rejected. Decision reason is a short ASCII `reason_code`, not free-form text. This path does not apply edits, create revision requests, call Providers, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
+## 2026-05-19: MVP-17 Manual Rewrite Workspace Skeleton
+
+Decision: Add metadata-only manual rewrite tasks for style suggestions marked `needs_manual_rewrite`.
+
+Rationale: `needs_manual_rewrite` should become an actionable human work item without turning into automatic LLM revision, draft mutation, or commit behavior. This preserves the explicit operator boundary.
+
+Impact: `ManualRewriteTaskService`, `create-manual-rewrite-task`, `list-manual-rewrite-tasks`, `read-manual-rewrite-task`, and `mark-manual-rewrite-task` write/read `data/manual_rewrite_tasks/*.json` plus `data/manual_rewrite_tasks_index.json`. Tasks can only be created from `needs_manual_rewrite` style suggestion decisions. `accepted` and `ignored` suggestions are rejected. Duplicate tasks are rejected. Status supports `pending`, `in_progress`, `done`, and `skipped`. This path does not call Providers, generate drafts, modify drafts, create revision requests, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.

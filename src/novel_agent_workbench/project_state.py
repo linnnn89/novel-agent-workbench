@@ -11,6 +11,7 @@ from .corpus_samples import CorpusSampleService
 from .drafts import DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
+from .manual_rewrite import ManualRewriteTaskService
 from .memory_apply_preview import MemoryApplyPreviewService
 from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
 from .reviews import DraftReviewService
@@ -36,6 +37,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     self_style_service = SelfStyleBaselineService(store)
     formal_context_plan_service = FormalContextPlanService(store)
     formal_context_task_service = FormalContextTaskQueueService(store)
+    manual_rewrite_task_service = ManualRewriteTaskService(store)
     memory_apply_preview_service = MemoryApplyPreviewService(store)
     drafts = draft_service.list_drafts()
     reviews = review_service.list_reviews()
@@ -52,6 +54,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     style_suggestions = self_style_service.list_style_suggestions()
     formal_context_plans = formal_context_plan_service.list_formal_context_plans()
     formal_context_tasks = formal_context_task_service.list_tasks()
+    manual_rewrite_tasks = manual_rewrite_task_service.list_tasks()
     memory_apply_previews = memory_apply_preview_service.list_memory_apply_previews()
     memory_bank_items = safe_memory_bank_items(store)
     store_state = store.public_state()
@@ -77,6 +80,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "style_suggestion_count": len(style_suggestions),
         "formal_context_plan_count": len(formal_context_plans),
         "formal_context_task_count": len(formal_context_tasks),
+        "manual_rewrite_task_count": len(manual_rewrite_tasks),
         "memory_apply_preview_count": len(memory_apply_previews),
         "memory_bank_item_count": len(memory_bank_items),
         "chapter_count": len(chapters),
@@ -98,6 +102,9 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         ),
         "latest_formal_context_task": safe_formal_context_task_summary(
             latest_by(formal_context_tasks, "updated_at")
+        ),
+        "latest_manual_rewrite_task": safe_manual_rewrite_task_summary(
+            latest_by(manual_rewrite_tasks, "updated_at")
         ),
         "latest_memory_apply_preview": safe_memory_apply_preview_summary(
             latest_by(memory_apply_previews, "created_at")
@@ -363,6 +370,24 @@ def safe_formal_context_task_summary(item: dict[str, Any] | None) -> dict[str, A
         "status": item.get("status"),
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
+    }
+
+
+def safe_manual_rewrite_task_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "task_id": item.get("task_id"),
+        "suggestion_id": item.get("suggestion_id"),
+        "check_id": item.get("check_id"),
+        "draft_id": item.get("draft_id"),
+        "chapter_id": item.get("chapter_id"),
+        "title": item.get("title"),
+        "status": item.get("status"),
+        "reason_code": item.get("reason_code"),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+        "safety": item.get("safety") if isinstance(item.get("safety"), dict) else {},
     }
 
 

@@ -234,6 +234,18 @@ Style suggestion tests currently cover:
 - audit rejection if a suggestion artifact stores text fields,
 - no draft mutation, auto revision, auto commit, Memory Bank, RAG, export, Provider, or confirmed chapter side effects.
 
+Manual rewrite task tests currently cover:
+
+- creating `data/manual_rewrite_tasks/*.json` and `data/manual_rewrite_tasks_index.json`,
+- allowing task creation only from `needs_manual_rewrite` style suggestion decisions,
+- rejecting `accepted` or `ignored` suggestions,
+- rejecting duplicate tasks for the same suggestion,
+- marking task status as `pending`, `in_progress`, `done`, or `skipped`,
+- facade and CLI commands `create-manual-rewrite-task`, `list-manual-rewrite-tasks`, `read-manual-rewrite-task`, and `mark-manual-rewrite-task`,
+- public state `manual_rewrite_task_count` and `latest_manual_rewrite_task`,
+- audit rejection if a task artifact stores text fields,
+- no draft generation, draft mutation, confirmed chapter, revision request, Memory Bank, RAG, export, or Provider side effects.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

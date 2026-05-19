@@ -137,6 +137,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     decide_style_suggestion.add_argument("--reason-code", default="")
 
+    create_manual_rewrite_task = subparsers.add_parser("create-manual-rewrite-task")
+    create_manual_rewrite_task.add_argument("project_id")
+    create_manual_rewrite_task.add_argument("suggestion_id")
+
+    list_manual_rewrite_tasks = subparsers.add_parser("list-manual-rewrite-tasks")
+    list_manual_rewrite_tasks.add_argument("project_id")
+    list_manual_rewrite_tasks.add_argument("--status", default="")
+
+    read_manual_rewrite_task = subparsers.add_parser("read-manual-rewrite-task")
+    read_manual_rewrite_task.add_argument("project_id")
+    read_manual_rewrite_task.add_argument("task_id")
+
+    mark_manual_rewrite_task = subparsers.add_parser("mark-manual-rewrite-task")
+    mark_manual_rewrite_task.add_argument("project_id")
+    mark_manual_rewrite_task.add_argument("task_id")
+    mark_manual_rewrite_task.add_argument("--status", required=True, choices=["pending", "in_progress", "done", "skipped"])
+    mark_manual_rewrite_task.add_argument("--reason-code", default="")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -486,6 +504,19 @@ def run_command(args: argparse.Namespace) -> Any:
             args.project_id,
             args.suggestion_id,
             decision=args.decision,
+            reason_code=args.reason_code,
+        )
+    if command == "create-manual-rewrite-task":
+        return app.create_manual_rewrite_task(args.project_id, args.suggestion_id)
+    if command == "list-manual-rewrite-tasks":
+        return app.list_manual_rewrite_tasks(args.project_id, status=args.status)
+    if command == "read-manual-rewrite-task":
+        return app.read_manual_rewrite_task(args.project_id, args.task_id)
+    if command == "mark-manual-rewrite-task":
+        return app.mark_manual_rewrite_task(
+            args.project_id,
+            args.task_id,
+            status=args.status,
             reason_code=args.reason_code,
         )
     if command == "state":

@@ -103,6 +103,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     audit_self_style_baselines(store, checked_paths=checked_paths, findings=findings)
     audit_draft_style_checks(store, checked_paths=checked_paths, findings=findings)
     audit_style_suggestions(store, checked_paths=checked_paths, findings=findings)
+    audit_manual_rewrite_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_memory_apply_previews(store, checked_paths=checked_paths, findings=findings)
@@ -469,6 +470,58 @@ def audit_style_suggestions(store: ProjectStore, *, checked_paths: list[str], fi
                     code="style_suggestion_side_effect_flag_invalid",
                     path=str(path),
                     message="Style suggestions must not auto-revise or auto-commit.",
+                )
+            )
+
+
+def audit_manual_rewrite_tasks(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_manual_rewrite_task", PROMPT_PATTERNS),
+        ("possible_secret_in_manual_rewrite_task", SECRET_PATTERNS),
+        ("possible_content_in_manual_rewrite_task", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "manual_rewrite_tasks_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    tasks_dir = store.data_dir / "manual_rewrite_tasks"
+    checked_paths.append(str(tasks_dir))
+    if not tasks_dir.exists():
+        return
+    for path in sorted(tasks_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_self_style_text(artifact):
+            findings.append(
+                AuditFinding(
+                    code="manual_rewrite_task_text_stored",
+                    path=str(path),
+                    message="Manual rewrite tasks must not store draft, prompt, or corpus text.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        if safety.get("provider_called") is not False or safety.get("external_corpus_used") is not False:
+            findings.append(
+                AuditFinding(
+                    code="manual_rewrite_task_boundary_invalid",
+                    path=str(path),
+                    message="Manual rewrite tasks must be local-only and must not use Providers or external corpora.",
+                )
+            )
+        if (
+            safety.get("auto_apply") is not False
+            or safety.get("auto_generate_draft") is not False
+            or safety.get("auto_commit") is not False
+        ):
+            findings.append(
+                AuditFinding(
+                    code="manual_rewrite_task_side_effect_flag_invalid",
+                    path=str(path),
+                    message="Manual rewrite tasks must not auto-apply, auto-generate, or auto-commit.",
                 )
             )
 

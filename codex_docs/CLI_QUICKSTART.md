@@ -593,6 +593,17 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This converts warning/hint metadata into manual advice, then lets the operator record a decision: `accepted`, `ignored`, or `needs_manual_rewrite`. Decisions update only metadata. They do not edit the draft, create a revision request, call Providers, auto-commit, or update Memory Bank/RAG/export. Suggestions and decisions are generic metric-level metadata and must not contain draft text, prompt text, generated content, or plaintext secrets.
 
+Create a human rewrite task from a `needs_manual_rewrite` style suggestion:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-manual-rewrite-task demo_project <suggestion_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-manual-rewrite-tasks demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-manual-rewrite-task demo_project <task_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test mark-manual-rewrite-task demo_project <task_id> --status in_progress --reason-code started
+```
+
+Manual rewrite tasks are workspace metadata only. They do not edit the draft, create a new draft, create a revision request, call Providers, auto-commit, or update Memory Bank/RAG/export.
+
 ## Safety And Cleanup Policy
 
 Do not hard delete real project files during early MVP.

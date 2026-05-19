@@ -393,6 +393,53 @@ data/style_suggestions_index.json
 
 This method must not apply edits, mutate draft content, create revision requests, auto-revise drafts, auto-commit drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports. A style suggestion can be decided only once.
 
+### create_manual_rewrite_task(project_id, suggestion_id)
+
+Creates a metadata-only human rewrite task from a style suggestion whose manual decision is `needs_manual_rewrite`.
+
+Writes:
+
+```text
+data/manual_rewrite_tasks/*.json
+data/manual_rewrite_tasks_index.json
+```
+
+Task metadata includes:
+
+```text
+task_id
+suggestion_id
+check_id
+draft_id
+chapter_id
+status
+reason_code
+created_at
+safety
+```
+
+The method must reject suggestions decided as `accepted` or `ignored`. It must also reject duplicate tasks for the same suggestion.
+
+This method must not call Providers, generate a draft, modify drafts, create revision requests, auto-revise drafts, auto-commit drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
+
+### list_manual_rewrite_tasks(project_id, status="")
+
+Returns manual rewrite task index metadata. Optional `status` can filter `pending`, `in_progress`, `done`, or `skipped`.
+
+Metadata-only. Must not return draft text, prompt text, generated content, or plaintext secrets.
+
+### read_manual_rewrite_task(project_id, task_id)
+
+Returns one manual rewrite task artifact.
+
+Metadata-only. Must not return draft text, prompt text, generated content, or plaintext secrets.
+
+### mark_manual_rewrite_task(project_id, task_id, status, reason_code="")
+
+Marks a manual rewrite task as `pending`, `in_progress`, `done`, or `skipped`.
+
+This updates task metadata only. It must not modify drafts, create new drafts, create revision requests, commit chapters, call Providers, or update Memory Bank/RAG/export.
+
 ### project_state(project_id)
 
 Returns safe public project state.
@@ -416,6 +463,7 @@ draft_style_check_count
 style_suggestion_count
 formal_context_plan_count
 formal_context_task_count
+manual_rewrite_task_count
 memory_apply_preview_count
 memory_bank_item_count
 chapter_count
@@ -434,6 +482,7 @@ latest_draft_style_check
 latest_style_suggestion
 latest_formal_context_plan
 latest_formal_context_task
+latest_manual_rewrite_task
 latest_memory_apply_preview
 latest_memory_bank_item
 latest_committed_chapter

@@ -460,6 +460,14 @@ decide-style-suggestion + one-time decision metadata.
 
 Manual style suggestion decisions must support `accepted`, `ignored`, and `needs_manual_rewrite`. They must update only the style suggestion artifact and index metadata. They must not apply edits, mutate drafts, create revision requests, call Providers, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
 
+MVP-17 manual rewrite workspace slice:
+
+```text
+create-manual-rewrite-task + data/manual_rewrite_tasks/*.json + human rewrite task metadata.
+```
+
+Manual rewrite tasks must only be created from style suggestions with `needs_manual_rewrite` decisions. They must reject `accepted` or `ignored` suggestions and duplicate tasks. They may track `pending`, `in_progress`, `done`, and `skipped`, but must not call Providers, generate drafts, modify drafts, create revision requests, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

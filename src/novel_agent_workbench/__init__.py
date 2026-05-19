@@ -28,6 +28,12 @@ from .formal_context_tasks import (
     FormalContextTaskQueueResult,
     FormalContextTaskQueueService,
 )
+from .manual_rewrite import (
+    ManualRewriteTaskError,
+    ManualRewriteTaskResult,
+    ManualRewriteTaskService,
+    ManualRewriteTaskStatusResult,
+)
 from .memory_apply_preview import (
     MemoryApplyCommitResult,
     MemoryApplyPreviewError,
@@ -154,6 +160,10 @@ __all__ = [
     "FormalContextTaskQueueError",
     "FormalContextTaskQueueResult",
     "FormalContextTaskQueueService",
+    "ManualRewriteTaskError",
+    "ManualRewriteTaskResult",
+    "ManualRewriteTaskService",
+    "ManualRewriteTaskStatusResult",
     "MemoryApplyPreviewError",
     "MemoryApplyPreviewResult",
     "MemoryApplyCommitResult",
