@@ -13,6 +13,7 @@ Each folder should contain a `README.md` with operation, files changed, verifica
 Recent log:
 
 ```text
+2026-05-19_mvp167_style_check_policy_toggles
 2026-05-19_mvp166_style_check_calibration
 2026-05-19_mvp165_draft_style_check
 2026-05-19_mvp16_self_style_baseline

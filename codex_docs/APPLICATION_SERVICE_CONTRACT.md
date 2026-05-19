@@ -296,6 +296,26 @@ custom
 
 Style checks are hints, not pass/fail grading. `scene_mode` adjusts tolerance so deliberately different chapters, such as exposition, battle, climax, daily, romance, or transition chapters, are not forced toward the global average.
 
+Project-level defaults live at:
+
+```text
+config.context_policy.style_check_policy
+```
+
+Fields:
+
+```text
+enabled
+calibration_enabled
+show_hints
+default_scene_mode
+severity_mode
+auto_create_revision_request
+ui_placement
+```
+
+`auto_create_revision_request` must remain `false` unless a later explicit operator workflow is implemented.
+
 Checks may include:
 
 ```text
@@ -309,7 +329,7 @@ selected punctuation frequency
 
 This method reads draft text in memory only. Persistent artifacts must not store draft text, prompt text, confirmed chapter text, external corpus text, raw Provider responses, or plaintext secrets.
 
-This method must not call Providers, create drafts, create confirmed chapters, create revision requests, auto-revise drafts, auto-commit drafts, update Memory Bank, update RAG, or create exports.
+This method must not call Providers, create drafts, create confirmed chapters, create revision requests, auto-revise drafts, auto-commit drafts, update Memory Bank, update RAG, or create exports. If style checks are disabled by policy, the method must fail without writing a style check artifact.
 
 ### list_draft_style_checks(project_id)
 

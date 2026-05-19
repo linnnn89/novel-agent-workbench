@@ -137,11 +137,17 @@ class WorkbenchApplicationService:
         *,
         baseline_id: str = "",
         scene_mode: str = "general",
+        enabled: bool | None = None,
+        calibration_enabled: bool | None = None,
+        show_hints: bool | None = None,
     ) -> dict[str, Any]:
         return SelfStyleBaselineService(self._open_store(project_id)).check_draft_against_baseline(
             draft_id,
             baseline_id=baseline_id,
             scene_mode=scene_mode,
+            enabled=enabled,
+            calibration_enabled=calibration_enabled,
+            show_hints=show_hints,
         ).to_dict()
 
     def list_draft_style_checks(self, project_id: str) -> list[dict[str, Any]]:

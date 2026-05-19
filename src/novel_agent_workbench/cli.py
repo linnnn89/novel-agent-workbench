@@ -101,6 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="general",
         choices=["general", "daily", "romance", "battle", "climax", "exposition", "transition", "custom"],
     )
+    check_draft_style.add_argument("--disable-style-check", action="store_true")
+    calibration_group = check_draft_style.add_mutually_exclusive_group()
+    calibration_group.add_argument("--enable-calibration", dest="calibration_enabled", action="store_true", default=None)
+    calibration_group.add_argument("--disable-calibration", dest="calibration_enabled", action="store_false")
+    hints_group = check_draft_style.add_mutually_exclusive_group()
+    hints_group.add_argument("--show-hints", dest="show_hints", action="store_true", default=None)
+    hints_group.add_argument("--hide-hints", dest="show_hints", action="store_false")
 
     list_draft_style_checks = subparsers.add_parser("list-draft-style-checks")
     list_draft_style_checks.add_argument("project_id")
@@ -439,6 +446,9 @@ def run_command(args: argparse.Namespace) -> Any:
             args.draft_id,
             baseline_id=args.baseline_id,
             scene_mode=args.scene_mode,
+            enabled=False if args.disable_style_check else None,
+            calibration_enabled=args.calibration_enabled,
+            show_hints=args.show_hints,
         )
     if command == "list-draft-style-checks":
         return app.list_draft_style_checks(args.project_id)

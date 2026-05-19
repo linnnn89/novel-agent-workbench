@@ -35,6 +35,13 @@ class ProjectFoundationTest(unittest.TestCase):
             self.assertEqual(world_building["world_book_overlap_policy"], "reduce_memory_when_world_book_enabled")
             self.assertEqual(world_building["memory_weight"], 1.0)
             self.assertEqual(world_building["world_book_enabled_memory_weight"], 0.35)
+            style_policy = config["context_policy"]["style_check_policy"]
+            self.assertTrue(style_policy["enabled"])
+            self.assertTrue(style_policy["calibration_enabled"])
+            self.assertTrue(style_policy["show_hints"])
+            self.assertEqual(style_policy["default_scene_mode"], "general")
+            self.assertEqual(style_policy["ui_placement"]["primary_surface"], "draft_review_side_panel")
+            self.assertFalse(style_policy["ui_placement"]["modal_recommended"])
             self.assertEqual(
                 {item["id"] for item in config["workflow_presets"]},
                 {"classic_direct", "manual_studio", "auto_pipeline"},
@@ -66,6 +73,7 @@ class ProjectFoundationTest(unittest.TestCase):
                 ],
                 "reduce_memory_when_world_book_enabled",
             )
+            self.assertTrue(config["context_policy"]["style_check_policy"]["enabled"])
             self.assertIn("writer", config["model_roles"])
             self.assertTrue(result["checkpoint"]["path"].endswith(".zip"))
             self.assertTrue(Path(result["checkpoint"]["path"]).exists())

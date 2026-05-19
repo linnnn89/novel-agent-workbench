@@ -172,6 +172,64 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
             self.assertEqual(exposition_dialogue["severity"], "hint")
             self.assertEqual(exposition_dialogue["status"], "soft_low")
 
+    def test_style_check_can_be_disabled_by_project_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            config = store.read_config()
+            config["context_policy"]["style_check_policy"]["enabled"] = False
+            store.write_config(config)
+            service = SelfStyleBaselineService(store)
+            service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private disabled style prompt")
+            )
+
+            with self.assertRaises(SelfStyleBaselineError):
+                service.check_draft_against_baseline(draft.draft_id)
+
+            self.assertEqual(service.list_style_checks(), [])
+
+    def test_style_check_hide_hints_override_suppresses_hint_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            baseline = service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private hide hints prompt")
+            )
+            replace_draft_text(store, draft.draft_id, "设定说明章。\n这里没有对白，只有连续说明。\n世界规则和背景被缓慢铺开。")
+
+            result = service.check_draft_against_baseline(
+                draft.draft_id,
+                baseline_id=baseline.baseline_id,
+                scene_mode="exposition",
+                show_hints=False,
+            )
+
+            self.assertEqual(result.hint_count, 0)
+            self.assertTrue(all(item["severity"] != "hint" for item in result.checks))
+
+    def test_style_check_can_disable_calibration_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            baseline = service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private no calibration prompt")
+            )
+            replace_draft_text(store, draft.draft_id, "设定说明章。\n这里没有对白，只有连续说明。\n世界规则和背景被缓慢铺开。")
+
+            result = service.check_draft_against_baseline(
+                draft.draft_id,
+                baseline_id=baseline.baseline_id,
+                scene_mode="exposition",
+                calibration_enabled=False,
+            )
+            dialogue = check_by_metric(result.checks, "dialogue_line_ratio")
+
+            self.assertEqual(dialogue["severity"], "warning")
+            self.assertFalse(service.read_style_check(result.check_id)["style_check_policy"]["calibration_enabled"])
+
     def test_check_draft_style_uses_latest_baseline_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = configured_store_with_confirmed_chapters(temp)
@@ -246,6 +304,7 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
 
             check = app.check_draft_style("demo", draft["draft_id"])
             exposition_check = app.check_draft_style("demo", draft["draft_id"], scene_mode="exposition")
+            hidden_hint_check = app.check_draft_style("demo", draft["draft_id"], show_hints=False)
             checks = app.list_draft_style_checks("demo")
             read = app.read_draft_style_check("demo", check["check_id"])
             stdout = capture_stdout(
@@ -264,8 +323,9 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
 
             self.assertEqual(checks[0]["check_id"], check["check_id"])
             self.assertEqual(exposition_check["scene_mode"], "exposition")
+            self.assertEqual(hidden_hint_check["hint_count"], 0)
             self.assertEqual(read["check_id"], check["check_id"])
-            self.assertEqual(state["draft_style_check_count"], 2)
+            self.assertEqual(state["draft_style_check_count"], 3)
             self.assertNotIn("private facade style prompt", combined)
             self.assertNotIn("MOCK writer", combined)
 

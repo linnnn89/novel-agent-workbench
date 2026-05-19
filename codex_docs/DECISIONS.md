@@ -517,3 +517,11 @@ Decision: Treat draft style checks as scene-mode-aware hints, not strict pass/fa
 Reason: Long-form chapters naturally vary. Daily, romance, battle, climax, exposition, and transition chapters should not be forced to match the global average for dialogue ratio, sentence length, punctuation, or chapter length.
 
 Impact: `check-draft-style` accepts `scene_mode` / `--scene-mode` with `general`, `daily`, `romance`, `battle`, `climax`, `exposition`, `transition`, and `custom`. P25-P75 deviations become `hint`; only calibrated extreme deviations become `warning`. Mode policies widen tolerance for intentional differences, such as low-dialogue exposition chapters or high-intensity battle/climax punctuation. The check remains local-only and still does not store draft text, call Providers, create revision requests, auto-revise, auto-commit, or update Memory Bank/RAG/export.
+
+## 2026-05-19: MVP-16.7 Style Check Policy Toggles
+
+Decision: Make style checks, calibration, and hint display configurable, with future UI placement recorded in project config.
+
+Reason: Style checks should help the operator while reviewing a draft, but they must not become intrusive or mandatory. The user explicitly wanted the option to turn this feature off and asked where it belongs in the UI.
+
+Impact: `context_policy.style_check_policy` now stores `enabled`, `calibration_enabled`, `show_hints`, `default_scene_mode`, `severity_mode`, `auto_create_revision_request=false`, and `ui_placement`. `check-draft-style` supports `--disable-style-check`, `--disable-calibration`, `--enable-calibration`, `--hide-hints`, and `--show-hints` call-level overrides. If disabled, no style check artifact is written. Future UI placement is `draft_review_side_panel` with defaults in `project_settings_writing_quality`; modal pop-ups are not recommended. No UI was implemented.

@@ -97,6 +97,7 @@ def default_project_config() -> dict[str, Any]:
             "world_book_enabled": False,
             "max_context_tokens": 32768,
             "formal_context_policy": default_formal_context_policy(),
+            "style_check_policy": default_style_check_policy(),
         },
     }
 
@@ -140,6 +141,23 @@ def default_formal_context_policy() -> dict[str, Any]:
                 "enabled": True,
                 "auto_extract": False,
             },
+        },
+    }
+
+
+def default_style_check_policy() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "enabled": True,
+        "calibration_enabled": True,
+        "show_hints": True,
+        "default_scene_mode": "general",
+        "severity_mode": "hint_first",
+        "auto_create_revision_request": False,
+        "ui_placement": {
+            "primary_surface": "draft_review_side_panel",
+            "settings_surface": "project_settings_writing_quality",
+            "modal_recommended": False,
         },
     }
 

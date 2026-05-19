@@ -16,6 +16,7 @@ STYLE_CHECKS_DIRNAME = "style_checks"
 STYLE_CHECKS_INDEX_FILENAME = "style_checks_index.json"
 SENTENCE_RE = re.compile(r"[^。！？!?\.]+[。！？!?\.]?")
 SCENE_MODES = {"general", "daily", "romance", "battle", "climax", "exposition", "transition", "custom"}
+STYLE_CHECK_POLICY_PATH = ("context_policy", "style_check_policy")
 
 
 class SelfStyleBaselineError(RuntimeError):
@@ -166,16 +167,34 @@ class SelfStyleBaselineService:
         *,
         baseline_id: str = "",
         scene_mode: str = "general",
+        enabled: bool | None = None,
+        calibration_enabled: bool | None = None,
+        show_hints: bool | None = None,
     ) -> DraftStyleCheckResult:
         self.store.initialize()
         with self.store.lock():
-            mode = normalize_scene_mode(scene_mode)
+            policy = effective_style_check_policy(
+                self.store,
+                scene_mode=scene_mode,
+                enabled=enabled,
+                calibration_enabled=calibration_enabled,
+                show_hints=show_hints,
+            )
+            if not policy["enabled"]:
+                raise SelfStyleBaselineError("Style check is disabled by project policy.")
+            mode = normalize_scene_mode(str(policy["scene_mode"]))
             baseline = self.read_baseline(baseline_id or self._latest_baseline_id())
             draft = DraftGenerationService(self.store).read_draft(draft_id)
             content = str(draft.get("content") or "")
             draft_metrics = analyze_text(content)
             baseline_metrics = baseline.get("metrics") if isinstance(baseline.get("metrics"), dict) else {}
-            checks = compare_metrics(draft_metrics, baseline_metrics, scene_mode=mode)
+            checks = compare_metrics(
+                draft_metrics,
+                baseline_metrics,
+                scene_mode=mode,
+                calibration_enabled=bool(policy["calibration_enabled"]),
+                show_hints=bool(policy["show_hints"]),
+            )
             issue_count = sum(1 for item in checks if item.get("severity") == "warning")
             hint_count = sum(1 for item in checks if item.get("severity") == "hint")
             if issue_count:
@@ -204,7 +223,8 @@ class SelfStyleBaselineService:
                     "chapter_count": baseline_metrics.get("chapter_count"),
                 },
                 "scene_mode": mode,
-                "calibration": scene_mode_policy(mode),
+                "style_check_policy": policy,
+                "calibration": scene_mode_policy(mode) if policy["calibration_enabled"] else disabled_calibration_policy(mode),
                 "draft_metrics": public_draft_metrics_summary(draft_metrics),
                 "checks": checks,
                 "issue_count": issue_count,
@@ -231,6 +251,12 @@ class SelfStyleBaselineService:
                 "title": str(draft.get("title") or ""),
                 "baseline_id": str(baseline.get("baseline_id") or ""),
                 "scene_mode": mode,
+                "style_check_policy": {
+                    "enabled": policy["enabled"],
+                    "calibration_enabled": policy["calibration_enabled"],
+                    "show_hints": policy["show_hints"],
+                    "source": policy["source"],
+                },
                 "issue_count": issue_count,
                 "hint_count": hint_count,
                 "path": str(artifact_path.relative_to(self.store.root)),
@@ -412,6 +438,8 @@ def compare_metrics(
     baseline_metrics: dict[str, Any],
     *,
     scene_mode: str = "general",
+    calibration_enabled: bool = True,
+    show_hints: bool = True,
 ) -> list[dict[str, Any]]:
     mode = normalize_scene_mode(scene_mode)
     checks = [
@@ -421,6 +449,8 @@ def compare_metrics(
             float(draft_metrics.get("nonspace_char_count") or 0),
             baseline_metrics.get("nonspace_chars"),
             scene_mode=mode,
+            calibration_enabled=calibration_enabled,
+            show_hints=show_hints,
         ),
         compare_distribution_metric(
             "paragraphs_per_chapter",
@@ -428,6 +458,8 @@ def compare_metrics(
             float(draft_metrics.get("paragraph_count") or 0),
             baseline_metrics.get("paragraphs_per_chapter"),
             scene_mode=mode,
+            calibration_enabled=calibration_enabled,
+            show_hints=show_hints,
         ),
         compare_distribution_metric(
             "sentences_per_chapter",
@@ -435,6 +467,8 @@ def compare_metrics(
             float(draft_metrics.get("sentence_count") or 0),
             baseline_metrics.get("sentences_per_chapter"),
             scene_mode=mode,
+            calibration_enabled=calibration_enabled,
+            show_hints=show_hints,
         ),
         compare_distribution_metric(
             "dialogue_line_ratio",
@@ -442,6 +476,8 @@ def compare_metrics(
             float(draft_metrics.get("dialogue_line_ratio") or 0),
             baseline_metrics.get("dialogue_line_ratio"),
             scene_mode=mode,
+            calibration_enabled=calibration_enabled,
+            show_hints=show_hints,
         ),
         compare_distribution_metric(
             "avg_sentence_chars",
@@ -449,6 +485,8 @@ def compare_metrics(
             float(draft_metrics.get("avg_sentence_chars") or 0),
             baseline_metrics.get("avg_sentence_chars"),
             scene_mode=mode,
+            calibration_enabled=calibration_enabled,
+            show_hints=show_hints,
         ),
         compare_distribution_metric(
             "avg_paragraph_chars",
@@ -456,6 +494,8 @@ def compare_metrics(
             float(draft_metrics.get("avg_paragraph_chars") or 0),
             baseline_metrics.get("avg_paragraph_chars"),
             scene_mode=mode,
+            calibration_enabled=calibration_enabled,
+            show_hints=show_hints,
         ),
     ]
     punctuation = draft_metrics.get("punctuation_per_1000_chars")
@@ -469,6 +509,8 @@ def compare_metrics(
                     punctuation.get(key),
                     baseline_punctuation.get(key),
                     scene_mode=mode,
+                    calibration_enabled=calibration_enabled,
+                    show_hints=show_hints,
                 )
             )
     return checks
@@ -481,13 +523,15 @@ def compare_distribution_metric(
     baseline: object,
     *,
     scene_mode: str,
+    calibration_enabled: bool,
+    show_hints: bool,
 ) -> dict[str, Any]:
     if not isinstance(baseline, dict) or not baseline:
         return unavailable_check(metric_id, label, value)
     p25 = float(baseline.get("p25") or 0)
     median = float(baseline.get("median") or 0)
     p75 = float(baseline.get("p75") or 0)
-    policy = scene_mode_policy(scene_mode)
+    policy = scene_mode_policy(scene_mode) if calibration_enabled else disabled_calibration_policy(scene_mode)
     lower_multiplier = tolerance_multiplier(policy, metric_id, "lower")
     upper_multiplier = tolerance_multiplier(policy, metric_id, "upper")
     minimum_span = 0.05 if "ratio" in metric_id else 1.0
@@ -502,6 +546,9 @@ def compare_distribution_metric(
     elif value > p75:
         status = "soft_high"
         severity = "hint"
+    if severity == "hint" and not show_hints:
+        status = "within_range"
+        severity = "info"
     if value < hard_low:
         status = "low"
         severity = "warning"
@@ -533,10 +580,12 @@ def compare_point_metric(
     baseline: object,
     *,
     scene_mode: str,
+    calibration_enabled: bool,
+    show_hints: bool,
 ) -> dict[str, Any]:
     numeric_value = float(value or 0)
     numeric_baseline = float(baseline or 0)
-    policy = scene_mode_policy(scene_mode)
+    policy = scene_mode_policy(scene_mode) if calibration_enabled else disabled_calibration_policy(scene_mode)
     lower_multiplier = tolerance_multiplier(policy, metric_id, "lower")
     upper_multiplier = tolerance_multiplier(policy, metric_id, "upper")
     base_tolerance = max(1.0, numeric_baseline * 0.5)
@@ -552,6 +601,9 @@ def compare_point_metric(
     elif numeric_value > soft_high:
         status = "soft_high"
         severity = "hint"
+    if severity == "hint" and not show_hints:
+        status = "within_range"
+        severity = "info"
     if numeric_value < hard_low:
         status = "low"
         severity = "warning"
@@ -592,6 +644,42 @@ def normalize_scene_mode(value: str) -> str:
     if mode not in SCENE_MODES:
         raise SelfStyleBaselineError(f"Unsupported scene_mode: {value!r}")
     return mode
+
+
+def effective_style_check_policy(
+    store: ProjectStore,
+    *,
+    scene_mode: str = "general",
+    enabled: bool | None = None,
+    calibration_enabled: bool | None = None,
+    show_hints: bool | None = None,
+) -> dict[str, Any]:
+    config = store.read_config()
+    policy = nested_dict(config, STYLE_CHECK_POLICY_PATH)
+    selected_scene_mode = scene_mode or str(policy.get("default_scene_mode") or "general")
+    if selected_scene_mode == "general" and scene_mode == "general":
+        selected_scene_mode = str(policy.get("default_scene_mode") or "general")
+    result = {
+        "enabled": bool(policy.get("enabled", True)) if enabled is None else bool(enabled),
+        "calibration_enabled": bool(policy.get("calibration_enabled", True))
+        if calibration_enabled is None
+        else bool(calibration_enabled),
+        "show_hints": bool(policy.get("show_hints", True)) if show_hints is None else bool(show_hints),
+        "scene_mode": normalize_scene_mode(selected_scene_mode),
+        "severity_mode": str(policy.get("severity_mode") or "hint_first"),
+        "auto_create_revision_request": bool(policy.get("auto_create_revision_request", False)),
+        "source": "project_config_with_call_overrides",
+    }
+    return result
+
+
+def nested_dict(source: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
+    current: object = source
+    for key in path:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
 
 
 def scene_mode_policy(scene_mode: str) -> dict[str, Any]:
@@ -649,6 +737,16 @@ def scene_mode_policy(scene_mode: str) -> dict[str, Any]:
         policy["default_lower_multiplier"] = 2.5
         policy["default_upper_multiplier"] = 2.5
     return policy
+
+
+def disabled_calibration_policy(scene_mode: str) -> dict[str, Any]:
+    return {
+        "scene_mode": normalize_scene_mode(scene_mode),
+        "meaning": "calibration disabled; unified baseline tolerance is used",
+        "default_lower_multiplier": 1.0,
+        "default_upper_multiplier": 1.0,
+        "metric_multipliers": {},
+    }
 
 
 def tolerance_multiplier(policy: dict[str, Any], metric_id: str, side: str) -> float:

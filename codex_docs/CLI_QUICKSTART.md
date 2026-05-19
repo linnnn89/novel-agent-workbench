@@ -572,6 +572,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This is local only. It compares draft statistics against the latest self-style baseline unless `--baseline-id` is provided. Use `--scene-mode exposition`, `--scene-mode battle`, `--scene-mode climax`, `--scene-mode daily`, `--scene-mode romance`, or `--scene-mode transition` when a chapter intentionally differs from the average. The result is a calibrated hint, not a strict grade. It does not call Providers, return draft text, create revision requests, auto-revise, auto-commit, or update Memory Bank/RAG/export.
 
+Optional style-check controls:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test check-draft-style demo_project <draft_id> --hide-hints
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test check-draft-style demo_project <draft_id> --disable-calibration
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test check-draft-style demo_project <draft_id> --disable-style-check
+```
+
+Future UI placement: the per-draft style check belongs in the draft review side panel, with defaults under Project Settings > Writing Quality. It should not be a blocking pop-up window.
+
 ## Safety And Cleanup Policy
 
 Do not hard delete real project files during early MVP.

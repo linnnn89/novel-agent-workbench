@@ -436,6 +436,14 @@ scene_mode + hint/warning calibration + no strict average forcing.
 
 Draft style checks must support chapter modes so daily, romance, battle, climax, exposition, and transition chapters can intentionally deviate from the global average. Ordinary deviations should become hints. Only calibrated extreme deviations should become warnings. This calibration must not call Providers, mutate drafts, create revision requests, auto-commit, or update Memory Bank/RAG/export.
 
+MVP-16.7 style check policy toggle slice:
+
+```text
+context_policy.style_check_policy + optional style checks + draft review side panel placement.
+```
+
+Style checks, calibration, and hint display must be configurable. If style checks are disabled, checking a draft must fail without writing an artifact. Future UI should place the per-draft check inside the draft review side panel, with defaults in Project Settings > Writing Quality. It should not be a blocking pop-up. Auto creation of revision requests must remain disabled unless explicitly implemented later.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:
