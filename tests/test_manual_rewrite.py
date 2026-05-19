@@ -83,6 +83,66 @@ class ManualRewriteTaskServiceTest(unittest.TestCase):
             self.assertEqual(artifact["status"], "done")
             self.assertEqual(service.list_tasks(status="done")[0]["task_id"], task.task_id)
 
+    def test_submit_manual_rewrite_draft_creates_new_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store, suggestion_id = configured_store_with_style_suggestion(temp, decision="needs_manual_rewrite")
+            service = ManualRewriteTaskService(store)
+            task = service.create_task_from_style_suggestion(suggestion_id)
+            draft_service = DraftGenerationService(store)
+            source_draft = draft_service.read_draft(task.draft_id)
+            draft_count_before = len(draft_service.list_drafts())
+            confirmed_before = len(draft_service.list_confirmed_chapters())
+            revision_before = len(RevisionRequestService(store).list_revision_requests())
+            provider_log_before = store.read_json(store.data_dir / "provider_call_log.json", default={})
+            memory_before = store.data_file_path("memory_bank.json").read_text(encoding="utf-8")
+            export_before = store.data_file_path("export_settings.json").read_text(encoding="utf-8")
+
+            result = service.submit_manual_rewrite_draft(task.task_id, text="人工提交的新正文。\n这是显式人工改写版本。")
+            submitted = draft_service.read_draft(result.draft_id)
+            source_after = draft_service.read_draft(task.draft_id)
+            task_after = service.read_task(task.task_id)
+
+            self.assertNotEqual(result.draft_id, task.draft_id)
+            self.assertEqual(len(draft_service.list_drafts()), draft_count_before + 1)
+            self.assertEqual(submitted["content"], "人工提交的新正文。\n这是显式人工改写版本。")
+            self.assertEqual(submitted["manual_rewrite"]["manual_rewrite_task_id"], task.task_id)
+            self.assertEqual(submitted["manual_rewrite"]["source_suggestion_id"], suggestion_id)
+            self.assertEqual(submitted["manual_rewrite"]["source_check_id"], task.check_id)
+            self.assertEqual(submitted["manual_rewrite"]["source_draft_id"], task.draft_id)
+            self.assertEqual(source_after["content"], source_draft["content"])
+            self.assertEqual(task_after["status"], "done")
+            self.assertEqual(task_after["submitted_draft_id"], result.draft_id)
+            self.assertEqual(confirmed_before, len(draft_service.list_confirmed_chapters()))
+            self.assertEqual(revision_before, len(RevisionRequestService(store).list_revision_requests()))
+            self.assertEqual(provider_log_before, store.read_json(store.data_dir / "provider_call_log.json", default={}))
+            self.assertEqual(memory_before, store.data_file_path("memory_bank.json").read_text(encoding="utf-8"))
+            self.assertEqual(export_before, store.data_file_path("export_settings.json").read_text(encoding="utf-8"))
+            self.assertFalse((store.root / "rag").exists())
+            self.assertFalse((store.root / "exports").exists())
+
+    def test_submit_manual_rewrite_draft_rejects_empty_skipped_and_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store, suggestion_id = configured_store_with_style_suggestion(temp, decision="needs_manual_rewrite")
+            service = ManualRewriteTaskService(store)
+            task = service.create_task_from_style_suggestion(suggestion_id)
+
+            with self.assertRaises(ManualRewriteTaskError):
+                service.submit_manual_rewrite_draft(task.task_id, text="   ")
+
+            service.mark_task(task.task_id, status="skipped", reason_code="manual_skip")
+            with self.assertRaises(ManualRewriteTaskError):
+                service.submit_manual_rewrite_draft(task.task_id, text="人工文本")
+
+        with tempfile.TemporaryDirectory() as temp:
+            store, suggestion_id = configured_store_with_style_suggestion(temp, decision="needs_manual_rewrite")
+            service = ManualRewriteTaskService(store)
+            task = service.create_task_from_style_suggestion(suggestion_id)
+
+            service.submit_manual_rewrite_draft(task.task_id, text="人工文本")
+
+            with self.assertRaises(ManualRewriteTaskError):
+                service.submit_manual_rewrite_draft(task.task_id, text="第二次人工文本")
+
     def test_task_has_no_draft_confirmed_memory_rag_export_side_effects(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store, suggestion_id = configured_store_with_style_suggestion(temp, decision="needs_manual_rewrite")
@@ -151,6 +211,47 @@ class ManualRewriteTaskServiceTest(unittest.TestCase):
             self.assertNotIn("private manual rewrite prompt", combined)
             self.assertNotIn("人工改写测试草稿", combined)
             self.assertNotIn("MOCK writer", combined)
+
+    def test_submit_manual_rewrite_draft_facade_and_cli_are_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            configured_store_with_style_suggestion(temp, decision="needs_manual_rewrite")
+            app = WorkbenchApplicationService.open(Path(temp))
+            suggestion_id = app.list_style_suggestions("demo")[0]["suggestion_id"]
+            task = app.create_manual_rewrite_task("demo", suggestion_id)
+
+            result = app.submit_manual_rewrite_draft(
+                "demo",
+                task["task_id"],
+                text="CLI不可见的新正文。",
+            )
+            read = app.read_draft("demo", result["draft_id"])
+            state = app.project_state("demo")
+            second_store, second_suggestion_id = configured_store_with_style_suggestion(
+                str(Path(temp) / "second"),
+                decision="needs_manual_rewrite",
+            )
+            second_app = WorkbenchApplicationService.open(Path(temp) / "second")
+            second_task = second_app.create_manual_rewrite_task("demo", second_suggestion_id)
+            stdout = capture_stdout(
+                [
+                    "--projects-root",
+                    str(Path(temp) / "second"),
+                    "submit-manual-rewrite-draft",
+                    "demo",
+                    second_task["task_id"],
+                    "--text",
+                    "CLI提交的新正文。",
+                ]
+            )
+            combined = json.dumps({"result": result, "state": state, "stdout": stdout}, ensure_ascii=False)
+
+            self.assertEqual(read["content"], "CLI不可见的新正文。")
+            self.assertEqual(state["latest_manual_rewrite_task"]["submitted_draft_id"], result["draft_id"])
+            self.assertNotIn("CLI不可见的新正文", combined)
+            self.assertNotIn("CLI提交的新正文", stdout)
+            self.assertNotIn("private manual rewrite prompt", combined)
+            self.assertNotIn("MOCK writer", combined)
+            self.assertEqual(len(DraftGenerationService(second_store).list_confirmed_chapters()), 2)
 
 
 def configured_store_with_style_suggestion(temp: str, *, decision: str) -> tuple[ProjectStore, str]:

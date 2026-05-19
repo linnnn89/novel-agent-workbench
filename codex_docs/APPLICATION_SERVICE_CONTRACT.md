@@ -440,6 +440,34 @@ Marks a manual rewrite task as `pending`, `in_progress`, `done`, or `skipped`.
 
 This updates task metadata only. It must not modify drafts, create new drafts, create revision requests, commit chapters, call Providers, or update Memory Bank/RAG/export.
 
+### submit_manual_rewrite_draft(project_id, task_id, text)
+
+Submits explicit human rewrite text as a new draft candidate.
+
+Writes:
+
+```text
+data/drafts/*.json
+data/drafts_index.json
+data/manual_rewrite_tasks/*.json
+data/manual_rewrite_tasks_index.json
+```
+
+The new draft must have a new `draft_id` and must not overwrite the source draft. The draft artifact stores the submitted text as `content` because draft artifacts are the explicit place where human-visible draft text lives.
+
+The draft artifact must include:
+
+```text
+manual_rewrite.manual_rewrite_task_id
+manual_rewrite.source_suggestion_id
+manual_rewrite.source_check_id
+manual_rewrite.source_draft_id
+```
+
+The command/facade result must be metadata-only and must not return submitted text. The submitted content may only be retrieved through `read_draft`.
+
+This method must not call Providers, create revision requests, auto-commit drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports. Empty text, skipped tasks, and duplicate submissions must be rejected.
+
 ### project_state(project_id)
 
 Returns safe public project state.

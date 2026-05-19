@@ -205,6 +205,12 @@ class WorkbenchApplicationService:
             reason_code=reason_code,
         ).to_dict()
 
+    def submit_manual_rewrite_draft(self, project_id: str, task_id: str, *, text: str) -> dict[str, Any]:
+        return ManualRewriteTaskService(self._open_store(project_id)).submit_manual_rewrite_draft(
+            task_id,
+            text=text,
+        ).to_dict()
+
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))
 

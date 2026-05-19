@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from .drafts import new_draft_id, validate_chapter_id
 from .self_style import SelfStyleBaselineService
 from .storage import ProjectStore, safe_filename, utc_stamp
 
@@ -41,6 +42,21 @@ class ManualRewriteTaskStatusResult:
     status: str
     reason_code: str
     updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ManualRewriteDraftSubmissionResult:
+    draft_id: str
+    task_id: str
+    suggestion_id: str
+    source_draft_id: str
+    chapter_id: str
+    title: str
+    path: str
+    submitted_at: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -180,6 +196,108 @@ class ManualRewriteTaskService:
                 updated_at=updated_at,
             )
 
+    def submit_manual_rewrite_draft(self, task_id: str, *, text: str) -> ManualRewriteDraftSubmissionResult:
+        self.store.initialize()
+        with self.store.lock():
+            content = str(text or "")
+            if not content.strip():
+                raise ManualRewriteTaskError("manual rewrite text cannot be empty.")
+            entry = self._task_index_entry(task_id)
+            task = self.read_task(task_id)
+            if str(task.get("status") or "") == "skipped":
+                raise ManualRewriteTaskError(f"Manual rewrite task is skipped and cannot submit a draft: {task_id}")
+            if str(task.get("submitted_draft_id") or ""):
+                raise ManualRewriteTaskError(f"Manual rewrite task already submitted a draft: {task_id}")
+            chapter_id = str(task.get("chapter_id") or entry.get("chapter_id") or "")
+            validate_chapter_id(chapter_id)
+            source_draft_id = str(task.get("draft_id") or entry.get("draft_id") or "")
+            suggestion_id = str(task.get("suggestion_id") or entry.get("suggestion_id") or "")
+            check_id = str(task.get("check_id") or entry.get("check_id") or "")
+            title = str(task.get("title") or entry.get("title") or "")
+            submitted_at = utc_stamp()
+            draft_id = new_draft_id()
+            draft_path = self.store.data_dir / "drafts" / f"{safe_filename(chapter_id)}__{draft_id}.json"
+            artifact = {
+                "schema_version": 1,
+                "status": "draft",
+                "draft_id": draft_id,
+                "chapter_id": chapter_id,
+                "title": title,
+                "created_at": submitted_at,
+                "content": content,
+                "provider": {
+                    "role": "manual_rewrite",
+                    "provider": "human",
+                    "model": "manual",
+                    "finish_reason": "manual_submission",
+                    "usage": {},
+                },
+                "manual_rewrite": {
+                    "manual_rewrite_task_id": task_id,
+                    "source_suggestion_id": suggestion_id,
+                    "source_check_id": check_id,
+                    "source_draft_id": source_draft_id,
+                    "submitted_at": submitted_at,
+                    "mode": "manual_rewrite_draft_candidate",
+                    "provider_called": False,
+                    "auto_commit": False,
+                },
+                "request_summary": {
+                    "source": "manual_rewrite_task",
+                    "text_chars": len(content),
+                    "metadata_keys": [
+                        "manual_rewrite_task_id",
+                        "source_check_id",
+                        "source_draft_id",
+                        "source_suggestion_id",
+                    ],
+                },
+            }
+            self.store.write_json(draft_path, artifact)
+            self._append_draft_index_entry(
+                {
+                    "draft_id": draft_id,
+                    "chapter_id": chapter_id,
+                    "title": title,
+                    "created_at": submitted_at,
+                    "status": "draft",
+                    "path": str(draft_path.relative_to(self.store.root)),
+                    "provider": "human",
+                    "model": "manual",
+                    "usage": {},
+                    "manual_rewrite": {
+                        "manual_rewrite_task_id": task_id,
+                        "source_suggestion_id": suggestion_id,
+                        "source_check_id": check_id,
+                        "source_draft_id": source_draft_id,
+                    },
+                }
+            )
+            task["status"] = "done"
+            task["updated_at"] = submitted_at
+            task["submitted_draft_id"] = draft_id
+            task["submitted_at"] = submitted_at
+            self.store.write_json(str(entry["path"]), task)
+            self._update_index_entry(
+                task_id,
+                {
+                    "status": "done",
+                    "updated_at": submitted_at,
+                    "submitted_draft_id": draft_id,
+                    "submitted_at": submitted_at,
+                },
+            )
+            return ManualRewriteDraftSubmissionResult(
+                draft_id=draft_id,
+                task_id=task_id,
+                suggestion_id=suggestion_id,
+                source_draft_id=source_draft_id,
+                chapter_id=chapter_id,
+                title=title,
+                path=str(draft_path),
+                submitted_at=submitted_at,
+            )
+
     def _append_index_entry(self, entry: dict[str, Any]) -> None:
         items = self.list_tasks()
         items.append(entry)
@@ -204,6 +322,15 @@ class ManualRewriteTaskService:
                 item = {**item, **updates}
             updated.append(item)
         self.store.write_json(self.index_path, {"schema_version": 1, "manual_rewrite_tasks": updated})
+
+    def _append_draft_index_entry(self, entry: dict[str, Any]) -> None:
+        path = self.store.data_dir / "drafts_index.json"
+        index = self.store.read_json(path, default={"schema_version": 1, "drafts": []})
+        if not isinstance(index, dict):
+            index = {"schema_version": 1, "drafts": []}
+        drafts = index.get("drafts") if isinstance(index.get("drafts"), list) else []
+        drafts.append(entry)
+        self.store.write_json(path, {"schema_version": 1, "drafts": drafts})
 
 
 def validate_manual_rewrite_status(status: str) -> str:

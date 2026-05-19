@@ -549,3 +549,11 @@ Decision: Add metadata-only manual rewrite tasks for style suggestions marked `n
 Rationale: `needs_manual_rewrite` should become an actionable human work item without turning into automatic LLM revision, draft mutation, or commit behavior. This preserves the explicit operator boundary.
 
 Impact: `ManualRewriteTaskService`, `create-manual-rewrite-task`, `list-manual-rewrite-tasks`, `read-manual-rewrite-task`, and `mark-manual-rewrite-task` write/read `data/manual_rewrite_tasks/*.json` plus `data/manual_rewrite_tasks_index.json`. Tasks can only be created from `needs_manual_rewrite` style suggestion decisions. `accepted` and `ignored` suggestions are rejected. Duplicate tasks are rejected. Status supports `pending`, `in_progress`, `done`, and `skipped`. This path does not call Providers, generate drafts, modify drafts, create revision requests, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
+## 2026-05-19: MVP-17.5 Manual Rewrite Draft Submission
+
+Decision: Allow a manual rewrite task to explicitly submit human text as a new draft candidate.
+
+Rationale: Manual rewrite work needs a safe persistence target. The target should be a new draft artifact, not a mutation of the source draft or an automatic commit.
+
+Impact: `ManualRewriteTaskService.submit_manual_rewrite_draft(...)` and `submit-manual-rewrite-draft` write a new `data/drafts/*.json` artifact, append `data/drafts_index.json`, and update the source manual rewrite task with `submitted_draft_id`. The new draft records `manual_rewrite_task_id`, `source_suggestion_id`, `source_check_id`, and `source_draft_id`. Empty text, skipped tasks, and duplicate submissions are rejected. This path does not call Providers, overwrite source drafts, create revision requests, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.

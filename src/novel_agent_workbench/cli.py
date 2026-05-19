@@ -155,6 +155,13 @@ def build_parser() -> argparse.ArgumentParser:
     mark_manual_rewrite_task.add_argument("--status", required=True, choices=["pending", "in_progress", "done", "skipped"])
     mark_manual_rewrite_task.add_argument("--reason-code", default="")
 
+    submit_manual_rewrite_draft = subparsers.add_parser("submit-manual-rewrite-draft")
+    submit_manual_rewrite_draft.add_argument("project_id")
+    submit_manual_rewrite_draft.add_argument("task_id")
+    text_group = submit_manual_rewrite_draft.add_mutually_exclusive_group(required=True)
+    text_group.add_argument("--text")
+    text_group.add_argument("--text-stdin", action="store_true")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -519,6 +526,9 @@ def run_command(args: argparse.Namespace) -> Any:
             status=args.status,
             reason_code=args.reason_code,
         )
+    if command == "submit-manual-rewrite-draft":
+        text = sys.stdin.read() if args.text_stdin else args.text
+        return app.submit_manual_rewrite_draft(args.project_id, args.task_id, text=text)
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":

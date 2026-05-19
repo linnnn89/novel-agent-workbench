@@ -600,9 +600,10 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-manual-rewrite-tasks demo_project
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-manual-rewrite-task demo_project <task_id>
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test mark-manual-rewrite-task demo_project <task_id> --status in_progress --reason-code started
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test submit-manual-rewrite-draft demo_project <task_id> --text "human rewrite text"
 ```
 
-Manual rewrite tasks are workspace metadata only. They do not edit the draft, create a new draft, create a revision request, call Providers, auto-commit, or update Memory Bank/RAG/export.
+Manual rewrite tasks are workspace metadata. `submit-manual-rewrite-draft` is the explicit handoff that saves human rewrite text as a new draft candidate. It does not overwrite the old draft, create a revision request, call Providers, auto-commit, or update Memory Bank/RAG/export. The CLI response is metadata-only; use `read-draft` to inspect the submitted draft content.
 
 ## Safety And Cleanup Policy
 

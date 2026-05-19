@@ -241,10 +241,13 @@ Manual rewrite task tests currently cover:
 - rejecting `accepted` or `ignored` suggestions,
 - rejecting duplicate tasks for the same suggestion,
 - marking task status as `pending`, `in_progress`, `done`, or `skipped`,
+- submitting explicit human rewrite text as a new draft candidate with a new `draft_id`,
+- preserving the original source draft and rejecting empty, skipped, or duplicate submissions,
 - facade and CLI commands `create-manual-rewrite-task`, `list-manual-rewrite-tasks`, `read-manual-rewrite-task`, and `mark-manual-rewrite-task`,
+- facade and CLI command `submit-manual-rewrite-draft`,
 - public state `manual_rewrite_task_count` and `latest_manual_rewrite_task`,
 - audit rejection if a task artifact stores text fields,
-- no draft generation, draft mutation, confirmed chapter, revision request, Memory Bank, RAG, export, or Provider side effects.
+- no source draft mutation, confirmed chapter, revision request, Memory Bank, RAG, export, or Provider side effects.
 
 Formal context task queue tests currently cover:
 

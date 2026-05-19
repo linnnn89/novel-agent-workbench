@@ -108,6 +108,7 @@ MVP-0 first storage slice is implemented:
 - MVP-16.8 Style Suggestion Artifact that converts a style check into metadata-only manual suggestions, without modifying drafts or creating revision requests.
 - MVP-16.9 Manual Suggestion Decision that records explicit operator decisions on style suggestions without applying edits automatically.
 - MVP-17 Manual Rewrite Workspace Skeleton that turns `needs_manual_rewrite` style suggestions into metadata-only human rewrite tasks, without editing drafts or generating candidates.
+- MVP-17.5 Manual Rewrite Draft Submission that lets a human rewrite task explicitly create a new draft candidate without overwriting old drafts or auto-committing.
 - Unit tests.
 
 Verification command:

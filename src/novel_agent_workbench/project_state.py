@@ -385,6 +385,8 @@ def safe_manual_rewrite_task_summary(item: dict[str, Any] | None) -> dict[str, A
         "title": item.get("title"),
         "status": item.get("status"),
         "reason_code": item.get("reason_code"),
+        "submitted_draft_id": item.get("submitted_draft_id"),
+        "submitted_at": item.get("submitted_at"),
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
         "safety": item.get("safety") if isinstance(item.get("safety"), dict) else {},

@@ -468,6 +468,14 @@ create-manual-rewrite-task + data/manual_rewrite_tasks/*.json + human rewrite ta
 
 Manual rewrite tasks must only be created from style suggestions with `needs_manual_rewrite` decisions. They must reject `accepted` or `ignored` suggestions and duplicate tasks. They may track `pending`, `in_progress`, `done`, and `skipped`, but must not call Providers, generate drafts, modify drafts, create revision requests, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
 
+MVP-17.5 manual rewrite draft submission slice:
+
+```text
+submit-manual-rewrite-draft + new draft candidate from explicit human text.
+```
+
+Manual rewrite draft submission must create a new draft artifact with a new `draft_id`, never overwrite the source draft, and mark the source manual rewrite task with `submitted_draft_id`. The submitted draft may contain human text as draft content, but command/facade responses must remain metadata-only. This path must not call Providers, create revision requests, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

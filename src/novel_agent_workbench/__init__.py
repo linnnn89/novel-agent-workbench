@@ -29,6 +29,7 @@ from .formal_context_tasks import (
     FormalContextTaskQueueService,
 )
 from .manual_rewrite import (
+    ManualRewriteDraftSubmissionResult,
     ManualRewriteTaskError,
     ManualRewriteTaskResult,
     ManualRewriteTaskService,
@@ -161,6 +162,7 @@ __all__ = [
     "FormalContextTaskQueueResult",
     "FormalContextTaskQueueService",
     "ManualRewriteTaskError",
+    "ManualRewriteDraftSubmissionResult",
     "ManualRewriteTaskResult",
     "ManualRewriteTaskService",
     "ManualRewriteTaskStatusResult",
