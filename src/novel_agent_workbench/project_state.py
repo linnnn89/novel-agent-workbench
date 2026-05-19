@@ -5,6 +5,7 @@ from typing import Any
 from .chapters import ChapterWorkflowService
 from .context_previews import ContextUpdatePreviewService
 from .context_queue import ContextUpdateQueueService
+from .corpus_profiles import CorpusProfileArtifactService
 from .drafts import DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
@@ -26,6 +27,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     chapter_service = ChapterWorkflowService(store)
     context_queue_service = ContextUpdateQueueService(store)
     context_preview_service = ContextUpdatePreviewService(store)
+    corpus_profile_service = CorpusProfileArtifactService(store)
     formal_context_plan_service = FormalContextPlanService(store)
     formal_context_task_service = FormalContextTaskQueueService(store)
     memory_apply_preview_service = MemoryApplyPreviewService(store)
@@ -36,6 +38,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     chapters = chapter_service.list_chapters()
     context_updates = context_queue_service.list_context_updates()
     context_previews = context_preview_service.list_context_previews()
+    corpus_profiles = corpus_profile_service.list_corpus_profiles()
     formal_context_plans = formal_context_plan_service.list_formal_context_plans()
     formal_context_tasks = formal_context_task_service.list_tasks()
     memory_apply_previews = memory_apply_preview_service.list_memory_apply_previews()
@@ -55,6 +58,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "revision_request_count": len(revision_requests),
         "context_update_count": len(context_updates),
         "context_preview_count": len(context_previews),
+        "corpus_profile_count": len(corpus_profiles),
         "formal_context_plan_count": len(formal_context_plans),
         "formal_context_task_count": len(formal_context_tasks),
         "memory_apply_preview_count": len(memory_apply_previews),
@@ -67,6 +71,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "latest_revision_request": safe_revision_request_summary(latest_by(revision_requests, "created_at")),
         "latest_context_update": safe_context_update_summary(latest_by(context_updates, "updated_at")),
         "latest_context_preview": safe_context_preview_summary(latest_by(context_previews, "created_at")),
+        "latest_corpus_profile": safe_corpus_profile_summary(latest_by(corpus_profiles, "created_at")),
         "latest_formal_context_plan": safe_formal_context_plan_summary(
             latest_by(formal_context_plans, "created_at")
         ),
@@ -202,6 +207,22 @@ def safe_context_preview_summary(item: dict[str, Any] | None) -> dict[str, Any] 
         "status": item.get("status"),
         "created_at": item.get("created_at"),
         "recommendation": item.get("recommendation"),
+    }
+
+
+def safe_corpus_profile_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "profile_id": item.get("profile_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "file_name": item.get("file_name"),
+        "source_sha256": item.get("source_sha256"),
+        "encoding": item.get("encoding") if isinstance(item.get("encoding"), dict) else {},
+        "strict_chapter_heading_count": item.get("strict_chapter_heading_count"),
+        "line_count": item.get("line_count"),
+        "safety": item.get("safety") if isinstance(item.get("safety"), dict) else {},
     }
 
 

@@ -20,6 +20,7 @@ novel_agent_workbench.context_assembler
 novel_agent_workbench.memory_apply_preview
 novel_agent_workbench.memory_bank
 novel_agent_workbench.corpus_profiler
+novel_agent_workbench.corpus_profiles
 novel_agent_workbench.audit
 novel_agent_workbench.application_service
 novel_agent_workbench.cli
@@ -46,5 +47,6 @@ Current safety hardening:
 - context-aware draft generation is mock-only in this phase and stores only safe context generation metadata in draft artifacts and indexes.
 - audit checks confirmed chapter consistency, revision request/generated draft consistency, and context-aware draft metadata safety.
 - corpus profiler is read-only and metadata-only; it may report rough structure statistics and candidate-name frequency, but it does not write project files, call Providers, or copy chapter/source text.
+- corpus profile artifacts are explicit project writes, but persist only conservative metadata and exclude external source paths plus candidate-name text by default.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

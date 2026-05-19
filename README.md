@@ -97,6 +97,7 @@ MVP-0 first storage slice is implemented:
 - MVP-12 Mock-Only Context-Aware Draft Generation that uses the prompt render envelope to create a draft through the local mock writer only, with no real Provider, no auto-commit, and no Memory Bank/RAG/export side effects.
 - MVP-12.5 Audit checks for context-aware draft metadata consistency and prompt/context/secret leakage before real Providers are allowed to use assembled context.
 - MVP-13 Corpus Profiler that reads an external `.txt` novel corpus in metadata-only mode, reports encoding/structure/chapter-length/dialogue/name-candidate statistics, and never copies source text into project files.
+- MVP-13.5 Corpus Profile Artifacts that explicitly save conservative project-local profile metadata while excluding source text, external source paths, and candidate-name text by default.
 - Unit tests.
 
 Verification command:

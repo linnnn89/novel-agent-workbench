@@ -75,6 +75,44 @@ This method must not initialize a project root, write project files, call Provid
 
 Name candidates are frequency heuristics only and may include false positives. They are not a character database.
 
+### save_corpus_profile(project_id, path, max_name_candidates=20)
+
+Explicitly saves a conservative metadata-only corpus profile artifact inside one project.
+
+Writes:
+
+```text
+data/corpus_profiles/*.json
+data/corpus_profiles_index.json
+```
+
+Persistent artifacts may include encoding, line/chapter counts, chapter statistics, dialogue proxy counts, source file name, source size, and source file SHA-256.
+
+Persistent artifacts must not store:
+
+```text
+external source path
+source text
+chapter heading text
+dialogue/source excerpts
+candidate-name text
+plaintext secrets
+```
+
+This method must not import the corpus, create drafts, create confirmed chapters, call Providers, update Memory Bank, update RAG, or create exports.
+
+### list_corpus_profiles(project_id)
+
+Returns corpus profile index metadata.
+
+Metadata-only. Must not return source text, external source path, candidate-name text, or plaintext secrets.
+
+### read_corpus_profile(project_id, profile_id)
+
+Returns one conservative corpus profile artifact.
+
+Metadata-only. Must not return source text, external source path, candidate-name text, or plaintext secrets.
+
 ### project_state(project_id)
 
 Returns safe public project state.
@@ -90,6 +128,7 @@ review_count
 revision_request_count
 context_update_count
 context_preview_count
+corpus_profile_count
 formal_context_plan_count
 formal_context_task_count
 memory_apply_preview_count
@@ -102,6 +141,7 @@ latest_review
 latest_revision_request
 latest_context_update
 latest_context_preview
+latest_corpus_profile
 latest_formal_context_plan
 latest_formal_context_task
 latest_memory_apply_preview
@@ -1310,6 +1350,18 @@ context_generation_forbidden_metadata_key
 ```
 
 Audit checks `context_generation` metadata and drafts index consistency. It does not flag normal draft `content` merely because draft artifacts are allowed to contain generated text for human review.
+
+Corpus profile artifact audit checks include:
+
+```text
+corpus_profile_source_path_stored
+corpus_profile_candidate_names_stored
+possible_prompt_in_corpus_profile
+possible_secret_in_corpus_profile
+possible_content_in_corpus_profile
+```
+
+Audit must fail if a persistent corpus profile stores an external source path or candidate-name text.
 
 ### provider_status(project_id, role)
 

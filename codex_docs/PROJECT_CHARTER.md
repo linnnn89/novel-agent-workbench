@@ -380,6 +380,14 @@ profile-corpus + read-only metadata statistics for external txt corpora.
 
 Corpus profiling may inspect external `.txt` files and return encoding, structure, chapter-length, dialogue proxy, and rough name-candidate statistics. It must not copy source text into the project, write corpus artifacts, call Providers, generate drafts, update Memory Bank/RAG/export, or create confirmed chapters. Name candidates are heuristic only and require later human or algorithmic validation before any character database is built.
 
+MVP-13.5 corpus profile artifact slice:
+
+```text
+save-corpus-profile + data/corpus_profiles/*.json + conservative metadata persistence.
+```
+
+Saving a corpus profile must be explicit. Persistent artifacts may store file name, size, SHA-256, encoding, and statistics, but not external source paths, source text, chapter heading text, dialogue excerpts, or candidate-name text. This is still not a corpus importer and must not call Providers or update drafts/confirmed chapters/Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

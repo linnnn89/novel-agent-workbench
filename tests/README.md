@@ -158,6 +158,15 @@ Corpus profiler tests currently cover:
 - no project root creation or project file writes,
 - source heading text and dialogue text excluded from returned JSON.
 
+Corpus profile artifact tests currently cover:
+
+- explicit `save-corpus-profile` project writes,
+- `data/corpus_profiles/*.json` and `data/corpus_profiles_index.json`,
+- persistent artifact output excluding source text, heading text, external source path, and candidate-name text,
+- project state `corpus_profile_count` and `latest_corpus_profile`,
+- CLI commands `save-corpus-profile`, `list-corpus-profiles`, and `read-corpus-profile`.
+- audit rejection if a corpus profile artifact stores an external source path or candidate-name text.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,
@@ -354,6 +363,7 @@ Audit tests currently cover:
 - context-aware draft metadata consistency,
 - context-aware draft metadata missing detection,
 - context-aware draft prompt/context leakage detection without treating normal draft body text as an error.
+- corpus profile artifact source-path and candidate-name persistence detection.
 
 Secret storage hardening tests currently cover:
 

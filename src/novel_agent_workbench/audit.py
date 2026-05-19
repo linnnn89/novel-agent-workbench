@@ -97,6 +97,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
         ],
     )
     audit_context_previews(store, checked_paths=checked_paths, findings=findings)
+    audit_corpus_profiles(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_memory_apply_previews(store, checked_paths=checked_paths, findings=findings)
@@ -192,6 +193,49 @@ def audit_context_previews(store: ProjectStore, *, checked_paths: list[str], fin
         return
     for path in sorted(previews_dir.glob("*.json")):
         check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+
+
+def audit_corpus_profiles(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_corpus_profile", PROMPT_PATTERNS),
+        ("possible_secret_in_corpus_profile", SECRET_PATTERNS),
+        ("possible_content_in_corpus_profile", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "corpus_profiles_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    profiles_dir = store.data_dir / "corpus_profiles"
+    checked_paths.append(str(profiles_dir))
+    if not profiles_dir.exists():
+        return
+    for path in sorted(profiles_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        source = artifact.get("source") if isinstance(artifact.get("source"), dict) else {}
+        if source.get("original_path_stored") or "path" in source:
+            findings.append(
+                AuditFinding(
+                    code="corpus_profile_source_path_stored",
+                    path=str(path),
+                    message="Corpus profile artifact must not store external source paths.",
+                )
+            )
+        name_candidates = (
+            artifact.get("name_candidates") if isinstance(artifact.get("name_candidates"), dict) else {}
+        )
+        if name_candidates.get("top_included") or "top" in name_candidates:
+            findings.append(
+                AuditFinding(
+                    code="corpus_profile_candidate_names_stored",
+                    path=str(path),
+                    message="Persistent corpus profile artifacts must not store candidate-name text.",
+                )
+            )
 
 
 def audit_formal_context_plans(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:

@@ -78,6 +78,16 @@ safety flags
 
 It does not write project files, call Providers, copy chapter/source text, create drafts, create confirmed chapters, or update Memory Bank/RAG/export. Name candidates are heuristic and may include common-word false positives; do not treat them as a final character list.
 
+Save a conservative project-local profile artifact:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test save-corpus-profile demo_project "T:\path\to\novel.txt" --max-name-candidates 12
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-corpus-profiles demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-corpus-profile demo_project <profile_id>
+```
+
+The saved artifact is more conservative than transient `profile-corpus`: it stores source file name, size, SHA-256, structure statistics, and safety flags, but not source text, external source path, chapter heading text, dialogue excerpts, or candidate-name text.
+
 ## Step-By-Step Flow
 
 Create a project:

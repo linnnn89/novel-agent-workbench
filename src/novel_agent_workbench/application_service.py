@@ -10,6 +10,7 @@ from .chapters import ChapterWorkflowService
 from .context_assembler import ContextAssemblerService
 from .context_queue import ContextUpdateQueueService
 from .corpus_profiler import profile_corpus
+from .corpus_profiles import CorpusProfileArtifactService
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
@@ -62,6 +63,24 @@ class WorkbenchApplicationService:
 
     def profile_corpus(self, path: str | Path, *, max_name_candidates: int = 20) -> dict[str, Any]:
         return profile_corpus(path, max_name_candidates=max_name_candidates).to_dict()
+
+    def save_corpus_profile(
+        self,
+        project_id: str,
+        path: str | Path,
+        *,
+        max_name_candidates: int = 20,
+    ) -> dict[str, Any]:
+        return CorpusProfileArtifactService(self._open_store(project_id)).save_corpus_profile(
+            path,
+            max_name_candidates=max_name_candidates,
+        ).to_dict()
+
+    def list_corpus_profiles(self, project_id: str) -> list[dict[str, Any]]:
+        return CorpusProfileArtifactService(self._open_store(project_id)).list_corpus_profiles()
+
+    def read_corpus_profile(self, project_id: str, profile_id: str) -> dict[str, Any]:
+        return CorpusProfileArtifactService(self._open_store(project_id)).read_corpus_profile(profile_id)
 
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))

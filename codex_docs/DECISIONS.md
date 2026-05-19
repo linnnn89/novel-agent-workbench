@@ -461,3 +461,11 @@ Decision: Add a read-only metadata profiler for external `.txt` novel corpora.
 Reason: The project needs to learn structural facts from real long-form web-novel files before building any importer, sampler, or style workflow. The safe first step is corpus profiling that reports counts and distributions only.
 
 Impact: `corpus_profiler.py`, `WorkbenchApplicationService.profile_corpus(...)`, and the `profile-corpus` CLI command can inspect an external text file and return encoding, line/chapter structure, chapter-length distribution, dialogue proxy counts, and rough name candidates. The profiler does not create projects, write artifacts, call Providers, copy source/chapter text, create drafts, create confirmed chapters, or update Memory Bank/RAG/export. Name candidates are heuristic and may include false positives; they are not treated as a character database.
+
+## 2026-05-19: MVP-13.5 Corpus Profile Artifacts
+
+Decision: Add explicit project-local corpus profile artifacts, but make persistent output more conservative than transient CLI profiling.
+
+Reason: Later phases need durable corpus-level structure metadata. Storing raw source paths, excerpts, or candidate names now would blur the line between profiling and importing copyrighted source material.
+
+Impact: `CorpusProfileArtifactService`, `save-corpus-profile`, `list-corpus-profiles`, and `read-corpus-profile` write/read `data/corpus_profiles/*.json` plus `data/corpus_profiles_index.json`. Saved artifacts include file name, size, SHA-256, encoding, line/chapter counts, chapter statistics, dialogue proxy counts, and safety flags. Saved artifacts do not store external source paths, source text, chapter heading text, dialogue excerpts, or candidate-name text. They do not call Providers, create drafts, create confirmed chapters, or update Memory Bank/RAG/export.

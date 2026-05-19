@@ -41,6 +41,18 @@ def build_parser() -> argparse.ArgumentParser:
     profile_corpus.add_argument("path")
     profile_corpus.add_argument("--max-name-candidates", type=int, default=20)
 
+    save_corpus_profile = subparsers.add_parser("save-corpus-profile")
+    save_corpus_profile.add_argument("project_id")
+    save_corpus_profile.add_argument("path")
+    save_corpus_profile.add_argument("--max-name-candidates", type=int, default=20)
+
+    list_corpus_profiles = subparsers.add_parser("list-corpus-profiles")
+    list_corpus_profiles.add_argument("project_id")
+
+    read_corpus_profile = subparsers.add_parser("read-corpus-profile")
+    read_corpus_profile.add_argument("project_id")
+    read_corpus_profile.add_argument("profile_id")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -333,6 +345,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_projects()
     if command == "profile-corpus":
         return app.profile_corpus(args.path, max_name_candidates=args.max_name_candidates)
+    if command == "save-corpus-profile":
+        return app.save_corpus_profile(args.project_id, args.path, max_name_candidates=args.max_name_candidates)
+    if command == "list-corpus-profiles":
+        return app.list_corpus_profiles(args.project_id)
+    if command == "read-corpus-profile":
+        return app.read_corpus_profile(args.project_id, args.profile_id)
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":
