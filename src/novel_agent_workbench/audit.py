@@ -97,6 +97,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
         ],
     )
     audit_context_previews(store, checked_paths=checked_paths, findings=findings)
+    audit_corpus_boundaries(store, checked_paths=checked_paths, findings=findings)
     audit_corpus_profiles(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
@@ -236,6 +237,59 @@ def audit_corpus_profiles(store: ProjectStore, *, checked_paths: list[str], find
                     message="Persistent corpus profile artifacts must not store candidate-name text.",
                 )
             )
+
+
+def audit_corpus_boundaries(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_corpus_boundary", PROMPT_PATTERNS),
+        ("possible_secret_in_corpus_boundary", SECRET_PATTERNS),
+        ("possible_content_in_corpus_boundary", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "corpus_boundaries_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    boundaries_dir = store.data_dir / "corpus_boundaries"
+    checked_paths.append(str(boundaries_dir))
+    if not boundaries_dir.exists():
+        return
+    for path in sorted(boundaries_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        source = artifact.get("source") if isinstance(artifact.get("source"), dict) else {}
+        if source.get("original_path_stored") or "path" in source:
+            findings.append(
+                AuditFinding(
+                    code="corpus_boundary_source_path_stored",
+                    path=str(path),
+                    message="Corpus boundary artifact must not store external source paths.",
+                )
+            )
+        if contains_forbidden_corpus_boundary_key(artifact):
+            findings.append(
+                AuditFinding(
+                    code="corpus_boundary_text_field_stored",
+                    path=str(path),
+                    message="Corpus boundary artifact must not store heading text or excerpts.",
+                )
+            )
+
+
+def contains_forbidden_corpus_boundary_key(value: object) -> bool:
+    forbidden = {"heading_text", "excerpt", "source_text", "chapter_text"}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                return True
+            if contains_forbidden_corpus_boundary_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_corpus_boundary_key(item) for item in value)
+    return False
 
 
 def audit_formal_context_plans(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:

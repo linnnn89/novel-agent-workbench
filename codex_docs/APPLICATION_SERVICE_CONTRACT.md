@@ -113,6 +113,54 @@ Returns one conservative corpus profile artifact.
 
 Metadata-only. Must not return source text, external source path, candidate-name text, or plaintext secrets.
 
+### save_corpus_boundaries(project_id, path)
+
+Explicitly saves a no-text chapter boundary index for one external corpus file.
+
+Writes:
+
+```text
+data/corpus_boundaries/*.json
+data/corpus_boundaries_index.json
+```
+
+Boundary entries may include:
+
+```text
+ordinal
+heading_line_number
+body_start_line
+body_end_line
+body_start_char
+body_end_char
+body_char_count
+```
+
+Persistent boundary artifacts must not store:
+
+```text
+external source path
+source text
+chapter heading text
+dialogue/source excerpts
+candidate-name text
+plaintext secrets
+```
+
+This method must not import the corpus, create drafts, create confirmed chapters, call Providers, update Memory Bank, update RAG, or create exports.
+
+### list_corpus_boundaries(project_id)
+
+Returns corpus boundary index metadata.
+
+Metadata-only. Must not return source text, external source path, heading text, excerpts, or plaintext secrets.
+
+### read_corpus_boundaries(project_id, boundary_id)
+
+Returns one no-text boundary artifact.
+
+Metadata-only. Must not return source text, external source path, heading text, excerpts, or plaintext secrets.
+
 ### project_state(project_id)
 
 Returns safe public project state.
@@ -128,6 +176,7 @@ review_count
 revision_request_count
 context_update_count
 context_preview_count
+corpus_boundary_count
 corpus_profile_count
 formal_context_plan_count
 formal_context_task_count
@@ -141,6 +190,7 @@ latest_review
 latest_revision_request
 latest_context_update
 latest_context_preview
+latest_corpus_boundary
 latest_corpus_profile
 latest_formal_context_plan
 latest_formal_context_task
@@ -1354,14 +1404,19 @@ Audit checks `context_generation` metadata and drafts index consistency. It does
 Corpus profile artifact audit checks include:
 
 ```text
+corpus_boundary_source_path_stored
+corpus_boundary_text_field_stored
 corpus_profile_source_path_stored
 corpus_profile_candidate_names_stored
+possible_prompt_in_corpus_boundary
+possible_secret_in_corpus_boundary
+possible_content_in_corpus_boundary
 possible_prompt_in_corpus_profile
 possible_secret_in_corpus_profile
 possible_content_in_corpus_profile
 ```
 
-Audit must fail if a persistent corpus profile stores an external source path or candidate-name text.
+Audit must fail if a persistent corpus profile stores an external source path or candidate-name text, or if a corpus boundary artifact stores an external source path, heading text, source text, chapter text, or excerpt fields.
 
 ### provider_status(project_id, role)
 

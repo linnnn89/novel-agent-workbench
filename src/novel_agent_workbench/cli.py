@@ -53,6 +53,17 @@ def build_parser() -> argparse.ArgumentParser:
     read_corpus_profile.add_argument("project_id")
     read_corpus_profile.add_argument("profile_id")
 
+    save_corpus_boundaries = subparsers.add_parser("save-corpus-boundaries")
+    save_corpus_boundaries.add_argument("project_id")
+    save_corpus_boundaries.add_argument("path")
+
+    list_corpus_boundaries = subparsers.add_parser("list-corpus-boundaries")
+    list_corpus_boundaries.add_argument("project_id")
+
+    read_corpus_boundaries = subparsers.add_parser("read-corpus-boundaries")
+    read_corpus_boundaries.add_argument("project_id")
+    read_corpus_boundaries.add_argument("boundary_id")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -351,6 +362,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_corpus_profiles(args.project_id)
     if command == "read-corpus-profile":
         return app.read_corpus_profile(args.project_id, args.profile_id)
+    if command == "save-corpus-boundaries":
+        return app.save_corpus_boundaries(args.project_id, args.path)
+    if command == "list-corpus-boundaries":
+        return app.list_corpus_boundaries(args.project_id)
+    if command == "read-corpus-boundaries":
+        return app.read_corpus_boundaries(args.project_id, args.boundary_id)
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":

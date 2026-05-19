@@ -167,6 +167,16 @@ Corpus profile artifact tests currently cover:
 - CLI commands `save-corpus-profile`, `list-corpus-profiles`, and `read-corpus-profile`.
 - audit rejection if a corpus profile artifact stores an external source path or candidate-name text.
 
+Corpus boundary tests currently cover:
+
+- explicit `save-corpus-boundaries` project writes,
+- `data/corpus_boundaries/*.json` and `data/corpus_boundaries_index.json`,
+- boundary entries storing heading line number, body line range, body character range, and body character count only,
+- output excluding source text, heading text, external source path, and excerpts,
+- project state `corpus_boundary_count` and `latest_corpus_boundary`,
+- audit rejection if a boundary artifact stores external source paths or text fields,
+- CLI commands `save-corpus-boundaries`, `list-corpus-boundaries`, and `read-corpus-boundaries`.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

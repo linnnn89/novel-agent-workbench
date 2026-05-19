@@ -9,6 +9,7 @@ from .context_previews import ContextUpdatePreviewService
 from .chapters import ChapterWorkflowService
 from .context_assembler import ContextAssemblerService
 from .context_queue import ContextUpdateQueueService
+from .corpus_boundaries import CorpusBoundaryService
 from .corpus_profiler import profile_corpus
 from .corpus_profiles import CorpusProfileArtifactService
 from .drafts import DraftGenerationRequest, DraftGenerationService
@@ -81,6 +82,15 @@ class WorkbenchApplicationService:
 
     def read_corpus_profile(self, project_id: str, profile_id: str) -> dict[str, Any]:
         return CorpusProfileArtifactService(self._open_store(project_id)).read_corpus_profile(profile_id)
+
+    def save_corpus_boundaries(self, project_id: str, path: str | Path) -> dict[str, Any]:
+        return CorpusBoundaryService(self._open_store(project_id)).save_corpus_boundaries(path).to_dict()
+
+    def list_corpus_boundaries(self, project_id: str) -> list[dict[str, Any]]:
+        return CorpusBoundaryService(self._open_store(project_id)).list_corpus_boundaries()
+
+    def read_corpus_boundaries(self, project_id: str, boundary_id: str) -> dict[str, Any]:
+        return CorpusBoundaryService(self._open_store(project_id)).read_corpus_boundaries(boundary_id)
 
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))

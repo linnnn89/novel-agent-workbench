@@ -19,6 +19,7 @@ novel_agent_workbench.formal_context_tasks
 novel_agent_workbench.context_assembler
 novel_agent_workbench.memory_apply_preview
 novel_agent_workbench.memory_bank
+novel_agent_workbench.corpus_boundaries
 novel_agent_workbench.corpus_profiler
 novel_agent_workbench.corpus_profiles
 novel_agent_workbench.audit
@@ -48,5 +49,6 @@ Current safety hardening:
 - audit checks confirmed chapter consistency, revision request/generated draft consistency, and context-aware draft metadata safety.
 - corpus profiler is read-only and metadata-only; it may report rough structure statistics and candidate-name frequency, but it does not write project files, call Providers, or copy chapter/source text.
 - corpus profile artifacts are explicit project writes, but persist only conservative metadata and exclude external source paths plus candidate-name text by default.
+- corpus boundary indexes persist no-text chapter line and character offsets only; they do not store heading text, excerpts, or external source paths.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

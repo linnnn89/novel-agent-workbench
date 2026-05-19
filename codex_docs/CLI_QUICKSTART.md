@@ -88,6 +88,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 The saved artifact is more conservative than transient `profile-corpus`: it stores source file name, size, SHA-256, structure statistics, and safety flags, but not source text, external source path, chapter heading text, dialogue excerpts, or candidate-name text.
 
+Save no-text chapter boundaries for future manual import planning:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test save-corpus-boundaries demo_project "T:\path\to\novel.txt"
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-corpus-boundaries demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-corpus-boundaries demo_project <boundary_id>
+```
+
+Boundary artifacts store line and character offsets only. They do not store chapter heading text, source text, excerpts, candidate names, or the external source path.
+
 ## Step-By-Step Flow
 
 Create a project:

@@ -11,6 +11,7 @@ from .context_assembler import (
 )
 from .context_previews import ContextUpdatePreviewError, ContextUpdatePreviewResult, ContextUpdatePreviewService
 from .context_queue import ContextUpdateQueueError, ContextUpdateQueueResult, ContextUpdateQueueService
+from .corpus_boundaries import CorpusBoundaryError, CorpusBoundaryResult, CorpusBoundaryService
 from .corpus_profiler import CorpusProfilerError, CorpusProfileResult, profile_corpus
 from .corpus_profiles import CorpusProfileArtifactError, CorpusProfileArtifactResult, CorpusProfileArtifactService
 from .drafts import (
@@ -109,6 +110,9 @@ __all__ = [
     "ContextUpdatePreviewService",
     "CorpusProfilerError",
     "CorpusProfileResult",
+    "CorpusBoundaryError",
+    "CorpusBoundaryResult",
+    "CorpusBoundaryService",
     "CorpusProfileArtifactError",
     "CorpusProfileArtifactResult",
     "CorpusProfileArtifactService",

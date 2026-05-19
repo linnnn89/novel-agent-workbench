@@ -469,3 +469,11 @@ Decision: Add explicit project-local corpus profile artifacts, but make persiste
 Reason: Later phases need durable corpus-level structure metadata. Storing raw source paths, excerpts, or candidate names now would blur the line between profiling and importing copyrighted source material.
 
 Impact: `CorpusProfileArtifactService`, `save-corpus-profile`, `list-corpus-profiles`, and `read-corpus-profile` write/read `data/corpus_profiles/*.json` plus `data/corpus_profiles_index.json`. Saved artifacts include file name, size, SHA-256, encoding, line/chapter counts, chapter statistics, dialogue proxy counts, and safety flags. Saved artifacts do not store external source paths, source text, chapter heading text, dialogue excerpts, or candidate-name text. They do not call Providers, create drafts, create confirmed chapters, or update Memory Bank/RAG/export.
+
+## 2026-05-19: MVP-14 Corpus Boundary Indexes
+
+Decision: Add explicit no-text chapter boundary artifacts for external corpora.
+
+Reason: Future import/sampling work needs stable chapter offsets, but storing headings or excerpts would require a separate copyright/safety decision. Line and character offsets are enough for planning without copying source text.
+
+Impact: `CorpusBoundaryService`, `save-corpus-boundaries`, `list-corpus-boundaries`, and `read-corpus-boundaries` write/read `data/corpus_boundaries/*.json` plus `data/corpus_boundaries_index.json`. Boundary artifacts store ordinal, heading line number, body line range, body character range, and body character count. They do not store external source paths, chapter heading text, source text, excerpts, candidate names, or plaintext secrets, and they do not call Providers, create drafts, create confirmed chapters, or update Memory Bank/RAG/export.
