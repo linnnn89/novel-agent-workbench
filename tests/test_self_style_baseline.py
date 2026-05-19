@@ -365,6 +365,30 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
 
             self.assertIn("style_suggestion_text_stored", codes)
 
+    def test_audit_scans_orphan_style_suggestion_without_baseline_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = ProjectStore.open(Path(temp), "demo")
+            store.initialize()
+            store.write_json(
+                store.data_dir / "style_suggestions" / "bad.json",
+                {
+                    "schema_version": 1,
+                    "suggestion_id": "bad",
+                    "prompt": "should not be stored",
+                    "safety": {
+                        "provider_called": False,
+                        "external_corpus_used": False,
+                        "auto_revision": False,
+                        "auto_commit": False,
+                    },
+                },
+            )
+
+            audit = audit_project(store)
+            codes = {item["code"] for item in audit["findings"]}
+
+            self.assertIn("style_suggestion_text_stored", codes)
+
     def test_facade_and_cli_style_check_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             configured_store_with_confirmed_chapters(temp)

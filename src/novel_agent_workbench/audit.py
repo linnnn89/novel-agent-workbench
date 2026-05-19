@@ -101,6 +101,8 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     audit_corpus_profiles(store, checked_paths=checked_paths, findings=findings)
     audit_corpus_samples(store, checked_paths=checked_paths, findings=findings)
     audit_self_style_baselines(store, checked_paths=checked_paths, findings=findings)
+    audit_draft_style_checks(store, checked_paths=checked_paths, findings=findings)
+    audit_style_suggestions(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_memory_apply_previews(store, checked_paths=checked_paths, findings=findings)
@@ -372,10 +374,6 @@ def audit_self_style_baselines(store: ProjectStore, *, checked_paths: list[str],
                     message="Self style baseline must be local-only and must not use external corpora or Providers.",
                 )
             )
-    audit_draft_style_checks(store, checked_paths=checked_paths, findings=findings)
-    audit_style_suggestions(store, checked_paths=checked_paths, findings=findings)
-
-
 def audit_draft_style_checks(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
     check_text_file(
         store.data_dir / "style_checks_index.json",
