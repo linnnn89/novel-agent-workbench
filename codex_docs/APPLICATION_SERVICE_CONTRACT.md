@@ -161,6 +161,57 @@ Returns one no-text boundary artifact.
 
 Metadata-only. Must not return source text, external source path, heading text, excerpts, or plaintext secrets.
 
+### create_corpus_sample(project_id, boundary_id, source_path, ordinal, max_chars=800)
+
+Explicitly creates a bounded real-text sample from a corpus boundary.
+
+Writes:
+
+```text
+data/corpus_samples/*.json
+data/corpus_samples_index.json
+```
+
+This is a test-only quarantine feature. It may persist bounded source text, but the artifact must include:
+
+```text
+test_only=true
+publish_blocker=true
+required_cleanup
+```
+
+Validation:
+
+```text
+source file SHA-256 must match the boundary artifact source SHA-256
+ordinal must exist in the boundary artifact
+max_chars must be between 1 and 2000
+```
+
+Default facade/CLI outputs must not return sample text. Sample text is only returned through explicit `include_text=true` / `--include-text`.
+
+This method must not create drafts, create confirmed chapters, call Providers, update Memory Bank, update RAG, create exports, or store the external source path.
+
+### list_corpus_samples(project_id)
+
+Returns corpus sample index metadata.
+
+Metadata-only. Must not return sample text, external source path, prompt text, or plaintext secrets.
+
+### read_corpus_sample(project_id, sample_id, include_text=False)
+
+Returns one corpus sample artifact.
+
+Default behavior:
+
+```text
+include_text=false
+```
+
+Default output must not include `sample_text`.
+
+With `include_text=true`, this method may return bounded real corpus text for local testing only. This content is non-publishable and must be removed before GitHub publication.
+
 ### project_state(project_id)
 
 Returns safe public project state.
@@ -178,6 +229,7 @@ context_update_count
 context_preview_count
 corpus_boundary_count
 corpus_profile_count
+corpus_sample_count
 formal_context_plan_count
 formal_context_task_count
 memory_apply_preview_count
@@ -192,6 +244,7 @@ latest_context_update
 latest_context_preview
 latest_corpus_boundary
 latest_corpus_profile
+latest_corpus_sample
 latest_formal_context_plan
 latest_formal_context_task
 latest_memory_apply_preview
@@ -1406,17 +1459,21 @@ Corpus profile artifact audit checks include:
 ```text
 corpus_boundary_source_path_stored
 corpus_boundary_text_field_stored
+corpus_sample_source_path_stored
+non_publishable_corpus_sample_present
 corpus_profile_source_path_stored
 corpus_profile_candidate_names_stored
 possible_prompt_in_corpus_boundary
 possible_secret_in_corpus_boundary
 possible_content_in_corpus_boundary
+possible_secret_in_corpus_sample
+possible_secret_in_corpus_sample_index
 possible_prompt_in_corpus_profile
 possible_secret_in_corpus_profile
 possible_content_in_corpus_profile
 ```
 
-Audit must fail if a persistent corpus profile stores an external source path or candidate-name text, or if a corpus boundary artifact stores an external source path, heading text, source text, chapter text, or excerpt fields.
+Audit must fail if a persistent corpus profile stores an external source path or candidate-name text, if a corpus boundary artifact stores an external source path, heading text, source text, chapter text, or excerpt fields, or if any non-publishable corpus sample artifact exists.
 
 ### provider_status(project_id, role)
 

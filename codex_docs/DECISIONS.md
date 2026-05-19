@@ -477,3 +477,11 @@ Decision: Add explicit no-text chapter boundary artifacts for external corpora.
 Reason: Future import/sampling work needs stable chapter offsets, but storing headings or excerpts would require a separate copyright/safety decision. Line and character offsets are enough for planning without copying source text.
 
 Impact: `CorpusBoundaryService`, `save-corpus-boundaries`, `list-corpus-boundaries`, and `read-corpus-boundaries` write/read `data/corpus_boundaries/*.json` plus `data/corpus_boundaries_index.json`. Boundary artifacts store ordinal, heading line number, body line range, body character range, and body character count. They do not store external source paths, chapter heading text, source text, excerpts, candidate names, or plaintext secrets, and they do not call Providers, create drafts, create confirmed chapters, or update Memory Bank/RAG/export.
+
+## 2026-05-19: MVP-15 Corpus Sample Quarantine
+
+Decision: Allow bounded real-text corpus samples only as temporary local testing artifacts.
+
+Reason: The user allowed storing real corpus-derived content during testing, with the requirement that it be removed before GitHub publication. The code must make that status machine-visible instead of relying on memory.
+
+Impact: `CorpusSampleService`, `create-corpus-sample`, `list-corpus-samples`, and `read-corpus-sample` write/read `data/corpus_samples/*.json` plus `data/corpus_samples_index.json`. Samples require a matching source SHA-256 from a boundary artifact, are bounded to 2000 characters, do not store external source paths, and are marked `test_only=true` and `publish_blocker=true`. Default reads/list/state do not return sample text. `audit-project` fails with `non_publishable_corpus_sample_present` while any sample artifact exists. Samples do not call Providers, create drafts, create confirmed chapters, or update Memory Bank/RAG/export.

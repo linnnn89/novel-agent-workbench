@@ -177,6 +177,17 @@ Corpus boundary tests currently cover:
 - audit rejection if a boundary artifact stores external source paths or text fields,
 - CLI commands `save-corpus-boundaries`, `list-corpus-boundaries`, and `read-corpus-boundaries`.
 
+Corpus sample tests currently cover:
+
+- explicit `create-corpus-sample` from a boundary artifact plus matching source file,
+- hash mismatch rejection,
+- max sample length bounded to 2000 characters,
+- sample artifacts marked `test_only=true` and `publish_blocker=true`,
+- default `read-corpus-sample` and project state excluding sample text,
+- explicit `read-corpus-sample --include-text` returning sample text for local testing,
+- `audit-project` emitting `non_publishable_corpus_sample_present`,
+- CLI commands `create-corpus-sample`, `list-corpus-samples`, and `read-corpus-sample`.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

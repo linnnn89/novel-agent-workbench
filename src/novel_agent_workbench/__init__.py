@@ -14,6 +14,7 @@ from .context_queue import ContextUpdateQueueError, ContextUpdateQueueResult, Co
 from .corpus_boundaries import CorpusBoundaryError, CorpusBoundaryResult, CorpusBoundaryService
 from .corpus_profiler import CorpusProfilerError, CorpusProfileResult, profile_corpus
 from .corpus_profiles import CorpusProfileArtifactError, CorpusProfileArtifactResult, CorpusProfileArtifactService
+from .corpus_samples import CorpusSampleError, CorpusSampleResult, CorpusSampleService
 from .drafts import (
     DraftCommitResult,
     DraftGenerationError,
@@ -116,6 +117,9 @@ __all__ = [
     "CorpusProfileArtifactError",
     "CorpusProfileArtifactResult",
     "CorpusProfileArtifactService",
+    "CorpusSampleError",
+    "CorpusSampleResult",
+    "CorpusSampleService",
     "audit_project",
     "chutes_generate_once",
     "configure_provider_role",

@@ -22,6 +22,7 @@ novel_agent_workbench.memory_bank
 novel_agent_workbench.corpus_boundaries
 novel_agent_workbench.corpus_profiler
 novel_agent_workbench.corpus_profiles
+novel_agent_workbench.corpus_samples
 novel_agent_workbench.audit
 novel_agent_workbench.application_service
 novel_agent_workbench.cli
@@ -50,5 +51,6 @@ Current safety hardening:
 - corpus profiler is read-only and metadata-only; it may report rough structure statistics and candidate-name frequency, but it does not write project files, call Providers, or copy chapter/source text.
 - corpus profile artifacts are explicit project writes, but persist only conservative metadata and exclude external source paths plus candidate-name text by default.
 - corpus boundary indexes persist no-text chapter line and character offsets only; they do not store heading text, excerpts, or external source paths.
+- corpus samples are temporary testing artifacts only; they may contain bounded real text, are marked `test_only` and `publish_blocker`, are redacted by default reads, and cause `audit-project` to fail until removed from publishable runtime state.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

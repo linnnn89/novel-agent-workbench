@@ -12,6 +12,7 @@ from .context_queue import ContextUpdateQueueService
 from .corpus_boundaries import CorpusBoundaryService
 from .corpus_profiler import profile_corpus
 from .corpus_profiles import CorpusProfileArtifactService
+from .corpus_samples import CorpusSampleService
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
@@ -91,6 +92,28 @@ class WorkbenchApplicationService:
 
     def read_corpus_boundaries(self, project_id: str, boundary_id: str) -> dict[str, Any]:
         return CorpusBoundaryService(self._open_store(project_id)).read_corpus_boundaries(boundary_id)
+
+    def create_corpus_sample(
+        self,
+        project_id: str,
+        boundary_id: str,
+        source_path: str | Path,
+        *,
+        ordinal: int,
+        max_chars: int = 800,
+    ) -> dict[str, Any]:
+        return CorpusSampleService(self._open_store(project_id)).create_corpus_sample(
+            boundary_id,
+            source_path,
+            ordinal=ordinal,
+            max_chars=max_chars,
+        ).to_dict()
+
+    def list_corpus_samples(self, project_id: str) -> list[dict[str, Any]]:
+        return CorpusSampleService(self._open_store(project_id)).list_corpus_samples()
+
+    def read_corpus_sample(self, project_id: str, sample_id: str, *, include_text: bool = False) -> dict[str, Any]:
+        return CorpusSampleService(self._open_store(project_id)).read_corpus_sample(sample_id, include_text=include_text)
 
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))

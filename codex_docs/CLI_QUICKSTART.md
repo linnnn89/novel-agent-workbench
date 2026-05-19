@@ -98,6 +98,24 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Boundary artifacts store line and character offsets only. They do not store chapter heading text, source text, excerpts, candidate names, or the external source path.
 
+Create a temporary real-text sample for local testing only:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-corpus-sample demo_project <boundary_id> "T:\path\to\novel.txt" --ordinal 1 --max-chars 800
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-corpus-samples demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-corpus-sample demo_project <sample_id>
+```
+
+Default `read-corpus-sample` does not print sample text.
+
+For explicit local inspection:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-corpus-sample demo_project <sample_id> --include-text
+```
+
+Corpus samples are `test_only` and `publish_blocker`. `audit-project` must fail while they exist so they cannot be missed before GitHub publication.
+
 ## Step-By-Step Flow
 
 Create a project:

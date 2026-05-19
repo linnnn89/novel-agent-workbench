@@ -7,6 +7,7 @@ from .context_previews import ContextUpdatePreviewService
 from .context_queue import ContextUpdateQueueService
 from .corpus_boundaries import CorpusBoundaryService
 from .corpus_profiles import CorpusProfileArtifactService
+from .corpus_samples import CorpusSampleService
 from .drafts import DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
@@ -30,6 +31,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     context_preview_service = ContextUpdatePreviewService(store)
     corpus_boundary_service = CorpusBoundaryService(store)
     corpus_profile_service = CorpusProfileArtifactService(store)
+    corpus_sample_service = CorpusSampleService(store)
     formal_context_plan_service = FormalContextPlanService(store)
     formal_context_task_service = FormalContextTaskQueueService(store)
     memory_apply_preview_service = MemoryApplyPreviewService(store)
@@ -42,6 +44,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     context_previews = context_preview_service.list_context_previews()
     corpus_boundaries = corpus_boundary_service.list_corpus_boundaries()
     corpus_profiles = corpus_profile_service.list_corpus_profiles()
+    corpus_samples = corpus_sample_service.list_corpus_samples()
     formal_context_plans = formal_context_plan_service.list_formal_context_plans()
     formal_context_tasks = formal_context_task_service.list_tasks()
     memory_apply_previews = memory_apply_preview_service.list_memory_apply_previews()
@@ -63,6 +66,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "context_preview_count": len(context_previews),
         "corpus_boundary_count": len(corpus_boundaries),
         "corpus_profile_count": len(corpus_profiles),
+        "corpus_sample_count": len(corpus_samples),
         "formal_context_plan_count": len(formal_context_plans),
         "formal_context_task_count": len(formal_context_tasks),
         "memory_apply_preview_count": len(memory_apply_previews),
@@ -77,6 +81,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "latest_context_preview": safe_context_preview_summary(latest_by(context_previews, "created_at")),
         "latest_corpus_boundary": safe_corpus_boundary_summary(latest_by(corpus_boundaries, "created_at")),
         "latest_corpus_profile": safe_corpus_profile_summary(latest_by(corpus_profiles, "created_at")),
+        "latest_corpus_sample": safe_corpus_sample_summary(latest_by(corpus_samples, "created_at")),
         "latest_formal_context_plan": safe_formal_context_plan_summary(
             latest_by(formal_context_plans, "created_at")
         ),
@@ -243,6 +248,22 @@ def safe_corpus_boundary_summary(item: dict[str, Any] | None) -> dict[str, Any] 
         "encoding": item.get("encoding") if isinstance(item.get("encoding"), dict) else {},
         "chapter_count": item.get("chapter_count"),
         "safety": item.get("safety") if isinstance(item.get("safety"), dict) else {},
+    }
+
+
+def safe_corpus_sample_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "sample_id": item.get("sample_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "test_only": item.get("test_only"),
+        "publish_blocker": item.get("publish_blocker"),
+        "boundary_id": item.get("boundary_id"),
+        "ordinal": item.get("ordinal"),
+        "source_sha256": item.get("source_sha256"),
+        "char_count": item.get("char_count"),
     }
 
 

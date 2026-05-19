@@ -396,6 +396,14 @@ save-corpus-boundaries + data/corpus_boundaries/*.json + no-text line/character 
 
 Boundary indexes may store chapter ordinals, heading line numbers, body line ranges, body character ranges, and body character counts. They must not store source text, heading text, excerpts, candidate names, or external source paths. This is still not import and must not call Providers or update drafts/confirmed chapters/Memory Bank/RAG/export.
 
+MVP-15 corpus sample quarantine slice:
+
+```text
+create-corpus-sample + data/corpus_samples/*.json + publish_blocker test-only text.
+```
+
+Samples may contain bounded real text only during local testing. They must be explicit, bounded, linked to a matching source hash, marked `test_only` and `publish_blocker`, hidden from default state/list/read outputs, and flagged by audit until removed from publishable runtime state. They must not call Providers or update drafts/confirmed chapters/Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

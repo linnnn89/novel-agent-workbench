@@ -64,6 +64,21 @@ def build_parser() -> argparse.ArgumentParser:
     read_corpus_boundaries.add_argument("project_id")
     read_corpus_boundaries.add_argument("boundary_id")
 
+    create_corpus_sample = subparsers.add_parser("create-corpus-sample")
+    create_corpus_sample.add_argument("project_id")
+    create_corpus_sample.add_argument("boundary_id")
+    create_corpus_sample.add_argument("source_path")
+    create_corpus_sample.add_argument("--ordinal", type=int, required=True)
+    create_corpus_sample.add_argument("--max-chars", type=int, default=800)
+
+    list_corpus_samples = subparsers.add_parser("list-corpus-samples")
+    list_corpus_samples.add_argument("project_id")
+
+    read_corpus_sample = subparsers.add_parser("read-corpus-sample")
+    read_corpus_sample.add_argument("project_id")
+    read_corpus_sample.add_argument("sample_id")
+    read_corpus_sample.add_argument("--include-text", action="store_true")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -368,6 +383,18 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_corpus_boundaries(args.project_id)
     if command == "read-corpus-boundaries":
         return app.read_corpus_boundaries(args.project_id, args.boundary_id)
+    if command == "create-corpus-sample":
+        return app.create_corpus_sample(
+            args.project_id,
+            args.boundary_id,
+            args.source_path,
+            ordinal=args.ordinal,
+            max_chars=args.max_chars,
+        )
+    if command == "list-corpus-samples":
+        return app.list_corpus_samples(args.project_id)
+    if command == "read-corpus-sample":
+        return app.read_corpus_sample(args.project_id, args.sample_id, include_text=args.include_text)
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":

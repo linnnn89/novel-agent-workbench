@@ -99,6 +99,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     audit_context_previews(store, checked_paths=checked_paths, findings=findings)
     audit_corpus_boundaries(store, checked_paths=checked_paths, findings=findings)
     audit_corpus_profiles(store, checked_paths=checked_paths, findings=findings)
+    audit_corpus_samples(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_memory_apply_previews(store, checked_paths=checked_paths, findings=findings)
@@ -290,6 +291,46 @@ def contains_forbidden_corpus_boundary_key(value: object) -> bool:
     elif isinstance(value, list):
         return any(contains_forbidden_corpus_boundary_key(item) for item in value)
     return False
+
+
+def audit_corpus_samples(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    check_text_file(
+        store.data_dir / "corpus_samples_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=[("possible_secret_in_corpus_sample_index", SECRET_PATTERNS)],
+    )
+    samples_dir = store.data_dir / "corpus_samples"
+    checked_paths.append(str(samples_dir))
+    if not samples_dir.exists():
+        return
+    for path in sorted(samples_dir.glob("*.json")):
+        check_text_file(
+            path,
+            checked_paths=checked_paths,
+            findings=findings,
+            pattern_groups=[("possible_secret_in_corpus_sample", SECRET_PATTERNS)],
+        )
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if artifact.get("publish_blocker") is True or artifact.get("test_only") is True:
+            findings.append(
+                AuditFinding(
+                    code="non_publishable_corpus_sample_present",
+                    path=str(path),
+                    message="Temporary real-corpus sample must be removed before GitHub publication.",
+                )
+            )
+        source = artifact.get("source") if isinstance(artifact.get("source"), dict) else {}
+        if source.get("source_path_stored") or "path" in source:
+            findings.append(
+                AuditFinding(
+                    code="corpus_sample_source_path_stored",
+                    path=str(path),
+                    message="Corpus sample artifact must not store external source paths.",
+                )
+            )
 
 
 def audit_formal_context_plans(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
