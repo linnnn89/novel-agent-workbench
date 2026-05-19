@@ -277,6 +277,57 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
             self.assertFalse((store.root / "rag").exists())
             self.assertFalse((store.root / "exports").exists())
 
+    def test_create_style_suggestion_is_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            baseline = service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private style suggestion prompt")
+            )
+            replace_draft_text(store, draft.draft_id, "风格建议草稿。\n这里没有对白，只有连续说明。\n世界规则和背景被缓慢铺开。")
+            check = service.check_draft_against_baseline(
+                draft.draft_id,
+                baseline_id=baseline.baseline_id,
+                scene_mode="general",
+            )
+
+            result = service.create_style_suggestion(check.check_id)
+            artifact = service.read_style_suggestion(result.suggestion_id)
+            artifact_text = Path(result.path).read_text(encoding="utf-8")
+
+            self.assertEqual(result.check_id, check.check_id)
+            self.assertEqual(artifact["check_id"], check.check_id)
+            self.assertGreaterEqual(artifact["suggestion_count"], 1)
+            self.assertTrue(all(item["auto_apply"] is False for item in artifact["suggestions"]))
+            self.assertNotIn("风格建议草稿", artifact_text)
+            self.assertNotIn("private style suggestion prompt", artifact_text)
+            self.assertFalse(artifact["safety"]["provider_called"])
+            self.assertFalse(artifact["safety"]["auto_revision"])
+            self.assertFalse(artifact["safety"]["auto_commit"])
+            self.assertFalse(artifact["safety"]["confirmed_touched"])
+
+    def test_style_suggestion_has_no_formal_context_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private suggestion side effect prompt")
+            )
+            memory_before = store.data_file_path("memory_bank.json").read_text(encoding="utf-8")
+            export_before = store.data_file_path("export_settings.json").read_text(encoding="utf-8")
+            confirmed_before = len(DraftGenerationService(store).list_confirmed_chapters())
+            check = service.check_draft_against_baseline(draft.draft_id)
+
+            service.create_style_suggestion(check.check_id)
+
+            self.assertEqual(memory_before, store.data_file_path("memory_bank.json").read_text(encoding="utf-8"))
+            self.assertEqual(export_before, store.data_file_path("export_settings.json").read_text(encoding="utf-8"))
+            self.assertEqual(confirmed_before, len(DraftGenerationService(store).list_confirmed_chapters()))
+            self.assertFalse((store.root / "rag").exists())
+            self.assertFalse((store.root / "exports").exists())
+
     def test_audit_rejects_style_check_with_text_field(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = configured_store_with_confirmed_chapters(temp)
@@ -295,6 +346,25 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
 
             self.assertIn("draft_style_check_text_stored", codes)
 
+    def test_audit_rejects_style_suggestion_with_text_field(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private audit suggestion prompt")
+            )
+            check = service.check_draft_against_baseline(draft.draft_id)
+            result = service.create_style_suggestion(check.check_id)
+            artifact = service.read_style_suggestion(result.suggestion_id)
+            artifact["prompt"] = "should not be stored"
+            store.write_json(str(Path(result.path).relative_to(store.root)), artifact)
+
+            audit = audit_project(store)
+            codes = {item["code"] for item in audit["findings"]}
+
+            self.assertIn("style_suggestion_text_stored", codes)
+
     def test_facade_and_cli_style_check_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             configured_store_with_confirmed_chapters(temp)
@@ -305,6 +375,9 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
             check = app.check_draft_style("demo", draft["draft_id"])
             exposition_check = app.check_draft_style("demo", draft["draft_id"], scene_mode="exposition")
             hidden_hint_check = app.check_draft_style("demo", draft["draft_id"], show_hints=False)
+            suggestion = app.create_style_suggestion("demo", check["check_id"])
+            suggestions = app.list_style_suggestions("demo")
+            read_suggestion = app.read_style_suggestion("demo", suggestion["suggestion_id"])
             checks = app.list_draft_style_checks("demo")
             read = app.read_draft_style_check("demo", check["check_id"])
             stdout = capture_stdout(
@@ -315,9 +388,27 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
                     "demo",
                 ]
             )
+            suggestion_stdout = capture_stdout(
+                [
+                    "--projects-root",
+                    temp,
+                    "list-style-suggestions",
+                    "demo",
+                ]
+            )
             state = app.project_state("demo")
             combined = json.dumps(
-                {"check": check, "checks": checks, "read": read, "stdout": stdout, "state": state},
+                {
+                    "check": check,
+                    "checks": checks,
+                    "read": read,
+                    "stdout": stdout,
+                    "suggestion": suggestion,
+                    "suggestions": suggestions,
+                    "read_suggestion": read_suggestion,
+                    "suggestion_stdout": suggestion_stdout,
+                    "state": state,
+                },
                 ensure_ascii=False,
             )
 
@@ -325,7 +416,10 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
             self.assertEqual(exposition_check["scene_mode"], "exposition")
             self.assertEqual(hidden_hint_check["hint_count"], 0)
             self.assertEqual(read["check_id"], check["check_id"])
+            self.assertEqual(suggestions[0]["suggestion_id"], suggestion["suggestion_id"])
+            self.assertEqual(read_suggestion["suggestion_id"], suggestion["suggestion_id"])
             self.assertEqual(state["draft_style_check_count"], 3)
+            self.assertEqual(state["style_suggestion_count"], 1)
             self.assertNotIn("private facade style prompt", combined)
             self.assertNotIn("MOCK writer", combined)
 

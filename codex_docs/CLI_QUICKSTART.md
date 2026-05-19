@@ -582,6 +582,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Future UI placement: the per-draft style check belongs in the draft review side panel, with defaults under Project Settings > Writing Quality. It should not be a blocking pop-up window.
 
+Create manual style suggestions from a style check:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-style-suggestion demo_project <check_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-style-suggestions demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-style-suggestion demo_project <suggestion_id>
+```
+
+This converts warning/hint metadata into manual advice. It does not edit the draft, create a revision request, call Providers, auto-commit, or update Memory Bank/RAG/export. Suggestions are generic metric-level guidance and must not contain draft text, prompt text, generated content, or plaintext secrets.
+
 ## Safety And Cleanup Policy
 
 Do not hard delete real project files during early MVP.

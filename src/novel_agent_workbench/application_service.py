@@ -156,6 +156,15 @@ class WorkbenchApplicationService:
     def read_draft_style_check(self, project_id: str, check_id: str) -> dict[str, Any]:
         return SelfStyleBaselineService(self._open_store(project_id)).read_style_check(check_id)
 
+    def create_style_suggestion(self, project_id: str, check_id: str) -> dict[str, Any]:
+        return SelfStyleBaselineService(self._open_store(project_id)).create_style_suggestion(check_id).to_dict()
+
+    def list_style_suggestions(self, project_id: str) -> list[dict[str, Any]]:
+        return SelfStyleBaselineService(self._open_store(project_id)).list_style_suggestions()
+
+    def read_style_suggestion(self, project_id: str, suggestion_id: str) -> dict[str, Any]:
+        return SelfStyleBaselineService(self._open_store(project_id)).read_style_suggestion(suggestion_id)
+
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))
 

@@ -116,6 +116,17 @@ def build_parser() -> argparse.ArgumentParser:
     read_draft_style_check.add_argument("project_id")
     read_draft_style_check.add_argument("check_id")
 
+    create_style_suggestion = subparsers.add_parser("create-style-suggestion")
+    create_style_suggestion.add_argument("project_id")
+    create_style_suggestion.add_argument("check_id")
+
+    list_style_suggestions = subparsers.add_parser("list-style-suggestions")
+    list_style_suggestions.add_argument("project_id")
+
+    read_style_suggestion = subparsers.add_parser("read-style-suggestion")
+    read_style_suggestion.add_argument("project_id")
+    read_style_suggestion.add_argument("suggestion_id")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -454,6 +465,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_draft_style_checks(args.project_id)
     if command == "read-draft-style-check":
         return app.read_draft_style_check(args.project_id, args.check_id)
+    if command == "create-style-suggestion":
+        return app.create_style_suggestion(args.project_id, args.check_id)
+    if command == "list-style-suggestions":
+        return app.list_style_suggestions(args.project_id)
+    if command == "read-style-suggestion":
+        return app.read_style_suggestion(args.project_id, args.suggestion_id)
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":

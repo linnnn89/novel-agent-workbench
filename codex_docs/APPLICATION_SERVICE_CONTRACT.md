@@ -343,6 +343,33 @@ Returns one draft style check artifact.
 
 Metadata-only. Must not return draft text, prompt text, generated content, or plaintext secrets.
 
+### create_style_suggestion(project_id, check_id)
+
+Creates a local metadata-only suggestion artifact from one draft style check.
+
+Writes:
+
+```text
+data/style_suggestions/*.json
+data/style_suggestions_index.json
+```
+
+The suggestions are manual review aids. They may name a metric, direction, severity, and generic action, but they must not contain draft text, prompt text, generated content, confirmed chapter text, external corpus text, raw Provider responses, or plaintext secrets.
+
+This method must not call Providers, modify drafts, create revision requests, auto-revise drafts, auto-commit drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
+
+### list_style_suggestions(project_id)
+
+Returns style suggestion index metadata.
+
+Metadata-only. Must not return draft text, prompt text, generated content, or plaintext secrets.
+
+### read_style_suggestion(project_id, suggestion_id)
+
+Returns one style suggestion artifact.
+
+Metadata-only. Must not return draft text, prompt text, generated content, or plaintext secrets.
+
 ### project_state(project_id)
 
 Returns safe public project state.
@@ -363,6 +390,7 @@ corpus_profile_count
 corpus_sample_count
 self_style_baseline_count
 draft_style_check_count
+style_suggestion_count
 formal_context_plan_count
 formal_context_task_count
 memory_apply_preview_count
@@ -380,6 +408,7 @@ latest_corpus_profile
 latest_corpus_sample
 latest_self_style_baseline
 latest_draft_style_check
+latest_style_suggestion
 latest_formal_context_plan
 latest_formal_context_task
 latest_memory_apply_preview

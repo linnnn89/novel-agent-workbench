@@ -14,6 +14,8 @@ STYLE_BASELINES_DIRNAME = "style_baselines"
 STYLE_BASELINES_INDEX_FILENAME = "style_baselines_index.json"
 STYLE_CHECKS_DIRNAME = "style_checks"
 STYLE_CHECKS_INDEX_FILENAME = "style_checks_index.json"
+STYLE_SUGGESTIONS_DIRNAME = "style_suggestions"
+STYLE_SUGGESTIONS_INDEX_FILENAME = "style_suggestions_index.json"
 SENTENCE_RE = re.compile(r"[^。！？!?\.]+[。！？!?\.]?")
 SCENE_MODES = {"general", "daily", "romance", "battle", "climax", "exposition", "transition", "custom"}
 STYLE_CHECK_POLICY_PATH = ("context_policy", "style_check_policy")
@@ -52,6 +54,21 @@ class DraftStyleCheckResult:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class DraftStyleSuggestionResult:
+    suggestion_id: str
+    check_id: str
+    draft_id: str
+    chapter_id: str
+    created_at: str
+    path: str
+    status: str
+    suggestion_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class SelfStyleBaselineService:
     """Create metadata-only style baselines from confirmed chapters."""
 
@@ -73,6 +90,14 @@ class SelfStyleBaselineService:
     @property
     def checks_index_path(self) -> Path:
         return self.store.data_dir / STYLE_CHECKS_INDEX_FILENAME
+
+    @property
+    def suggestions_dir(self) -> Path:
+        return self.store.data_dir / STYLE_SUGGESTIONS_DIRNAME
+
+    @property
+    def suggestions_index_path(self) -> Path:
+        return self.store.data_dir / STYLE_SUGGESTIONS_INDEX_FILENAME
 
     def create_baseline(self) -> SelfStyleBaselineResult:
         self.store.initialize()
@@ -298,6 +323,113 @@ class SelfStyleBaselineService:
             return artifact
         raise SelfStyleBaselineError(f"Style check not found: {check_id}")
 
+    def create_style_suggestion(self, check_id: str) -> DraftStyleSuggestionResult:
+        self.store.initialize()
+        with self.store.lock():
+            check = self.read_style_check(check_id)
+            draft = check.get("draft") if isinstance(check.get("draft"), dict) else {}
+            suggestions = build_style_suggestions(check.get("checks") if isinstance(check.get("checks"), list) else [])
+            created_at = utc_stamp()
+            suggestion_id = f"{created_at}_{uuid4().hex[:12]}"
+            artifact_path = self.suggestions_dir / f"{safe_filename(suggestion_id)}.json"
+            status = "suggestions_ready" if suggestions else "no_action_needed"
+            artifact = {
+                "schema_version": 1,
+                "suggestion_id": suggestion_id,
+                "check_id": str(check.get("check_id") or check_id),
+                "status": status,
+                "created_at": created_at,
+                "draft": {
+                    "draft_id": str(draft.get("draft_id") or ""),
+                    "chapter_id": str(draft.get("chapter_id") or ""),
+                    "title": str(draft.get("title") or ""),
+                },
+                "style_check": {
+                    "status": str(check.get("status") or ""),
+                    "scene_mode": str(check.get("scene_mode") or ""),
+                    "issue_count": int(check.get("issue_count") or 0),
+                    "hint_count": int(check.get("hint_count") or 0),
+                    "baseline_id": str((check.get("baseline") or {}).get("baseline_id") or "")
+                    if isinstance(check.get("baseline"), dict)
+                    else "",
+                },
+                "suggestions": suggestions,
+                "suggestion_count": len(suggestions),
+                "policy": {
+                    "local_only": True,
+                    "manual_review_required": True,
+                    "auto_apply": False,
+                    "auto_revision_request": False,
+                    "auto_commit": False,
+                },
+                "safety": {
+                    "local_only": True,
+                    "provider_called": False,
+                    "external_corpus_used": False,
+                    "draft_text_stored": False,
+                    "baseline_text_stored": False,
+                    "prompt_text_stored": False,
+                    "secret_text_stored": False,
+                    "raw_response_stored": False,
+                    "auto_revision": False,
+                    "auto_commit": False,
+                    "confirmed_touched": False,
+                    "memory_bank_touched": False,
+                    "rag_touched": False,
+                    "exports_touched": False,
+                },
+            }
+            self.store.write_json(artifact_path, artifact)
+            entry = {
+                "suggestion_id": suggestion_id,
+                "check_id": str(check.get("check_id") or check_id),
+                "status": status,
+                "created_at": created_at,
+                "draft_id": str(draft.get("draft_id") or ""),
+                "chapter_id": str(draft.get("chapter_id") or ""),
+                "title": str(draft.get("title") or ""),
+                "scene_mode": str(check.get("scene_mode") or ""),
+                "suggestion_count": len(suggestions),
+                "path": str(artifact_path.relative_to(self.store.root)),
+                "safety": artifact["safety"],
+            }
+            self._append_suggestion_index_entry(entry)
+            return DraftStyleSuggestionResult(
+                suggestion_id=suggestion_id,
+                check_id=str(check.get("check_id") or check_id),
+                draft_id=str(draft.get("draft_id") or ""),
+                chapter_id=str(draft.get("chapter_id") or ""),
+                created_at=created_at,
+                path=str(artifact_path),
+                status=status,
+                suggestion_count=len(suggestions),
+            )
+
+    def list_style_suggestions(self) -> list[dict[str, Any]]:
+        index = self.store.read_json(
+            self.suggestions_index_path,
+            default={"schema_version": 1, "style_suggestions": []},
+        )
+        if not isinstance(index, dict):
+            return []
+        items = index.get("style_suggestions")
+        if not isinstance(items, list):
+            return []
+        return [item for item in items if isinstance(item, dict)]
+
+    def read_style_suggestion(self, suggestion_id: str) -> dict[str, Any]:
+        for item in self.list_style_suggestions():
+            if item.get("suggestion_id") != suggestion_id:
+                continue
+            path = item.get("path")
+            if not isinstance(path, str):
+                raise SelfStyleBaselineError(f"Style suggestion index entry has no path: {suggestion_id}")
+            artifact = self.store.read_json(path, default=None)
+            if not isinstance(artifact, dict):
+                raise SelfStyleBaselineError(f"Style suggestion artifact is missing or invalid: {suggestion_id}")
+            return artifact
+        raise SelfStyleBaselineError(f"Style suggestion not found: {suggestion_id}")
+
     def _confirmed_chapter_records(self) -> list[dict[str, Any]]:
         service = DraftGenerationService(self.store)
         records: list[dict[str, Any]] = []
@@ -325,6 +457,14 @@ class SelfStyleBaselineService:
         items = self.list_style_checks()
         items.append(entry)
         self.store.write_json(self.checks_index_path, {"schema_version": 1, "style_checks": items})
+
+    def _append_suggestion_index_entry(self, entry: dict[str, Any]) -> None:
+        items = self.list_style_suggestions()
+        items.append(entry)
+        self.store.write_json(
+            self.suggestions_index_path,
+            {"schema_version": 1, "style_suggestions": items},
+        )
 
     def _latest_baseline_id(self) -> str:
         baselines = self.list_baselines()
@@ -514,6 +654,72 @@ def compare_metrics(
                 )
             )
     return checks
+
+
+def build_style_suggestions(checks: list[object]) -> list[dict[str, Any]]:
+    suggestions: list[dict[str, Any]] = []
+    for item in checks:
+        if not isinstance(item, dict):
+            continue
+        severity = str(item.get("severity") or "")
+        if severity not in {"warning", "hint"}:
+            continue
+        status = str(item.get("status") or "")
+        metric_id = str(item.get("metric_id") or "")
+        label = str(item.get("label") or metric_id)
+        suggestions.append(
+            {
+                "suggestion_id": f"s{len(suggestions) + 1:03d}",
+                "metric_id": metric_id,
+                "label": label,
+                "severity": severity,
+                "status": status,
+                "direction": suggestion_direction(status),
+                "action": suggestion_action(metric_id, status),
+                "reason": suggestion_reason(label, severity, status),
+                "auto_apply": False,
+            }
+        )
+    return suggestions
+
+
+def suggestion_direction(status: str) -> str:
+    if status.endswith("_low") or status == "low":
+        return "increase"
+    if status.endswith("_high") or status == "high":
+        return "decrease"
+    return "review"
+
+
+def suggestion_reason(label: str, severity: str, status: str) -> str:
+    if severity == "warning":
+        return f"{label} is outside the calibrated hard range ({status})."
+    return f"{label} is outside the typical baseline band ({status})."
+
+
+def suggestion_action(metric_id: str, status: str) -> str:
+    direction = suggestion_direction(status)
+    if metric_id == "dialogue_line_ratio":
+        if direction == "increase":
+            return "Consider adding more dialogue beats if this scene is not intentionally expository."
+        if direction == "decrease":
+            return "Consider adding more narration or action beats if the scene is not intentionally dialogue-heavy."
+    if metric_id in {"avg_sentence_chars", "avg_paragraph_chars"}:
+        if direction == "increase":
+            return "Consider allowing a few longer sentences or paragraphs where the scene needs slower texture."
+        if direction == "decrease":
+            return "Consider breaking up long sentences or paragraphs where pace and readability matter."
+    if metric_id in {"nonspace_chars", "paragraphs_per_chapter", "sentences_per_chapter"}:
+        if direction == "increase":
+            return "Consider expanding the scene if the short length is not intentional."
+        if direction == "decrease":
+            return "Consider tightening the scene if the long length is not intentional."
+    if metric_id.startswith("punctuation."):
+        if direction == "increase":
+            return "Consider whether this punctuation pattern is intentionally understated."
+        if direction == "decrease":
+            return "Consider reducing this punctuation pattern if it distracts from the target style."
+    return "Review this metric manually before changing the draft."
 
 
 def compare_distribution_metric(

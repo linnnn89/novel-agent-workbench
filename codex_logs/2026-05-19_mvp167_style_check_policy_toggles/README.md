@@ -113,7 +113,7 @@ OK
 Leak scan:
 
 ```powershell
-rg -n "cpk_e0ae50a74d564a84bad5e1c21683a8ef|60fbb7047bbb55588ed1b85fe20c98c4|4Zb73oUeomWRDdzdwHlenDTt5ASRxu0S|Ninja？不，我是Assassins|瑛，陪我去东京|洛天依：我不会唱歌" I:\AI-NOVEL\novel_agent_workbench I:\AI-NOVEL\PROJECT_INDEX.md
+rg -n "<redacted secret and real-corpus sentinel patterns>" I:\AI-NOVEL\novel_agent_workbench I:\AI-NOVEL\PROJECT_INDEX.md
 ```
 
 Result:

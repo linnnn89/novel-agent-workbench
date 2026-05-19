@@ -223,6 +223,15 @@ Draft style check tests currently cover:
 - facade and CLI commands `check-draft-style`, `list-draft-style-checks`, and `read-draft-style-check`,
 - output excluding draft text, prompt text, generated content, and plaintext secrets.
 
+Style suggestion tests currently cover:
+
+- creating `data/style_suggestions/*.json` and `data/style_suggestions_index.json`,
+- converting warning/hint metadata into manual suggestions without storing draft text,
+- facade and CLI commands `create-style-suggestion`, `list-style-suggestions`, and `read-style-suggestion`,
+- project state `style_suggestion_count` and `latest_style_suggestion`,
+- audit rejection if a suggestion artifact stores text fields,
+- no draft mutation, auto revision, auto commit, Memory Bank, RAG, export, Provider, or confirmed chapter side effects.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

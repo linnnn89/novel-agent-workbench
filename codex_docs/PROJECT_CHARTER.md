@@ -444,6 +444,14 @@ context_policy.style_check_policy + optional style checks + draft review side pa
 
 Style checks, calibration, and hint display must be configurable. If style checks are disabled, checking a draft must fail without writing an artifact. Future UI should place the per-draft check inside the draft review side panel, with defaults in Project Settings > Writing Quality. It should not be a blocking pop-up. Auto creation of revision requests must remain disabled unless explicitly implemented later.
 
+MVP-16.8 style suggestion artifact slice:
+
+```text
+create-style-suggestion + data/style_suggestions/*.json + manual metric-level suggestions.
+```
+
+Style suggestions must be generated from existing style-check metadata only. They may contain metric IDs, severity, direction, and generic manual advice, but must not contain draft text, prompt text, generated content, confirmed chapter text, external corpus text, raw Provider responses, or plaintext secrets. They must not call Providers, modify drafts, create revision requests, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

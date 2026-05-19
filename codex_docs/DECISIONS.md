@@ -525,3 +525,11 @@ Decision: Make style checks, calibration, and hint display configurable, with fu
 Reason: Style checks should help the operator while reviewing a draft, but they must not become intrusive or mandatory. The user explicitly wanted the option to turn this feature off and asked where it belongs in the UI.
 
 Impact: `context_policy.style_check_policy` now stores `enabled`, `calibration_enabled`, `show_hints`, `default_scene_mode`, `severity_mode`, `auto_create_revision_request=false`, and `ui_placement`. `check-draft-style` supports `--disable-style-check`, `--disable-calibration`, `--enable-calibration`, `--hide-hints`, and `--show-hints` call-level overrides. If disabled, no style check artifact is written. Future UI placement is `draft_review_side_panel` with defaults in `project_settings_writing_quality`; modal pop-ups are not recommended. No UI was implemented.
+
+## 2026-05-19: MVP-16.8 Style Suggestion Artifact
+
+Decision: Convert style-check findings into manual suggestion artifacts before any automatic rewrite or revision workflow.
+
+Rationale: A style check can identify metric-level drift, but applying changes automatically would be too aggressive because scenes intentionally vary by mode. Suggestions should therefore be review aids that tell the operator what to inspect, not instructions that mutate drafts.
+
+Impact: `SelfStyleBaselineService.create_style_suggestion(...)`, `create-style-suggestion`, `list-style-suggestions`, and `read-style-suggestion` write/read `data/style_suggestions/*.json` plus `data/style_suggestions_index.json`. Suggestions are generated from style-check metadata only. They do not store draft text, prompt text, generated content, raw Provider responses, external corpus text, or plaintext secrets. They do not call Providers, modify drafts, create revision requests, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
