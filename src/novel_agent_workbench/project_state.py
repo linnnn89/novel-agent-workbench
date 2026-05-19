@@ -299,7 +299,9 @@ def safe_draft_style_check_summary(item: dict[str, Any] | None) -> dict[str, Any
         "chapter_id": item.get("chapter_id"),
         "title": item.get("title"),
         "baseline_id": item.get("baseline_id"),
+        "scene_mode": item.get("scene_mode"),
         "issue_count": item.get("issue_count"),
+        "hint_count": item.get("hint_count"),
         "safety": item.get("safety") if isinstance(item.get("safety"), dict) else {},
     }
 

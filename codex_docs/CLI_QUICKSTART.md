@@ -570,7 +570,7 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-draft-style-check demo_project <check_id>
 ```
 
-This is local only. It compares draft statistics against the latest self-style baseline unless `--baseline-id` is provided. It does not call Providers, return draft text, create revision requests, auto-revise, auto-commit, or update Memory Bank/RAG/export.
+This is local only. It compares draft statistics against the latest self-style baseline unless `--baseline-id` is provided. Use `--scene-mode exposition`, `--scene-mode battle`, `--scene-mode climax`, `--scene-mode daily`, `--scene-mode romance`, or `--scene-mode transition` when a chapter intentionally differs from the average. The result is a calibrated hint, not a strict grade. It does not call Providers, return draft text, create revision requests, auto-revise, auto-commit, or update Memory Bank/RAG/export.
 
 ## Safety And Cleanup Policy
 

@@ -268,7 +268,7 @@ Returns one style baseline artifact.
 
 Metadata-only. Must not return confirmed chapter text, prompt text, external corpus text, or plaintext secrets.
 
-### check_draft_style(project_id, draft_id, baseline_id="")
+### check_draft_style(project_id, draft_id, baseline_id="", scene_mode="general")
 
 Creates a local metadata-only style check comparing one draft to a self-style baseline.
 
@@ -280,6 +280,21 @@ data/style_checks_index.json
 ```
 
 If `baseline_id` is empty, the latest self-style baseline is used.
+
+Supported scene modes:
+
+```text
+general
+daily
+romance
+battle
+climax
+exposition
+transition
+custom
+```
+
+Style checks are hints, not pass/fail grading. `scene_mode` adjusts tolerance so deliberately different chapters, such as exposition, battle, climax, daily, romance, or transition chapters, are not forced toward the global average.
 
 Checks may include:
 

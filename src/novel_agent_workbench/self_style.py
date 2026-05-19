@@ -15,6 +15,7 @@ STYLE_BASELINES_INDEX_FILENAME = "style_baselines_index.json"
 STYLE_CHECKS_DIRNAME = "style_checks"
 STYLE_CHECKS_INDEX_FILENAME = "style_checks_index.json"
 SENTENCE_RE = re.compile(r"[^。！？!?\.]+[。！？!?\.]?")
+SCENE_MODES = {"general", "daily", "romance", "battle", "climax", "exposition", "transition", "custom"}
 
 
 class SelfStyleBaselineError(RuntimeError):
@@ -38,10 +39,12 @@ class DraftStyleCheckResult:
     check_id: str
     draft_id: str
     baseline_id: str
+    scene_mode: str
     created_at: str
     path: str
     status: str
     issue_count: int
+    hint_count: int
     checks: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
@@ -157,17 +160,30 @@ class SelfStyleBaselineService:
             return artifact
         raise SelfStyleBaselineError(f"Style baseline not found: {baseline_id}")
 
-    def check_draft_against_baseline(self, draft_id: str, *, baseline_id: str = "") -> DraftStyleCheckResult:
+    def check_draft_against_baseline(
+        self,
+        draft_id: str,
+        *,
+        baseline_id: str = "",
+        scene_mode: str = "general",
+    ) -> DraftStyleCheckResult:
         self.store.initialize()
         with self.store.lock():
+            mode = normalize_scene_mode(scene_mode)
             baseline = self.read_baseline(baseline_id or self._latest_baseline_id())
             draft = DraftGenerationService(self.store).read_draft(draft_id)
             content = str(draft.get("content") or "")
             draft_metrics = analyze_text(content)
             baseline_metrics = baseline.get("metrics") if isinstance(baseline.get("metrics"), dict) else {}
-            checks = compare_metrics(draft_metrics, baseline_metrics)
-            issue_count = sum(1 for item in checks if item.get("status") != "within_range")
-            status = "within_baseline" if issue_count == 0 else "needs_attention"
+            checks = compare_metrics(draft_metrics, baseline_metrics, scene_mode=mode)
+            issue_count = sum(1 for item in checks if item.get("severity") == "warning")
+            hint_count = sum(1 for item in checks if item.get("severity") == "hint")
+            if issue_count:
+                status = "needs_attention"
+            elif hint_count:
+                status = "style_hints"
+            else:
+                status = "within_baseline"
             created_at = utc_stamp()
             check_id = f"{created_at}_{uuid4().hex[:12]}"
             artifact_path = self.checks_dir / f"{safe_filename(check_id)}.json"
@@ -187,9 +203,12 @@ class SelfStyleBaselineService:
                     "created_at": str(baseline.get("created_at") or ""),
                     "chapter_count": baseline_metrics.get("chapter_count"),
                 },
+                "scene_mode": mode,
+                "calibration": scene_mode_policy(mode),
                 "draft_metrics": public_draft_metrics_summary(draft_metrics),
                 "checks": checks,
                 "issue_count": issue_count,
+                "hint_count": hint_count,
                 "safety": {
                     "local_only": True,
                     "provider_called": False,
@@ -211,7 +230,9 @@ class SelfStyleBaselineService:
                 "chapter_id": str(draft.get("chapter_id") or ""),
                 "title": str(draft.get("title") or ""),
                 "baseline_id": str(baseline.get("baseline_id") or ""),
+                "scene_mode": mode,
                 "issue_count": issue_count,
+                "hint_count": hint_count,
                 "path": str(artifact_path.relative_to(self.store.root)),
                 "safety": artifact["safety"],
             }
@@ -220,10 +241,12 @@ class SelfStyleBaselineService:
                 check_id=check_id,
                 draft_id=str(draft.get("draft_id") or draft_id),
                 baseline_id=str(baseline.get("baseline_id") or ""),
+                scene_mode=mode,
                 created_at=created_at,
                 path=str(artifact_path),
                 status=status,
                 issue_count=issue_count,
+                hint_count=hint_count,
                 checks=checks,
             )
 
@@ -384,91 +407,171 @@ def public_draft_metrics_summary(metrics: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def compare_metrics(draft_metrics: dict[str, Any], baseline_metrics: dict[str, Any]) -> list[dict[str, Any]]:
+def compare_metrics(
+    draft_metrics: dict[str, Any],
+    baseline_metrics: dict[str, Any],
+    *,
+    scene_mode: str = "general",
+) -> list[dict[str, Any]]:
+    mode = normalize_scene_mode(scene_mode)
     checks = [
         compare_distribution_metric(
             "nonspace_chars",
             "chapter length",
             float(draft_metrics.get("nonspace_char_count") or 0),
             baseline_metrics.get("nonspace_chars"),
+            scene_mode=mode,
         ),
         compare_distribution_metric(
             "paragraphs_per_chapter",
             "paragraph count",
             float(draft_metrics.get("paragraph_count") or 0),
             baseline_metrics.get("paragraphs_per_chapter"),
+            scene_mode=mode,
         ),
         compare_distribution_metric(
             "sentences_per_chapter",
             "sentence count",
             float(draft_metrics.get("sentence_count") or 0),
             baseline_metrics.get("sentences_per_chapter"),
+            scene_mode=mode,
         ),
         compare_distribution_metric(
             "dialogue_line_ratio",
             "dialogue line ratio",
             float(draft_metrics.get("dialogue_line_ratio") or 0),
             baseline_metrics.get("dialogue_line_ratio"),
+            scene_mode=mode,
         ),
         compare_distribution_metric(
             "avg_sentence_chars",
             "average sentence length",
             float(draft_metrics.get("avg_sentence_chars") or 0),
             baseline_metrics.get("avg_sentence_chars"),
+            scene_mode=mode,
         ),
         compare_distribution_metric(
             "avg_paragraph_chars",
             "average paragraph length",
             float(draft_metrics.get("avg_paragraph_chars") or 0),
             baseline_metrics.get("avg_paragraph_chars"),
+            scene_mode=mode,
         ),
     ]
     punctuation = draft_metrics.get("punctuation_per_1000_chars")
     baseline_punctuation = baseline_metrics.get("punctuation_per_1000_chars")
     if isinstance(punctuation, dict) and isinstance(baseline_punctuation, dict):
         for key in ("cn_question", "cn_exclamation", "ellipsis", "dash", "colon"):
-            checks.append(compare_point_metric(f"punctuation.{key}", key, punctuation.get(key), baseline_punctuation.get(key)))
+            checks.append(
+                compare_point_metric(
+                    f"punctuation.{key}",
+                    key,
+                    punctuation.get(key),
+                    baseline_punctuation.get(key),
+                    scene_mode=mode,
+                )
+            )
     return checks
 
 
-def compare_distribution_metric(metric_id: str, label: str, value: float, baseline: object) -> dict[str, Any]:
+def compare_distribution_metric(
+    metric_id: str,
+    label: str,
+    value: float,
+    baseline: object,
+    *,
+    scene_mode: str,
+) -> dict[str, Any]:
     if not isinstance(baseline, dict) or not baseline:
         return unavailable_check(metric_id, label, value)
     p25 = float(baseline.get("p25") or 0)
     median = float(baseline.get("median") or 0)
     p75 = float(baseline.get("p75") or 0)
+    policy = scene_mode_policy(scene_mode)
+    lower_multiplier = tolerance_multiplier(policy, metric_id, "lower")
+    upper_multiplier = tolerance_multiplier(policy, metric_id, "upper")
+    minimum_span = 0.05 if "ratio" in metric_id else 1.0
+    span = max(p75 - p25, abs(median) * 0.15, minimum_span)
+    hard_low = max(0.0, p25 - span * lower_multiplier)
+    hard_high = p75 + span * upper_multiplier
     status = "within_range"
+    severity = "info"
     if value < p25:
-        status = "low"
+        status = "soft_low"
+        severity = "hint"
     elif value > p75:
+        status = "soft_high"
+        severity = "hint"
+    if value < hard_low:
+        status = "low"
+        severity = "warning"
+    elif value > hard_high:
         status = "high"
+        severity = "warning"
     return {
         "metric_id": metric_id,
         "label": label,
         "value": safe_round(value, digits=3),
-        "baseline": {"p25": p25, "median": median, "p75": p75},
+        "baseline": {
+            "p25": p25,
+            "median": median,
+            "p75": p75,
+            "hard_low": safe_round(hard_low, digits=3),
+            "hard_high": safe_round(hard_high, digits=3),
+        },
+        "scene_mode": scene_mode,
         "status": status,
-        "severity": "info" if status == "within_range" else "warning",
+        "severity": severity,
         "delta_from_median": safe_round(value - median, digits=3),
     }
 
 
-def compare_point_metric(metric_id: str, label: str, value: object, baseline: object) -> dict[str, Any]:
+def compare_point_metric(
+    metric_id: str,
+    label: str,
+    value: object,
+    baseline: object,
+    *,
+    scene_mode: str,
+) -> dict[str, Any]:
     numeric_value = float(value or 0)
     numeric_baseline = float(baseline or 0)
-    tolerance = max(1.0, numeric_baseline * 0.5)
+    policy = scene_mode_policy(scene_mode)
+    lower_multiplier = tolerance_multiplier(policy, metric_id, "lower")
+    upper_multiplier = tolerance_multiplier(policy, metric_id, "upper")
+    base_tolerance = max(1.0, numeric_baseline * 0.5)
+    soft_low = max(0.0, numeric_baseline - base_tolerance)
+    soft_high = numeric_baseline + base_tolerance
+    hard_low = max(0.0, numeric_baseline - base_tolerance * lower_multiplier)
+    hard_high = numeric_baseline + base_tolerance * upper_multiplier
     status = "within_range"
-    if numeric_value < numeric_baseline - tolerance:
+    severity = "info"
+    if numeric_value < soft_low:
+        status = "soft_low"
+        severity = "hint"
+    elif numeric_value > soft_high:
+        status = "soft_high"
+        severity = "hint"
+    if numeric_value < hard_low:
         status = "low"
-    elif numeric_value > numeric_baseline + tolerance:
+        severity = "warning"
+    elif numeric_value > hard_high:
         status = "high"
+        severity = "warning"
     return {
         "metric_id": metric_id,
         "label": label,
         "value": safe_round(numeric_value, digits=3),
-        "baseline": {"target": safe_round(numeric_baseline, digits=3), "tolerance": safe_round(tolerance, digits=3)},
+        "baseline": {
+            "target": safe_round(numeric_baseline, digits=3),
+            "soft_low": safe_round(soft_low, digits=3),
+            "soft_high": safe_round(soft_high, digits=3),
+            "hard_low": safe_round(hard_low, digits=3),
+            "hard_high": safe_round(hard_high, digits=3),
+        },
+        "scene_mode": scene_mode,
         "status": status,
-        "severity": "info" if status == "within_range" else "warning",
+        "severity": severity,
         "delta_from_target": safe_round(numeric_value - numeric_baseline, digits=3),
     }
 
@@ -482,6 +585,82 @@ def unavailable_check(metric_id: str, label: str, value: float) -> dict[str, Any
         "status": "baseline_unavailable",
         "severity": "warning",
     }
+
+
+def normalize_scene_mode(value: str) -> str:
+    mode = str(value or "general").strip().lower().replace("-", "_")
+    if mode not in SCENE_MODES:
+        raise SelfStyleBaselineError(f"Unsupported scene_mode: {value!r}")
+    return mode
+
+
+def scene_mode_policy(scene_mode: str) -> dict[str, Any]:
+    mode = normalize_scene_mode(scene_mode)
+    policy: dict[str, Any] = {
+        "scene_mode": mode,
+        "meaning": "local style check hints only; not a pass/fail grade",
+        "default_lower_multiplier": 1.75,
+        "default_upper_multiplier": 1.75,
+        "metric_multipliers": {},
+    }
+    if mode == "daily":
+        policy["metric_multipliers"] = {
+            "dialogue_line_ratio": {"upper": 3.0},
+            "avg_paragraph_chars": {"lower": 2.2},
+        }
+    elif mode == "romance":
+        policy["metric_multipliers"] = {
+            "dialogue_line_ratio": {"lower": 2.4, "upper": 2.4},
+            "avg_sentence_chars": {"upper": 2.4},
+            "avg_paragraph_chars": {"upper": 2.6},
+            "punctuation.ellipsis": {"upper": 2.5},
+        }
+    elif mode == "battle":
+        policy["metric_multipliers"] = {
+            "nonspace_chars": {"lower": 2.8},
+            "avg_sentence_chars": {"lower": 3.0},
+            "avg_paragraph_chars": {"lower": 3.0},
+            "punctuation.cn_exclamation": {"upper": 3.0},
+            "punctuation.dash": {"upper": 2.5},
+        }
+    elif mode == "climax":
+        policy["metric_multipliers"] = {
+            "nonspace_chars": {"lower": 2.4, "upper": 2.4},
+            "avg_sentence_chars": {"lower": 2.8},
+            "avg_paragraph_chars": {"lower": 2.6},
+            "punctuation.cn_exclamation": {"upper": 3.2},
+            "punctuation.ellipsis": {"upper": 2.4},
+            "punctuation.dash": {"upper": 2.4},
+        }
+    elif mode == "exposition":
+        policy["metric_multipliers"] = {
+            "dialogue_line_ratio": {"lower": 6.0},
+            "avg_sentence_chars": {"upper": 3.0},
+            "avg_paragraph_chars": {"upper": 3.2},
+            "paragraphs_per_chapter": {"lower": 2.5},
+        }
+    elif mode == "transition":
+        policy["metric_multipliers"] = {
+            "nonspace_chars": {"lower": 3.5},
+            "paragraphs_per_chapter": {"lower": 2.5},
+            "sentences_per_chapter": {"lower": 2.5},
+        }
+    elif mode == "custom":
+        policy["default_lower_multiplier"] = 2.5
+        policy["default_upper_multiplier"] = 2.5
+    return policy
+
+
+def tolerance_multiplier(policy: dict[str, Any], metric_id: str, side: str) -> float:
+    default_key = "default_lower_multiplier" if side == "lower" else "default_upper_multiplier"
+    value = float(policy.get(default_key) or 1.75)
+    metric_multipliers = policy.get("metric_multipliers")
+    if not isinstance(metric_multipliers, dict):
+        return value
+    item = metric_multipliers.get(metric_id)
+    if isinstance(item, dict) and side in item:
+        return float(item[side])
+    return value
 
 
 def split_paragraphs(text: str) -> list[str]:

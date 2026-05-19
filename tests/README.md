@@ -212,6 +212,7 @@ Draft style check tests currently cover:
 - creating `data/style_checks/*.json` and `data/style_checks_index.json`,
 - defaulting to the latest self-style baseline,
 - comparing draft metrics against baseline ranges without storing draft text,
+- scene-mode calibration such as `exposition` downgrading low-dialogue findings from warning to hint,
 - rejection when no self-style baseline exists,
 - no confirmed chapter, Memory Bank, RAG, export, Provider, or revision side effects,
 - project state `draft_style_check_count` and `latest_draft_style_check`,

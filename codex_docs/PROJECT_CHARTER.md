@@ -428,6 +428,14 @@ check-draft-style + data/style_checks/*.json + local baseline comparison.
 
 Draft style checks must compare one draft to a self-style baseline using local statistics only. They may read draft text in memory to calculate metrics, but persistent artifacts must contain only numeric checks and issue metadata. They must not store draft text, prompt text, generated content, confirmed chapter text, external corpus text, raw Provider responses, or plaintext secrets. They must not call Providers, create revision requests, auto-revise, auto-commit, or update Memory Bank/RAG/export.
 
+MVP-16.6 style check calibration slice:
+
+```text
+scene_mode + hint/warning calibration + no strict average forcing.
+```
+
+Draft style checks must support chapter modes so daily, romance, battle, climax, exposition, and transition chapters can intentionally deviate from the global average. Ordinary deviations should become hints. Only calibrated extreme deviations should become warnings. This calibration must not call Providers, mutate drafts, create revision requests, auto-commit, or update Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

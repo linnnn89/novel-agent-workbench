@@ -135,12 +135,42 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
 
             self.assertEqual(result.draft_id, draft.draft_id)
             self.assertEqual(artifact["baseline"]["baseline_id"], baseline.baseline_id)
+            self.assertEqual(artifact["scene_mode"], "general")
             self.assertGreaterEqual(len(artifact["checks"]), 1)
-            self.assertIn(result.status, {"within_baseline", "needs_attention"})
+            self.assertIn(result.status, {"within_baseline", "style_hints", "needs_attention"})
             self.assertNotIn("风格检查草稿", artifact_text)
             self.assertNotIn("private style check prompt", artifact_text)
             self.assertFalse(artifact["safety"]["provider_called"])
             self.assertFalse(artifact["safety"]["auto_commit"])
+
+    def test_scene_mode_calibrates_soft_and_hard_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            baseline = service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private scene mode prompt")
+            )
+            replace_draft_text(store, draft.draft_id, "设定说明章。\n这里没有对白，只有连续说明。\n世界规则和背景被缓慢铺开。")
+
+            general = service.check_draft_against_baseline(
+                draft.draft_id,
+                baseline_id=baseline.baseline_id,
+                scene_mode="general",
+            )
+            exposition = service.check_draft_against_baseline(
+                draft.draft_id,
+                baseline_id=baseline.baseline_id,
+                scene_mode="exposition",
+            )
+            general_dialogue = check_by_metric(general.checks, "dialogue_line_ratio")
+            exposition_dialogue = check_by_metric(exposition.checks, "dialogue_line_ratio")
+
+            self.assertEqual(general.scene_mode, "general")
+            self.assertEqual(exposition.scene_mode, "exposition")
+            self.assertEqual(general_dialogue["severity"], "warning")
+            self.assertEqual(exposition_dialogue["severity"], "hint")
+            self.assertEqual(exposition_dialogue["status"], "soft_low")
 
     def test_check_draft_style_uses_latest_baseline_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -215,6 +245,7 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
             draft = app.generate_draft("demo", chapter_id="chapter_003", prompt="private facade style prompt")
 
             check = app.check_draft_style("demo", draft["draft_id"])
+            exposition_check = app.check_draft_style("demo", draft["draft_id"], scene_mode="exposition")
             checks = app.list_draft_style_checks("demo")
             read = app.read_draft_style_check("demo", check["check_id"])
             stdout = capture_stdout(
@@ -232,8 +263,9 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
             )
 
             self.assertEqual(checks[0]["check_id"], check["check_id"])
+            self.assertEqual(exposition_check["scene_mode"], "exposition")
             self.assertEqual(read["check_id"], check["check_id"])
-            self.assertEqual(state["draft_style_check_count"], 1)
+            self.assertEqual(state["draft_style_check_count"], 2)
             self.assertNotIn("private facade style prompt", combined)
             self.assertNotIn("MOCK writer", combined)
 
@@ -284,6 +316,13 @@ def replace_draft_text(store: ProjectStore, draft_id: str, text: str) -> None:
             store.write_json(str(item["path"]), draft)
             return
     raise AssertionError(f"Missing draft: {draft_id}")
+
+
+def check_by_metric(checks: list[dict[str, object]], metric_id: str) -> dict[str, object]:
+    for item in checks:
+        if item.get("metric_id") == metric_id:
+            return item
+    raise AssertionError(f"Missing check metric: {metric_id}")
 
 
 def capture_stdout(argv: list[str]) -> str:

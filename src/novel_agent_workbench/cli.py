@@ -96,6 +96,11 @@ def build_parser() -> argparse.ArgumentParser:
     check_draft_style.add_argument("project_id")
     check_draft_style.add_argument("draft_id")
     check_draft_style.add_argument("--baseline-id", default="")
+    check_draft_style.add_argument(
+        "--scene-mode",
+        default="general",
+        choices=["general", "daily", "romance", "battle", "climax", "exposition", "transition", "custom"],
+    )
 
     list_draft_style_checks = subparsers.add_parser("list-draft-style-checks")
     list_draft_style_checks.add_argument("project_id")
@@ -429,7 +434,12 @@ def run_command(args: argparse.Namespace) -> Any:
     if command == "read-self-style-baseline":
         return app.read_self_style_baseline(args.project_id, args.baseline_id)
     if command == "check-draft-style":
-        return app.check_draft_style(args.project_id, args.draft_id, baseline_id=args.baseline_id)
+        return app.check_draft_style(
+            args.project_id,
+            args.draft_id,
+            baseline_id=args.baseline_id,
+            scene_mode=args.scene_mode,
+        )
     if command == "list-draft-style-checks":
         return app.list_draft_style_checks(args.project_id)
     if command == "read-draft-style-check":

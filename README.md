@@ -103,6 +103,7 @@ MVP-0 first storage slice is implemented:
 - MVP-15.5 Prepublish Readiness Check that scans the publishable source tree plus runtime projects for secrets, environment files, corpus samples, and audit blockers before GitHub publication.
 - MVP-16 Self Style Baseline that creates local metadata-only style statistics from the project's own confirmed chapters, with no external corpus, no Provider call, and no stored chapter text.
 - MVP-16.5 Draft vs Self Style Check that compares one draft to a self-style baseline using local statistics only, without storing draft text or triggering revision/commit.
+- MVP-16.6 Style Check Calibration that treats draft style checks as scene-mode-aware hints rather than strict pass/fail grading.
 - Unit tests.
 
 Verification command:

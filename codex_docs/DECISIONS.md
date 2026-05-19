@@ -509,3 +509,11 @@ Decision: Add a local draft-vs-baseline style check before any LLM-based style r
 Reason: The project can already calculate its own style baseline from confirmed chapters. The safest next step is a deterministic local comparison of one draft against that baseline, producing actionable metadata without model cost or content leakage.
 
 Impact: `SelfStyleBaselineService.check_draft_against_baseline(...)`, `check-draft-style`, `list-draft-style-checks`, and `read-draft-style-check` write/read `data/style_checks/*.json` plus `data/style_checks_index.json`. Checks compare draft statistics against baseline ranges for length, paragraph/sentence structure, dialogue ratio, and selected punctuation frequency. They do not store draft text, prompt text, generated content, raw Provider responses, external corpus text, or plaintext secrets. They do not call Providers, create revision requests, auto-revise drafts, auto-commit drafts, create confirmed chapters, or update Memory Bank/RAG/export.
+
+## 2026-05-19: MVP-16.6 Style Check Calibration
+
+Decision: Treat draft style checks as scene-mode-aware hints, not strict pass/fail grading.
+
+Reason: Long-form chapters naturally vary. Daily, romance, battle, climax, exposition, and transition chapters should not be forced to match the global average for dialogue ratio, sentence length, punctuation, or chapter length.
+
+Impact: `check-draft-style` accepts `scene_mode` / `--scene-mode` with `general`, `daily`, `romance`, `battle`, `climax`, `exposition`, `transition`, and `custom`. P25-P75 deviations become `hint`; only calibrated extreme deviations become `warning`. Mode policies widen tolerance for intentional differences, such as low-dialogue exposition chapters or high-intensity battle/climax punctuation. The check remains local-only and still does not store draft text, call Providers, create revision requests, auto-revise, auto-commit, or update Memory Bank/RAG/export.
