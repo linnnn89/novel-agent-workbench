@@ -227,7 +227,9 @@ Style suggestion tests currently cover:
 
 - creating `data/style_suggestions/*.json` and `data/style_suggestions_index.json`,
 - converting warning/hint metadata into manual suggestions without storing draft text,
-- facade and CLI commands `create-style-suggestion`, `list-style-suggestions`, and `read-style-suggestion`,
+- facade and CLI commands `create-style-suggestion`, `list-style-suggestions`, `read-style-suggestion`, and `decide-style-suggestion`,
+- explicit manual decisions `accepted`, `ignored`, and `needs_manual_rewrite`,
+- duplicate decision rejection,
 - project state `style_suggestion_count` and `latest_style_suggestion`,
 - audit rejection if a suggestion artifact stores text fields,
 - no draft mutation, auto revision, auto commit, Memory Bank, RAG, export, Provider, or confirmed chapter side effects.

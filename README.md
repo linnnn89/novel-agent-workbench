@@ -106,6 +106,7 @@ MVP-0 first storage slice is implemented:
 - MVP-16.6 Style Check Calibration that treats draft style checks as scene-mode-aware hints rather than strict pass/fail grading.
 - MVP-16.7 Style Check Policy Toggles that make style checks, calibration, and hint display configurable, with future UI placement recorded as the draft review side panel.
 - MVP-16.8 Style Suggestion Artifact that converts a style check into metadata-only manual suggestions, without modifying drafts or creating revision requests.
+- MVP-16.9 Manual Suggestion Decision that records explicit operator decisions on style suggestions without applying edits automatically.
 - Unit tests.
 
 Verification command:

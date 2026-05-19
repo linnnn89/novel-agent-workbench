@@ -80,6 +80,7 @@ from .self_style import (
     SelfStyleBaselineError,
     SelfStyleBaselineResult,
     SelfStyleBaselineService,
+    StyleSuggestionDecisionResult,
 )
 from .storage import InvalidProjectIdError, ProjectLockError, ProjectRegistry, ProjectStore, StorageError
 
@@ -101,6 +102,7 @@ __all__ = [
     "ProjectStore",
     "DraftStyleCheckResult",
     "DraftStyleSuggestionResult",
+    "StyleSuggestionDecisionResult",
     "SelfStyleBaselineError",
     "SelfStyleBaselineResult",
     "SelfStyleBaselineService",

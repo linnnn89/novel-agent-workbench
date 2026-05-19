@@ -588,9 +588,10 @@ Create manual style suggestions from a style check:
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-style-suggestion demo_project <check_id>
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-style-suggestions demo_project
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-style-suggestion demo_project <suggestion_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test decide-style-suggestion demo_project <suggestion_id> --decision ignored --reason-code scene_intentional
 ```
 
-This converts warning/hint metadata into manual advice. It does not edit the draft, create a revision request, call Providers, auto-commit, or update Memory Bank/RAG/export. Suggestions are generic metric-level guidance and must not contain draft text, prompt text, generated content, or plaintext secrets.
+This converts warning/hint metadata into manual advice, then lets the operator record a decision: `accepted`, `ignored`, or `needs_manual_rewrite`. Decisions update only metadata. They do not edit the draft, create a revision request, call Providers, auto-commit, or update Memory Bank/RAG/export. Suggestions and decisions are generic metric-level metadata and must not contain draft text, prompt text, generated content, or plaintext secrets.
 
 ## Safety And Cleanup Policy
 

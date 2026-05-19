@@ -370,6 +370,29 @@ Returns one style suggestion artifact.
 
 Metadata-only. Must not return draft text, prompt text, generated content, or plaintext secrets.
 
+### decide_style_suggestion(project_id, suggestion_id, decision, reason_code="")
+
+Records an explicit manual decision on a style suggestion.
+
+Supported decisions:
+
+```text
+accepted
+ignored
+needs_manual_rewrite
+```
+
+The method updates only:
+
+```text
+data/style_suggestions/*.json
+data/style_suggestions_index.json
+```
+
+`reason_code` is a short ASCII code, not free-form prose. This method must not accept or persist draft text, prompt text, generated content, or plaintext secrets.
+
+This method must not apply edits, mutate draft content, create revision requests, auto-revise drafts, auto-commit drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports. A style suggestion can be decided only once.
+
 ### project_state(project_id)
 
 Returns safe public project state.

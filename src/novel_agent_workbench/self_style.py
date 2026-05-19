@@ -19,6 +19,7 @@ STYLE_SUGGESTIONS_INDEX_FILENAME = "style_suggestions_index.json"
 SENTENCE_RE = re.compile(r"[^。！？!?\.]+[。！？!?\.]?")
 SCENE_MODES = {"general", "daily", "romance", "battle", "climax", "exposition", "transition", "custom"}
 STYLE_CHECK_POLICY_PATH = ("context_policy", "style_check_policy")
+STYLE_SUGGESTION_DECISIONS = {"accepted", "ignored", "needs_manual_rewrite"}
 
 
 class SelfStyleBaselineError(RuntimeError):
@@ -64,6 +65,20 @@ class DraftStyleSuggestionResult:
     path: str
     status: str
     suggestion_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class StyleSuggestionDecisionResult:
+    suggestion_id: str
+    check_id: str
+    draft_id: str
+    chapter_id: str
+    decision: str
+    reason_code: str
+    decided_at: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -362,6 +377,7 @@ class SelfStyleBaselineService:
                     "auto_revision_request": False,
                     "auto_commit": False,
                 },
+                "decision": pending_style_suggestion_decision(),
                 "safety": {
                     "local_only": True,
                     "provider_called": False,
@@ -390,6 +406,7 @@ class SelfStyleBaselineService:
                 "title": str(draft.get("title") or ""),
                 "scene_mode": str(check.get("scene_mode") or ""),
                 "suggestion_count": len(suggestions),
+                "decision": pending_style_suggestion_decision(),
                 "path": str(artifact_path.relative_to(self.store.root)),
                 "safety": artifact["safety"],
             }
@@ -430,6 +447,42 @@ class SelfStyleBaselineService:
             return artifact
         raise SelfStyleBaselineError(f"Style suggestion not found: {suggestion_id}")
 
+    def decide_style_suggestion(
+        self,
+        suggestion_id: str,
+        *,
+        decision: str,
+        reason_code: str = "",
+    ) -> StyleSuggestionDecisionResult:
+        self.store.initialize()
+        with self.store.lock():
+            decision = validate_style_suggestion_decision(decision)
+            reason_code = validate_style_suggestion_reason_code(reason_code)
+            entry = self._suggestion_index_entry(suggestion_id)
+            artifact = self.read_style_suggestion(suggestion_id)
+            existing = artifact.get("decision") if isinstance(artifact.get("decision"), dict) else {}
+            if str(existing.get("status") or "pending") != "pending":
+                raise SelfStyleBaselineError(f"Style suggestion already has a manual decision: {suggestion_id}")
+            decided_at = utc_stamp()
+            decision_summary = {
+                "status": decision,
+                "reason_code": reason_code,
+                "decided_at": decided_at,
+            }
+            artifact["decision"] = decision_summary
+            self.store.write_json(str(entry["path"]), artifact)
+            self._update_suggestion_index_decision(suggestion_id, decision_summary)
+            draft = artifact.get("draft") if isinstance(artifact.get("draft"), dict) else {}
+            return StyleSuggestionDecisionResult(
+                suggestion_id=suggestion_id,
+                check_id=str(artifact.get("check_id") or entry.get("check_id") or ""),
+                draft_id=str(draft.get("draft_id") or entry.get("draft_id") or ""),
+                chapter_id=str(draft.get("chapter_id") or entry.get("chapter_id") or ""),
+                decision=decision,
+                reason_code=reason_code,
+                decided_at=decided_at,
+            )
+
     def _confirmed_chapter_records(self) -> list[dict[str, Any]]:
         service = DraftGenerationService(self.store)
         records: list[dict[str, Any]] = []
@@ -461,6 +514,23 @@ class SelfStyleBaselineService:
     def _append_suggestion_index_entry(self, entry: dict[str, Any]) -> None:
         items = self.list_style_suggestions()
         items.append(entry)
+        self.store.write_json(
+            self.suggestions_index_path,
+            {"schema_version": 1, "style_suggestions": items},
+        )
+
+    def _suggestion_index_entry(self, suggestion_id: str) -> dict[str, Any]:
+        for item in self.list_style_suggestions():
+            if item.get("suggestion_id") == suggestion_id:
+                return item
+        raise SelfStyleBaselineError(f"Style suggestion not found: {suggestion_id}")
+
+    def _update_suggestion_index_decision(self, suggestion_id: str, decision: dict[str, Any]) -> None:
+        items = []
+        for item in self.list_style_suggestions():
+            if item.get("suggestion_id") == suggestion_id:
+                item = {**item, "decision": decision}
+            items.append(item)
         self.store.write_json(
             self.suggestions_index_path,
             {"schema_version": 1, "style_suggestions": items},
@@ -681,6 +751,28 @@ def build_style_suggestions(checks: list[object]) -> list[dict[str, Any]]:
             }
         )
     return suggestions
+
+
+def pending_style_suggestion_decision() -> dict[str, str]:
+    return {"status": "pending", "reason_code": "", "decided_at": ""}
+
+
+def validate_style_suggestion_decision(decision: str) -> str:
+    value = str(decision or "").strip()
+    if value not in STYLE_SUGGESTION_DECISIONS:
+        raise SelfStyleBaselineError(f"Invalid style suggestion decision: {decision!r}")
+    return value
+
+
+def validate_style_suggestion_reason_code(reason_code: str) -> str:
+    value = str(reason_code or "").strip()
+    if not value:
+        return ""
+    if len(value) > 80:
+        raise SelfStyleBaselineError("reason_code is too long.")
+    if not all(character.isascii() and (character.isalnum() or character in {"_", "-"}) for character in value):
+        raise SelfStyleBaselineError("reason_code must use ASCII letters, numbers, '_' or '-'.")
+    return value
 
 
 def suggestion_direction(status: str) -> str:

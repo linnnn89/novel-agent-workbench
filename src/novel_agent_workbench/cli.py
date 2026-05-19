@@ -127,6 +127,16 @@ def build_parser() -> argparse.ArgumentParser:
     read_style_suggestion.add_argument("project_id")
     read_style_suggestion.add_argument("suggestion_id")
 
+    decide_style_suggestion = subparsers.add_parser("decide-style-suggestion")
+    decide_style_suggestion.add_argument("project_id")
+    decide_style_suggestion.add_argument("suggestion_id")
+    decide_style_suggestion.add_argument(
+        "--decision",
+        required=True,
+        choices=["accepted", "ignored", "needs_manual_rewrite"],
+    )
+    decide_style_suggestion.add_argument("--reason-code", default="")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -471,6 +481,13 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_style_suggestions(args.project_id)
     if command == "read-style-suggestion":
         return app.read_style_suggestion(args.project_id, args.suggestion_id)
+    if command == "decide-style-suggestion":
+        return app.decide_style_suggestion(
+            args.project_id,
+            args.suggestion_id,
+            decision=args.decision,
+            reason_code=args.reason_code,
+        )
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":

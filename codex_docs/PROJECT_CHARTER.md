@@ -452,6 +452,14 @@ create-style-suggestion + data/style_suggestions/*.json + manual metric-level su
 
 Style suggestions must be generated from existing style-check metadata only. They may contain metric IDs, severity, direction, and generic manual advice, but must not contain draft text, prompt text, generated content, confirmed chapter text, external corpus text, raw Provider responses, or plaintext secrets. They must not call Providers, modify drafts, create revision requests, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
 
+MVP-16.9 manual style suggestion decision slice:
+
+```text
+decide-style-suggestion + one-time decision metadata.
+```
+
+Manual style suggestion decisions must support `accepted`, `ignored`, and `needs_manual_rewrite`. They must update only the style suggestion artifact and index metadata. They must not apply edits, mutate drafts, create revision requests, call Providers, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

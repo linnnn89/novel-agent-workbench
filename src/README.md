@@ -59,5 +59,6 @@ Current safety hardening:
 - draft style checks compare one draft to a self-style baseline with local metrics only. They are scene-mode-aware hints, not strict grades. They store issue metadata, not draft text, and they do not auto-revise, auto-commit, or update Memory Bank/RAG/export.
 - style check policy lives in `config.json` under `context_policy.style_check_policy`, so the future UI can disable style checks, disable calibration, hide hints, and keep auto-revision off.
 - style suggestions convert a style check into manual advice metadata under `data/style_suggestions/`. They do not call Providers, read external corpora, modify drafts, create revision requests, commit chapters, or update Memory Bank/RAG/export.
+- manual style suggestion decisions update only the suggestion artifact/index `decision` metadata. They do not apply edits, create revision requests, mutate drafts, commit chapters, or update Memory Bank/RAG/export.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.

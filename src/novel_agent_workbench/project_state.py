@@ -322,6 +322,7 @@ def safe_style_suggestion_summary(item: dict[str, Any] | None) -> dict[str, Any]
         "title": item.get("title"),
         "scene_mode": item.get("scene_mode"),
         "suggestion_count": item.get("suggestion_count"),
+        "decision": item.get("decision") if isinstance(item.get("decision"), dict) else {},
         "safety": item.get("safety") if isinstance(item.get("safety"), dict) else {},
     }
 

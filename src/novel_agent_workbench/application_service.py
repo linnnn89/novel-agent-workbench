@@ -165,6 +165,20 @@ class WorkbenchApplicationService:
     def read_style_suggestion(self, project_id: str, suggestion_id: str) -> dict[str, Any]:
         return SelfStyleBaselineService(self._open_store(project_id)).read_style_suggestion(suggestion_id)
 
+    def decide_style_suggestion(
+        self,
+        project_id: str,
+        suggestion_id: str,
+        *,
+        decision: str,
+        reason_code: str = "",
+    ) -> dict[str, Any]:
+        return SelfStyleBaselineService(self._open_store(project_id)).decide_style_suggestion(
+            suggestion_id,
+            decision=decision,
+            reason_code=reason_code,
+        ).to_dict()
+
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))
 

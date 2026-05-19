@@ -533,3 +533,11 @@ Decision: Convert style-check findings into manual suggestion artifacts before a
 Rationale: A style check can identify metric-level drift, but applying changes automatically would be too aggressive because scenes intentionally vary by mode. Suggestions should therefore be review aids that tell the operator what to inspect, not instructions that mutate drafts.
 
 Impact: `SelfStyleBaselineService.create_style_suggestion(...)`, `create-style-suggestion`, `list-style-suggestions`, and `read-style-suggestion` write/read `data/style_suggestions/*.json` plus `data/style_suggestions_index.json`. Suggestions are generated from style-check metadata only. They do not store draft text, prompt text, generated content, raw Provider responses, external corpus text, or plaintext secrets. They do not call Providers, modify drafts, create revision requests, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
+## 2026-05-19: MVP-16.9 Manual Suggestion Decision
+
+Decision: Add explicit one-time operator decisions for style suggestion artifacts.
+
+Rationale: Style suggestions should support human workflow tracking without silently becoming rewrite instructions. The operator can mark suggestions as accepted, ignored, or needing manual rewrite, while the system still avoids automatic draft mutation.
+
+Impact: `SelfStyleBaselineService.decide_style_suggestion(...)` and `decide-style-suggestion` update only the style suggestion artifact and index `decision` metadata. Supported decisions are `accepted`, `ignored`, and `needs_manual_rewrite`. Duplicate decisions are rejected. Decision reason is a short ASCII `reason_code`, not free-form text. This path does not apply edits, create revision requests, call Providers, auto-revise, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
