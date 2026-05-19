@@ -268,6 +268,46 @@ Returns one style baseline artifact.
 
 Metadata-only. Must not return confirmed chapter text, prompt text, external corpus text, or plaintext secrets.
 
+### check_draft_style(project_id, draft_id, baseline_id="")
+
+Creates a local metadata-only style check comparing one draft to a self-style baseline.
+
+Writes:
+
+```text
+data/style_checks/*.json
+data/style_checks_index.json
+```
+
+If `baseline_id` is empty, the latest self-style baseline is used.
+
+Checks may include:
+
+```text
+chapter length vs baseline P25/P50/P75
+paragraph count vs baseline P25/P50/P75
+sentence count vs baseline P25/P50/P75
+dialogue-line ratio vs baseline P25/P50/P75
+average sentence and paragraph length
+selected punctuation frequency
+```
+
+This method reads draft text in memory only. Persistent artifacts must not store draft text, prompt text, confirmed chapter text, external corpus text, raw Provider responses, or plaintext secrets.
+
+This method must not call Providers, create drafts, create confirmed chapters, create revision requests, auto-revise drafts, auto-commit drafts, update Memory Bank, update RAG, or create exports.
+
+### list_draft_style_checks(project_id)
+
+Returns draft style check index metadata.
+
+Metadata-only. Must not return draft text, prompt text, generated content, or plaintext secrets.
+
+### read_draft_style_check(project_id, check_id)
+
+Returns one draft style check artifact.
+
+Metadata-only. Must not return draft text, prompt text, generated content, or plaintext secrets.
+
 ### project_state(project_id)
 
 Returns safe public project state.
@@ -287,6 +327,7 @@ corpus_boundary_count
 corpus_profile_count
 corpus_sample_count
 self_style_baseline_count
+draft_style_check_count
 formal_context_plan_count
 formal_context_task_count
 memory_apply_preview_count
@@ -303,6 +344,7 @@ latest_corpus_boundary
 latest_corpus_profile
 latest_corpus_sample
 latest_self_style_baseline
+latest_draft_style_check
 latest_formal_context_plan
 latest_formal_context_task
 latest_memory_apply_preview

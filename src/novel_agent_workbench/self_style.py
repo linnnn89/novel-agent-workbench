@@ -12,6 +12,8 @@ from .storage import ProjectStore, safe_filename, utc_stamp
 
 STYLE_BASELINES_DIRNAME = "style_baselines"
 STYLE_BASELINES_INDEX_FILENAME = "style_baselines_index.json"
+STYLE_CHECKS_DIRNAME = "style_checks"
+STYLE_CHECKS_INDEX_FILENAME = "style_checks_index.json"
 SENTENCE_RE = re.compile(r"[^。！？!?\.]+[。！？!?\.]?")
 
 
@@ -31,6 +33,21 @@ class SelfStyleBaselineResult:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class DraftStyleCheckResult:
+    check_id: str
+    draft_id: str
+    baseline_id: str
+    created_at: str
+    path: str
+    status: str
+    issue_count: int
+    checks: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class SelfStyleBaselineService:
     """Create metadata-only style baselines from confirmed chapters."""
 
@@ -44,6 +61,14 @@ class SelfStyleBaselineService:
     @property
     def index_path(self) -> Path:
         return self.store.data_dir / STYLE_BASELINES_INDEX_FILENAME
+
+    @property
+    def checks_dir(self) -> Path:
+        return self.store.data_dir / STYLE_CHECKS_DIRNAME
+
+    @property
+    def checks_index_path(self) -> Path:
+        return self.store.data_dir / STYLE_CHECKS_INDEX_FILENAME
 
     def create_baseline(self) -> SelfStyleBaselineResult:
         self.store.initialize()
@@ -132,6 +157,98 @@ class SelfStyleBaselineService:
             return artifact
         raise SelfStyleBaselineError(f"Style baseline not found: {baseline_id}")
 
+    def check_draft_against_baseline(self, draft_id: str, *, baseline_id: str = "") -> DraftStyleCheckResult:
+        self.store.initialize()
+        with self.store.lock():
+            baseline = self.read_baseline(baseline_id or self._latest_baseline_id())
+            draft = DraftGenerationService(self.store).read_draft(draft_id)
+            content = str(draft.get("content") or "")
+            draft_metrics = analyze_text(content)
+            baseline_metrics = baseline.get("metrics") if isinstance(baseline.get("metrics"), dict) else {}
+            checks = compare_metrics(draft_metrics, baseline_metrics)
+            issue_count = sum(1 for item in checks if item.get("status") != "within_range")
+            status = "within_baseline" if issue_count == 0 else "needs_attention"
+            created_at = utc_stamp()
+            check_id = f"{created_at}_{uuid4().hex[:12]}"
+            artifact_path = self.checks_dir / f"{safe_filename(check_id)}.json"
+            artifact = {
+                "schema_version": 1,
+                "check_id": check_id,
+                "status": status,
+                "created_at": created_at,
+                "draft": {
+                    "draft_id": str(draft.get("draft_id") or draft_id),
+                    "chapter_id": str(draft.get("chapter_id") or ""),
+                    "title": str(draft.get("title") or ""),
+                    "draft_status": str(draft.get("status") or ""),
+                },
+                "baseline": {
+                    "baseline_id": str(baseline.get("baseline_id") or ""),
+                    "created_at": str(baseline.get("created_at") or ""),
+                    "chapter_count": baseline_metrics.get("chapter_count"),
+                },
+                "draft_metrics": public_draft_metrics_summary(draft_metrics),
+                "checks": checks,
+                "issue_count": issue_count,
+                "safety": {
+                    "local_only": True,
+                    "provider_called": False,
+                    "external_corpus_used": False,
+                    "draft_text_stored": False,
+                    "baseline_text_stored": False,
+                    "prompt_text_stored": False,
+                    "secret_text_stored": False,
+                    "auto_revision": False,
+                    "auto_commit": False,
+                },
+            }
+            self.store.write_json(artifact_path, artifact)
+            entry = {
+                "check_id": check_id,
+                "status": status,
+                "created_at": created_at,
+                "draft_id": str(draft.get("draft_id") or draft_id),
+                "chapter_id": str(draft.get("chapter_id") or ""),
+                "title": str(draft.get("title") or ""),
+                "baseline_id": str(baseline.get("baseline_id") or ""),
+                "issue_count": issue_count,
+                "path": str(artifact_path.relative_to(self.store.root)),
+                "safety": artifact["safety"],
+            }
+            self._append_check_index_entry(entry)
+            return DraftStyleCheckResult(
+                check_id=check_id,
+                draft_id=str(draft.get("draft_id") or draft_id),
+                baseline_id=str(baseline.get("baseline_id") or ""),
+                created_at=created_at,
+                path=str(artifact_path),
+                status=status,
+                issue_count=issue_count,
+                checks=checks,
+            )
+
+    def list_style_checks(self) -> list[dict[str, Any]]:
+        index = self.store.read_json(self.checks_index_path, default={"schema_version": 1, "style_checks": []})
+        if not isinstance(index, dict):
+            return []
+        items = index.get("style_checks")
+        if not isinstance(items, list):
+            return []
+        return [item for item in items if isinstance(item, dict)]
+
+    def read_style_check(self, check_id: str) -> dict[str, Any]:
+        for item in self.list_style_checks():
+            if item.get("check_id") != check_id:
+                continue
+            path = item.get("path")
+            if not isinstance(path, str):
+                raise SelfStyleBaselineError(f"Style check index entry has no path: {check_id}")
+            artifact = self.store.read_json(path, default=None)
+            if not isinstance(artifact, dict):
+                raise SelfStyleBaselineError(f"Style check artifact is missing or invalid: {check_id}")
+            return artifact
+        raise SelfStyleBaselineError(f"Style check not found: {check_id}")
+
     def _confirmed_chapter_records(self) -> list[dict[str, Any]]:
         service = DraftGenerationService(self.store)
         records: list[dict[str, Any]] = []
@@ -154,6 +271,21 @@ class SelfStyleBaselineService:
         items = self.list_baselines()
         items.append(entry)
         self.store.write_json(self.index_path, {"schema_version": 1, "style_baselines": items})
+
+    def _append_check_index_entry(self, entry: dict[str, Any]) -> None:
+        items = self.list_style_checks()
+        items.append(entry)
+        self.store.write_json(self.checks_index_path, {"schema_version": 1, "style_checks": items})
+
+    def _latest_baseline_id(self) -> str:
+        baselines = self.list_baselines()
+        if not baselines:
+            raise SelfStyleBaselineError("At least one self style baseline is required.")
+        latest = max(baselines, key=lambda item: str(item.get("created_at") or ""))
+        baseline_id = str(latest.get("baseline_id") or "")
+        if not baseline_id:
+            raise SelfStyleBaselineError("Latest self style baseline has no baseline_id.")
+        return baseline_id
 
 
 def analyze_text(text: str) -> dict[str, Any]:
@@ -235,6 +367,120 @@ def public_metrics_summary(metrics: dict[str, Any]) -> dict[str, Any]:
         "punctuation_per_1000_chars": metrics.get("punctuation_per_1000_chars")
         if isinstance(metrics.get("punctuation_per_1000_chars"), dict)
         else {},
+    }
+
+
+def public_draft_metrics_summary(metrics: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "nonspace_char_count": metrics.get("nonspace_char_count"),
+        "paragraph_count": metrics.get("paragraph_count"),
+        "sentence_count": metrics.get("sentence_count"),
+        "dialogue_line_ratio": metrics.get("dialogue_line_ratio"),
+        "avg_sentence_chars": metrics.get("avg_sentence_chars"),
+        "avg_paragraph_chars": metrics.get("avg_paragraph_chars"),
+        "punctuation_per_1000_chars": metrics.get("punctuation_per_1000_chars")
+        if isinstance(metrics.get("punctuation_per_1000_chars"), dict)
+        else {},
+    }
+
+
+def compare_metrics(draft_metrics: dict[str, Any], baseline_metrics: dict[str, Any]) -> list[dict[str, Any]]:
+    checks = [
+        compare_distribution_metric(
+            "nonspace_chars",
+            "chapter length",
+            float(draft_metrics.get("nonspace_char_count") or 0),
+            baseline_metrics.get("nonspace_chars"),
+        ),
+        compare_distribution_metric(
+            "paragraphs_per_chapter",
+            "paragraph count",
+            float(draft_metrics.get("paragraph_count") or 0),
+            baseline_metrics.get("paragraphs_per_chapter"),
+        ),
+        compare_distribution_metric(
+            "sentences_per_chapter",
+            "sentence count",
+            float(draft_metrics.get("sentence_count") or 0),
+            baseline_metrics.get("sentences_per_chapter"),
+        ),
+        compare_distribution_metric(
+            "dialogue_line_ratio",
+            "dialogue line ratio",
+            float(draft_metrics.get("dialogue_line_ratio") or 0),
+            baseline_metrics.get("dialogue_line_ratio"),
+        ),
+        compare_distribution_metric(
+            "avg_sentence_chars",
+            "average sentence length",
+            float(draft_metrics.get("avg_sentence_chars") or 0),
+            baseline_metrics.get("avg_sentence_chars"),
+        ),
+        compare_distribution_metric(
+            "avg_paragraph_chars",
+            "average paragraph length",
+            float(draft_metrics.get("avg_paragraph_chars") or 0),
+            baseline_metrics.get("avg_paragraph_chars"),
+        ),
+    ]
+    punctuation = draft_metrics.get("punctuation_per_1000_chars")
+    baseline_punctuation = baseline_metrics.get("punctuation_per_1000_chars")
+    if isinstance(punctuation, dict) and isinstance(baseline_punctuation, dict):
+        for key in ("cn_question", "cn_exclamation", "ellipsis", "dash", "colon"):
+            checks.append(compare_point_metric(f"punctuation.{key}", key, punctuation.get(key), baseline_punctuation.get(key)))
+    return checks
+
+
+def compare_distribution_metric(metric_id: str, label: str, value: float, baseline: object) -> dict[str, Any]:
+    if not isinstance(baseline, dict) or not baseline:
+        return unavailable_check(metric_id, label, value)
+    p25 = float(baseline.get("p25") or 0)
+    median = float(baseline.get("median") or 0)
+    p75 = float(baseline.get("p75") or 0)
+    status = "within_range"
+    if value < p25:
+        status = "low"
+    elif value > p75:
+        status = "high"
+    return {
+        "metric_id": metric_id,
+        "label": label,
+        "value": safe_round(value, digits=3),
+        "baseline": {"p25": p25, "median": median, "p75": p75},
+        "status": status,
+        "severity": "info" if status == "within_range" else "warning",
+        "delta_from_median": safe_round(value - median, digits=3),
+    }
+
+
+def compare_point_metric(metric_id: str, label: str, value: object, baseline: object) -> dict[str, Any]:
+    numeric_value = float(value or 0)
+    numeric_baseline = float(baseline or 0)
+    tolerance = max(1.0, numeric_baseline * 0.5)
+    status = "within_range"
+    if numeric_value < numeric_baseline - tolerance:
+        status = "low"
+    elif numeric_value > numeric_baseline + tolerance:
+        status = "high"
+    return {
+        "metric_id": metric_id,
+        "label": label,
+        "value": safe_round(numeric_value, digits=3),
+        "baseline": {"target": safe_round(numeric_baseline, digits=3), "tolerance": safe_round(tolerance, digits=3)},
+        "status": status,
+        "severity": "info" if status == "within_range" else "warning",
+        "delta_from_target": safe_round(numeric_value - numeric_baseline, digits=3),
+    }
+
+
+def unavailable_check(metric_id: str, label: str, value: float) -> dict[str, Any]:
+    return {
+        "metric_id": metric_id,
+        "label": label,
+        "value": safe_round(value, digits=3),
+        "baseline": {},
+        "status": "baseline_unavailable",
+        "severity": "warning",
     }
 
 

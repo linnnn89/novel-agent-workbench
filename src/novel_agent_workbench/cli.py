@@ -92,6 +92,18 @@ def build_parser() -> argparse.ArgumentParser:
     read_style_baseline.add_argument("project_id")
     read_style_baseline.add_argument("baseline_id")
 
+    check_draft_style = subparsers.add_parser("check-draft-style")
+    check_draft_style.add_argument("project_id")
+    check_draft_style.add_argument("draft_id")
+    check_draft_style.add_argument("--baseline-id", default="")
+
+    list_draft_style_checks = subparsers.add_parser("list-draft-style-checks")
+    list_draft_style_checks.add_argument("project_id")
+
+    read_draft_style_check = subparsers.add_parser("read-draft-style-check")
+    read_draft_style_check.add_argument("project_id")
+    read_draft_style_check.add_argument("check_id")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -416,6 +428,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_self_style_baselines(args.project_id)
     if command == "read-self-style-baseline":
         return app.read_self_style_baseline(args.project_id, args.baseline_id)
+    if command == "check-draft-style":
+        return app.check_draft_style(args.project_id, args.draft_id, baseline_id=args.baseline_id)
+    if command == "list-draft-style-checks":
+        return app.list_draft_style_checks(args.project_id)
+    if command == "read-draft-style-check":
+        return app.read_draft_style_check(args.project_id, args.check_id)
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":

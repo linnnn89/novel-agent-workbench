@@ -501,3 +501,11 @@ Decision: Build the first style baseline from the user's own confirmed chapters,
 Reason: The user clarified that the practical product need is Memory Bank / own-work style continuity. External TXT novels are useful for parser and quarantine testing, but they must not become the default style source.
 
 Impact: `SelfStyleBaselineService`, `create-self-style-baseline`, `list-self-style-baselines`, and `read-self-style-baseline` write/read `data/style_baselines/*.json` plus `data/style_baselines_index.json`. Baselines include numeric/statistical metrics for chapter length, paragraph count, sentence length, dialogue-line ratio, and punctuation frequency. They do not store confirmed chapter text, prompt text, external corpus text, source paths, raw Provider responses, or plaintext secrets. They do not call Providers, create drafts, create confirmed chapters, update Memory Bank/RAG/export, or read external corpus files.
+
+## 2026-05-19: MVP-16.5 Draft vs Self Style Check
+
+Decision: Add a local draft-vs-baseline style check before any LLM-based style review.
+
+Reason: The project can already calculate its own style baseline from confirmed chapters. The safest next step is a deterministic local comparison of one draft against that baseline, producing actionable metadata without model cost or content leakage.
+
+Impact: `SelfStyleBaselineService.check_draft_against_baseline(...)`, `check-draft-style`, `list-draft-style-checks`, and `read-draft-style-check` write/read `data/style_checks/*.json` plus `data/style_checks_index.json`. Checks compare draft statistics against baseline ranges for length, paragraph/sentence structure, dialogue ratio, and selected punctuation frequency. They do not store draft text, prompt text, generated content, raw Provider responses, external corpus text, or plaintext secrets. They do not call Providers, create revision requests, auto-revise drafts, auto-commit drafts, create confirmed chapters, or update Memory Bank/RAG/export.

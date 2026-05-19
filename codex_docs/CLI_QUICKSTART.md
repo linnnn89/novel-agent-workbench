@@ -562,6 +562,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 This uses only the project's own confirmed chapters. It does not read external reference novels, call Providers, or store chapter text. The output is numeric/statistical metadata for future draft style checks.
 
+Check one draft against the self-style baseline:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test check-draft-style demo_project <draft_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-draft-style-checks demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-draft-style-check demo_project <check_id>
+```
+
+This is local only. It compares draft statistics against the latest self-style baseline unless `--baseline-id` is provided. It does not call Providers, return draft text, create revision requests, auto-revise, auto-commit, or update Memory Bank/RAG/export.
+
 ## Safety And Cleanup Policy
 
 Do not hard delete real project files during early MVP.

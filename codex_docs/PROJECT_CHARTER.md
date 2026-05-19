@@ -420,6 +420,14 @@ create-self-style-baseline + data/style_baselines/*.json + own confirmed chapter
 
 Self style baselines must use only the project's confirmed chapters. They may read confirmed chapter text in memory to calculate statistics, but persistent artifacts must contain only numeric/statistical metadata. They must not store chapter text, prompt text, external corpus text, source paths, raw Provider responses, or plaintext secrets. They must not call Providers or update drafts/confirmed chapters/Memory Bank/RAG/export.
 
+MVP-16.5 draft vs self style check slice:
+
+```text
+check-draft-style + data/style_checks/*.json + local baseline comparison.
+```
+
+Draft style checks must compare one draft to a self-style baseline using local statistics only. They may read draft text in memory to calculate metrics, but persistent artifacts must contain only numeric checks and issue metadata. They must not store draft text, prompt text, generated content, confirmed chapter text, external corpus text, raw Provider responses, or plaintext secrets. They must not call Providers, create revision requests, auto-revise, auto-commit, or update Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

@@ -119,6 +119,124 @@ class SelfStyleBaselineServiceTest(unittest.TestCase):
             self.assertNotIn("自有正文第一章", combined)
             self.assertNotIn("private baseline prompt", combined)
 
+    def test_check_draft_style_creates_metadata_only_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            baseline = service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", title="Three", prompt="private style check prompt")
+            )
+            replace_draft_text(store, draft.draft_id, "风格检查草稿。\n\n这是一个特别长特别长特别长特别长的段落。")
+
+            result = service.check_draft_against_baseline(draft.draft_id, baseline_id=baseline.baseline_id)
+            artifact = service.read_style_check(result.check_id)
+            artifact_text = Path(result.path).read_text(encoding="utf-8")
+
+            self.assertEqual(result.draft_id, draft.draft_id)
+            self.assertEqual(artifact["baseline"]["baseline_id"], baseline.baseline_id)
+            self.assertGreaterEqual(len(artifact["checks"]), 1)
+            self.assertIn(result.status, {"within_baseline", "needs_attention"})
+            self.assertNotIn("风格检查草稿", artifact_text)
+            self.assertNotIn("private style check prompt", artifact_text)
+            self.assertFalse(artifact["safety"]["provider_called"])
+            self.assertFalse(artifact["safety"]["auto_commit"])
+
+    def test_check_draft_style_uses_latest_baseline_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            first = service.create_baseline()
+            second = service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private latest baseline prompt")
+            )
+
+            result = service.check_draft_against_baseline(draft.draft_id)
+
+            self.assertNotEqual(first.baseline_id, second.baseline_id)
+            self.assertEqual(result.baseline_id, second.baseline_id)
+
+    def test_check_draft_style_requires_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private no baseline prompt")
+            )
+
+            with self.assertRaises(SelfStyleBaselineError):
+                SelfStyleBaselineService(store).check_draft_against_baseline(draft.draft_id)
+
+            self.assertFalse((store.data_dir / "style_checks").exists())
+
+    def test_check_draft_style_has_no_formal_context_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private side effect prompt")
+            )
+            memory_before = store.data_file_path("memory_bank.json").read_text(encoding="utf-8")
+            export_before = store.data_file_path("export_settings.json").read_text(encoding="utf-8")
+            confirmed_before = len(DraftGenerationService(store).list_confirmed_chapters())
+
+            service.check_draft_against_baseline(draft.draft_id)
+
+            self.assertEqual(memory_before, store.data_file_path("memory_bank.json").read_text(encoding="utf-8"))
+            self.assertEqual(export_before, store.data_file_path("export_settings.json").read_text(encoding="utf-8"))
+            self.assertEqual(confirmed_before, len(DraftGenerationService(store).list_confirmed_chapters()))
+            self.assertFalse((store.root / "rag").exists())
+            self.assertFalse((store.root / "exports").exists())
+
+    def test_audit_rejects_style_check_with_text_field(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = configured_store_with_confirmed_chapters(temp)
+            service = SelfStyleBaselineService(store)
+            service.create_baseline()
+            draft = DraftGenerationService(store).generate_draft(
+                DraftGenerationRequest(chapter_id="chapter_003", prompt="private audit check prompt")
+            )
+            result = service.check_draft_against_baseline(draft.draft_id)
+            artifact = service.read_style_check(result.check_id)
+            artifact["prompt"] = "should not be stored"
+            store.write_json(str(Path(result.path).relative_to(store.root)), artifact)
+
+            audit = audit_project(store)
+            codes = {item["code"] for item in audit["findings"]}
+
+            self.assertIn("draft_style_check_text_stored", codes)
+
+    def test_facade_and_cli_style_check_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            configured_store_with_confirmed_chapters(temp)
+            app = WorkbenchApplicationService.open(Path(temp))
+            app.create_self_style_baseline("demo")
+            draft = app.generate_draft("demo", chapter_id="chapter_003", prompt="private facade style prompt")
+
+            check = app.check_draft_style("demo", draft["draft_id"])
+            checks = app.list_draft_style_checks("demo")
+            read = app.read_draft_style_check("demo", check["check_id"])
+            stdout = capture_stdout(
+                [
+                    "--projects-root",
+                    temp,
+                    "list-draft-style-checks",
+                    "demo",
+                ]
+            )
+            state = app.project_state("demo")
+            combined = json.dumps(
+                {"check": check, "checks": checks, "read": read, "stdout": stdout, "state": state},
+                ensure_ascii=False,
+            )
+
+            self.assertEqual(checks[0]["check_id"], check["check_id"])
+            self.assertEqual(read["check_id"], check["check_id"])
+            self.assertEqual(state["draft_style_check_count"], 1)
+            self.assertNotIn("private facade style prompt", combined)
+            self.assertNotIn("MOCK writer", combined)
+
 
 def configured_store_with_confirmed_chapters(temp: str) -> ProjectStore:
     store = ProjectStore.open(Path(temp), "demo")
@@ -155,6 +273,17 @@ def replace_confirmed_text(store: ProjectStore, chapter_id: str, text: str) -> N
             store.write_json(str(item["path"]), chapter)
             return
     raise AssertionError(f"Missing confirmed chapter: {chapter_id}")
+
+
+def replace_draft_text(store: ProjectStore, draft_id: str, text: str) -> None:
+    service = DraftGenerationService(store)
+    draft = service.read_draft(draft_id)
+    draft["content"] = text
+    for item in service.list_drafts():
+        if item.get("draft_id") == draft_id:
+            store.write_json(str(item["path"]), draft)
+            return
+    raise AssertionError(f"Missing draft: {draft_id}")
 
 
 def capture_stdout(argv: list[str]) -> str:

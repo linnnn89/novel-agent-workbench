@@ -74,7 +74,7 @@ from .revision_candidates import (
     RevisionCandidateSummary,
 )
 from .revisions import RevisionRequestError, RevisionRequestResult, RevisionRequestService
-from .self_style import SelfStyleBaselineError, SelfStyleBaselineResult, SelfStyleBaselineService
+from .self_style import DraftStyleCheckResult, SelfStyleBaselineError, SelfStyleBaselineResult, SelfStyleBaselineService
 from .storage import InvalidProjectIdError, ProjectLockError, ProjectRegistry, ProjectStore, StorageError
 
 __all__ = [
@@ -93,6 +93,7 @@ __all__ = [
     "ProjectLockError",
     "ProjectRegistry",
     "ProjectStore",
+    "DraftStyleCheckResult",
     "SelfStyleBaselineError",
     "SelfStyleBaselineResult",
     "SelfStyleBaselineService",

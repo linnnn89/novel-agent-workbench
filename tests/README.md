@@ -207,6 +207,18 @@ Self style baseline tests currently cover:
 - facade and CLI commands `create-self-style-baseline`, `list-self-style-baselines`, and `read-self-style-baseline`,
 - output excluding confirmed chapter text, prompt text, and plaintext secrets.
 
+Draft style check tests currently cover:
+
+- creating `data/style_checks/*.json` and `data/style_checks_index.json`,
+- defaulting to the latest self-style baseline,
+- comparing draft metrics against baseline ranges without storing draft text,
+- rejection when no self-style baseline exists,
+- no confirmed chapter, Memory Bank, RAG, export, Provider, or revision side effects,
+- project state `draft_style_check_count` and `latest_draft_style_check`,
+- audit rejection if a style check artifact stores text fields,
+- facade and CLI commands `check-draft-style`, `list-draft-style-checks`, and `read-draft-style-check`,
+- output excluding draft text, prompt text, generated content, and plaintext secrets.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

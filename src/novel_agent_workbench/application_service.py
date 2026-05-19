@@ -130,6 +130,18 @@ class WorkbenchApplicationService:
     def read_self_style_baseline(self, project_id: str, baseline_id: str) -> dict[str, Any]:
         return SelfStyleBaselineService(self._open_store(project_id)).read_baseline(baseline_id)
 
+    def check_draft_style(self, project_id: str, draft_id: str, *, baseline_id: str = "") -> dict[str, Any]:
+        return SelfStyleBaselineService(self._open_store(project_id)).check_draft_against_baseline(
+            draft_id,
+            baseline_id=baseline_id,
+        ).to_dict()
+
+    def list_draft_style_checks(self, project_id: str) -> list[dict[str, Any]]:
+        return SelfStyleBaselineService(self._open_store(project_id)).list_style_checks()
+
+    def read_draft_style_check(self, project_id: str, check_id: str) -> dict[str, Any]:
+        return SelfStyleBaselineService(self._open_store(project_id)).read_style_check(check_id)
+
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))
 

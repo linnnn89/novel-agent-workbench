@@ -372,6 +372,55 @@ def audit_self_style_baselines(store: ProjectStore, *, checked_paths: list[str],
                     message="Self style baseline must be local-only and must not use external corpora or Providers.",
                 )
             )
+    audit_draft_style_checks(store, checked_paths=checked_paths, findings=findings)
+
+
+def audit_draft_style_checks(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    check_text_file(
+        store.data_dir / "style_checks_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=[("possible_secret_in_draft_style_check_index", SECRET_PATTERNS)],
+    )
+    checks_dir = store.data_dir / "style_checks"
+    checked_paths.append(str(checks_dir))
+    if not checks_dir.exists():
+        return
+    for path in sorted(checks_dir.glob("*.json")):
+        check_text_file(
+            path,
+            checked_paths=checked_paths,
+            findings=findings,
+            pattern_groups=[("possible_secret_in_draft_style_check", SECRET_PATTERNS)],
+        )
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_self_style_text(artifact):
+            findings.append(
+                AuditFinding(
+                    code="draft_style_check_text_stored",
+                    path=str(path),
+                    message="Draft style check artifacts must store statistics only, not draft/prompt text.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        if safety.get("external_corpus_used") is not False or safety.get("provider_called") is not False:
+            findings.append(
+                AuditFinding(
+                    code="draft_style_check_boundary_invalid",
+                    path=str(path),
+                    message="Draft style check must be local-only and must not use external corpora or Providers.",
+                )
+            )
+        if safety.get("auto_revision") is not False or safety.get("auto_commit") is not False:
+            findings.append(
+                AuditFinding(
+                    code="draft_style_check_side_effect_flag_invalid",
+                    path=str(path),
+                    message="Draft style check must not auto-revise or auto-commit.",
+                )
+            )
 
 
 def contains_forbidden_self_style_text(value: object) -> bool:

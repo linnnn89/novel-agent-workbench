@@ -56,5 +56,6 @@ Current safety hardening:
 - corpus samples are temporary testing artifacts only; they may contain bounded real text, are marked `test_only` and `publish_blocker`, are redacted by default reads, and cause `audit-project` to fail until removed from publishable runtime state.
 - prepublish checks are read-only and scan the source tree plus runtime projects for publish blockers such as secrets, `.env` files, corpus samples, and high-risk audit findings. Provider disabled/missing-secret runtime findings are warnings, not source publication blockers.
 - self style baselines read only confirmed chapters and persist numeric/statistical style metrics. They do not use external corpora, do not call Providers, and do not store chapter text, prompt text, or plaintext secrets.
+- draft style checks compare one draft to a self-style baseline with local metrics only. They store issue metadata, not draft text, and they do not auto-revise, auto-commit, or update Memory Bank/RAG/export.
 
 Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.
