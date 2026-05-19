@@ -493,3 +493,11 @@ Decision: Add a read-only `prepublish-check` gate before any future GitHub publi
 Reason: The project now has user-authorized real corpus sample quarantine and real Provider test history. Publication readiness must be machine-checkable instead of relying on chat memory.
 
 Impact: `publication.py`, `WorkbenchApplicationService.prepublish_check(...)`, and CLI command `prepublish-check` scan the source tree and runtime projects for missing ignore patterns, publishable secret/env files, corpus sample blockers, and high-risk audit findings. Real corpus samples remain blockers. Disabled Provider adapters or missing local runtime secrets are warnings when they do not expose secrets, prompts, or content. The check is read-only and does not call Providers, delete files, or print sample text/secrets.
+
+## 2026-05-19: MVP-16 Self Style Baseline
+
+Decision: Build the first style baseline from the user's own confirmed chapters, not from external reference novels.
+
+Reason: The user clarified that the practical product need is Memory Bank / own-work style continuity. External TXT novels are useful for parser and quarantine testing, but they must not become the default style source.
+
+Impact: `SelfStyleBaselineService`, `create-self-style-baseline`, `list-self-style-baselines`, and `read-self-style-baseline` write/read `data/style_baselines/*.json` plus `data/style_baselines_index.json`. Baselines include numeric/statistical metrics for chapter length, paragraph count, sentence length, dialogue-line ratio, and punctuation frequency. They do not store confirmed chapter text, prompt text, external corpus text, source paths, raw Provider responses, or plaintext secrets. They do not call Providers, create drafts, create confirmed chapters, update Memory Bank/RAG/export, or read external corpus files.

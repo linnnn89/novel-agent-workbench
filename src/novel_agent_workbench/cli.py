@@ -82,6 +82,16 @@ def build_parser() -> argparse.ArgumentParser:
     read_corpus_sample.add_argument("sample_id")
     read_corpus_sample.add_argument("--include-text", action="store_true")
 
+    create_style_baseline = subparsers.add_parser("create-self-style-baseline")
+    create_style_baseline.add_argument("project_id")
+
+    list_style_baselines = subparsers.add_parser("list-self-style-baselines")
+    list_style_baselines.add_argument("project_id")
+
+    read_style_baseline = subparsers.add_parser("read-self-style-baseline")
+    read_style_baseline.add_argument("project_id")
+    read_style_baseline.add_argument("baseline_id")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -400,6 +410,12 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_corpus_samples(args.project_id)
     if command == "read-corpus-sample":
         return app.read_corpus_sample(args.project_id, args.sample_id, include_text=args.include_text)
+    if command == "create-self-style-baseline":
+        return app.create_self_style_baseline(args.project_id)
+    if command == "list-self-style-baselines":
+        return app.list_self_style_baselines(args.project_id)
+    if command == "read-self-style-baseline":
+        return app.read_self_style_baseline(args.project_id, args.baseline_id)
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":

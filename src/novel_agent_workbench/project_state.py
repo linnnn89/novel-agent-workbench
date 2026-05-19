@@ -15,6 +15,7 @@ from .memory_apply_preview import MemoryApplyPreviewService
 from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
 from .reviews import DraftReviewService
 from .revisions import RevisionRequestService
+from .self_style import SelfStyleBaselineService
 from .storage import ProjectStore
 
 
@@ -32,6 +33,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     corpus_boundary_service = CorpusBoundaryService(store)
     corpus_profile_service = CorpusProfileArtifactService(store)
     corpus_sample_service = CorpusSampleService(store)
+    self_style_service = SelfStyleBaselineService(store)
     formal_context_plan_service = FormalContextPlanService(store)
     formal_context_task_service = FormalContextTaskQueueService(store)
     memory_apply_preview_service = MemoryApplyPreviewService(store)
@@ -45,6 +47,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     corpus_boundaries = corpus_boundary_service.list_corpus_boundaries()
     corpus_profiles = corpus_profile_service.list_corpus_profiles()
     corpus_samples = corpus_sample_service.list_corpus_samples()
+    style_baselines = self_style_service.list_baselines()
     formal_context_plans = formal_context_plan_service.list_formal_context_plans()
     formal_context_tasks = formal_context_task_service.list_tasks()
     memory_apply_previews = memory_apply_preview_service.list_memory_apply_previews()
@@ -67,6 +70,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "corpus_boundary_count": len(corpus_boundaries),
         "corpus_profile_count": len(corpus_profiles),
         "corpus_sample_count": len(corpus_samples),
+        "self_style_baseline_count": len(style_baselines),
         "formal_context_plan_count": len(formal_context_plans),
         "formal_context_task_count": len(formal_context_tasks),
         "memory_apply_preview_count": len(memory_apply_previews),
@@ -82,6 +86,7 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "latest_corpus_boundary": safe_corpus_boundary_summary(latest_by(corpus_boundaries, "created_at")),
         "latest_corpus_profile": safe_corpus_profile_summary(latest_by(corpus_profiles, "created_at")),
         "latest_corpus_sample": safe_corpus_sample_summary(latest_by(corpus_samples, "created_at")),
+        "latest_self_style_baseline": safe_self_style_baseline_summary(latest_by(style_baselines, "created_at")),
         "latest_formal_context_plan": safe_formal_context_plan_summary(
             latest_by(formal_context_plans, "created_at")
         ),
@@ -264,6 +269,19 @@ def safe_corpus_sample_summary(item: dict[str, Any] | None) -> dict[str, Any] | 
         "ordinal": item.get("ordinal"),
         "source_sha256": item.get("source_sha256"),
         "char_count": item.get("char_count"),
+    }
+
+
+def safe_self_style_baseline_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "baseline_id": item.get("baseline_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "chapter_count": item.get("chapter_count"),
+        "metrics": item.get("metrics") if isinstance(item.get("metrics"), dict) else {},
+        "safety": item.get("safety") if isinstance(item.get("safety"), dict) else {},
     }
 
 

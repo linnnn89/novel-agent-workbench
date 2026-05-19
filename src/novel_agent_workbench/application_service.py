@@ -35,6 +35,7 @@ from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
 from .reviews import DraftReviewService
 from .revision_candidates import RevisionCandidateService
 from .revisions import RevisionRequestService
+from .self_style import SelfStyleBaselineService
 from .storage import ProjectRegistry, ProjectStore
 
 
@@ -119,6 +120,15 @@ class WorkbenchApplicationService:
 
     def read_corpus_sample(self, project_id: str, sample_id: str, *, include_text: bool = False) -> dict[str, Any]:
         return CorpusSampleService(self._open_store(project_id)).read_corpus_sample(sample_id, include_text=include_text)
+
+    def create_self_style_baseline(self, project_id: str) -> dict[str, Any]:
+        return SelfStyleBaselineService(self._open_store(project_id)).create_baseline().to_dict()
+
+    def list_self_style_baselines(self, project_id: str) -> list[dict[str, Any]]:
+        return SelfStyleBaselineService(self._open_store(project_id)).list_baselines()
+
+    def read_self_style_baseline(self, project_id: str, baseline_id: str) -> dict[str, Any]:
+        return SelfStyleBaselineService(self._open_store(project_id)).read_baseline(baseline_id)
 
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))

@@ -412,6 +412,14 @@ prepublish-check + source tree scan + runtime project audit blocker scan.
 
 Before any GitHub publication, the operator must be able to run one read-only check that catches publishable secrets, `.env` files, missing required ignore patterns, corpus sample artifacts, and high-risk audit leaks. Runtime Provider disabled/missing-secret findings can be warnings when they do not leak sensitive content. The check must not delete files, mutate runtime projects, call Providers, read external corpus text, or print sample text/secrets.
 
+MVP-16 self style baseline slice:
+
+```text
+create-self-style-baseline + data/style_baselines/*.json + own confirmed chapter statistics.
+```
+
+Self style baselines must use only the project's confirmed chapters. They may read confirmed chapter text in memory to calculate statistics, but persistent artifacts must contain only numeric/statistical metadata. They must not store chapter text, prompt text, external corpus text, source paths, raw Provider responses, or plaintext secrets. They must not call Providers or update drafts/confirmed chapters/Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

@@ -197,6 +197,16 @@ Prepublish tests currently cover:
 - CLI command `prepublish-check`,
 - output excluding sample text and plaintext secrets.
 
+Self style baseline tests currently cover:
+
+- creating `data/style_baselines/*.json` and `data/style_baselines_index.json` from confirmed chapters only,
+- local statistics for chapter length, paragraph counts, sentence length, dialogue-line ratio, and punctuation frequency,
+- rejection when no confirmed chapters exist,
+- project state `self_style_baseline_count` and `latest_self_style_baseline`,
+- audit rejection if a baseline artifact stores text fields,
+- facade and CLI commands `create-self-style-baseline`, `list-self-style-baselines`, and `read-self-style-baseline`,
+- output excluding confirmed chapter text, prompt text, and plaintext secrets.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

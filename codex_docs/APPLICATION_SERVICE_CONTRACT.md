@@ -231,6 +231,43 @@ Default output must not include `sample_text`.
 
 With `include_text=true`, this method may return bounded real corpus text for local testing only. This content is non-publishable and must be removed before GitHub publication.
 
+### create_self_style_baseline(project_id)
+
+Creates a local metadata-only style baseline from the project's own confirmed chapters.
+
+Writes:
+
+```text
+data/style_baselines/*.json
+data/style_baselines_index.json
+```
+
+Metrics may include:
+
+```text
+chapter length distributions
+paragraph count distributions
+sentence count and average sentence length
+dialogue-line ratio
+punctuation frequency per 1000 nonspace characters
+```
+
+This method reads confirmed chapter text in memory only. Persistent artifacts must not store chapter text, prompt text, external corpus text, source paths, raw Provider responses, or plaintext secrets.
+
+This method must not read external corpus files, call Providers, create drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
+
+### list_self_style_baselines(project_id)
+
+Returns style baseline index metadata.
+
+Metadata-only. Must not return confirmed chapter text, prompt text, external corpus text, or plaintext secrets.
+
+### read_self_style_baseline(project_id, baseline_id)
+
+Returns one style baseline artifact.
+
+Metadata-only. Must not return confirmed chapter text, prompt text, external corpus text, or plaintext secrets.
+
 ### project_state(project_id)
 
 Returns safe public project state.
@@ -249,6 +286,7 @@ context_preview_count
 corpus_boundary_count
 corpus_profile_count
 corpus_sample_count
+self_style_baseline_count
 formal_context_plan_count
 formal_context_task_count
 memory_apply_preview_count
@@ -264,6 +302,7 @@ latest_context_preview
 latest_corpus_boundary
 latest_corpus_profile
 latest_corpus_sample
+latest_self_style_baseline
 latest_formal_context_plan
 latest_formal_context_task
 latest_memory_apply_preview

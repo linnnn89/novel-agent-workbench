@@ -552,6 +552,16 @@ py -3.13 -m novel_agent_workbench.cli --projects-root I:\AI-NOVEL\novel_agent_wo
 
 This is read-only. It checks required `.gitignore` patterns, publishable source files, runtime project audit findings, and test-only corpus samples. Real corpus samples are blockers until removed or retired from runtime state. Disabled real Provider adapters or missing local Provider secrets may appear as warnings when they do not leak secrets, prompts, or content.
 
+Create a self-style baseline from confirmed chapters:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-self-style-baseline demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-self-style-baselines demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-self-style-baseline demo_project <baseline_id>
+```
+
+This uses only the project's own confirmed chapters. It does not read external reference novels, call Providers, or store chapter text. The output is numeric/statistical metadata for future draft style checks.
+
 ## Safety And Cleanup Policy
 
 Do not hard delete real project files during early MVP.

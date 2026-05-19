@@ -100,6 +100,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     audit_corpus_boundaries(store, checked_paths=checked_paths, findings=findings)
     audit_corpus_profiles(store, checked_paths=checked_paths, findings=findings)
     audit_corpus_samples(store, checked_paths=checked_paths, findings=findings)
+    audit_self_style_baselines(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_memory_apply_previews(store, checked_paths=checked_paths, findings=findings)
@@ -331,6 +332,62 @@ def audit_corpus_samples(store: ProjectStore, *, checked_paths: list[str], findi
                     message="Corpus sample artifact must not store external source paths.",
                 )
             )
+
+
+def audit_self_style_baselines(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    check_text_file(
+        store.data_dir / "style_baselines_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=[("possible_secret_in_self_style_baseline_index", SECRET_PATTERNS)],
+    )
+    baselines_dir = store.data_dir / "style_baselines"
+    checked_paths.append(str(baselines_dir))
+    if not baselines_dir.exists():
+        return
+    for path in sorted(baselines_dir.glob("*.json")):
+        check_text_file(
+            path,
+            checked_paths=checked_paths,
+            findings=findings,
+            pattern_groups=[("possible_secret_in_self_style_baseline", SECRET_PATTERNS)],
+        )
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_self_style_text(artifact):
+            findings.append(
+                AuditFinding(
+                    code="self_style_baseline_text_stored",
+                    path=str(path),
+                    message="Self style baseline artifacts must store statistics only, not chapter/prompt text.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        if safety.get("external_corpus_used") is not False or safety.get("provider_called") is not False:
+            findings.append(
+                AuditFinding(
+                    code="self_style_baseline_boundary_invalid",
+                    path=str(path),
+                    message="Self style baseline must be local-only and must not use external corpora or Providers.",
+                )
+            )
+
+
+def contains_forbidden_self_style_text(value: object) -> bool:
+    forbidden_keys = {"text", "chapter_text", "prompt", "prompt_text", "system_prompt", "excerpt", "sample_text"}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key)
+            if key_text in forbidden_keys and bool(item):
+                return True
+            if key_text.endswith("_text_stored") and item is True:
+                return True
+            if contains_forbidden_self_style_text(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_self_style_text(item) for item in value)
+    return False
 
 
 def audit_formal_context_plans(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
