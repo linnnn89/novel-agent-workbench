@@ -100,6 +100,7 @@ MVP-0 first storage slice is implemented:
 - MVP-13.5 Corpus Profile Artifacts that explicitly save conservative project-local profile metadata while excluding source text, external source paths, and candidate-name text by default.
 - MVP-14 Corpus Boundary Indexes that explicitly save no-text chapter line/character offsets for future manual import planning while excluding heading text, excerpts, and source paths.
 - MVP-15 Corpus Sample Quarantine that can explicitly save bounded real-text samples for local testing only, marks them as `publish_blocker`, and keeps default reads/state/list output text-free.
+- MVP-15.5 Prepublish Readiness Check that scans the publishable source tree plus runtime projects for secrets, environment files, corpus samples, and audit blockers before GitHub publication.
 - Unit tests.
 
 Verification command:

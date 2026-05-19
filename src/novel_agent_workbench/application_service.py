@@ -19,6 +19,7 @@ from .formal_context_tasks import FormalContextTaskQueueService
 from .memory_apply_preview import MemoryApplyPreviewService
 from .memory_bank import MemoryBankService
 from .project_state import public_project_state
+from .publication import prepublish_check
 from .providers import (
     ProviderRequest,
     configure_provider_role,
@@ -62,6 +63,10 @@ class WorkbenchApplicationService:
 
     def list_projects(self) -> list[dict[str, Any]]:
         return self.registry.list_projects()
+
+    def prepublish_check(self, *, repo_root: str | Path | None = None) -> dict[str, Any]:
+        root = Path(repo_root).resolve() if repo_root is not None else Path(__file__).resolve().parents[2]
+        return prepublish_check(root, projects_root=self.registry.projects_root)
 
     def profile_corpus(self, path: str | Path, *, max_name_candidates: int = 20) -> dict[str, Any]:
         return profile_corpus(path, max_name_candidates=max_name_candidates).to_dict()

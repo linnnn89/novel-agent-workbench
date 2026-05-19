@@ -55,6 +55,25 @@ Returns registry entries.
 
 Metadata-only. Must not return prompt text, generated content, or plaintext secrets.
 
+### prepublish_check(repo_root=None)
+
+Runs a read-only publication readiness check for the source tree and configured runtime projects root.
+
+Returns:
+
+```text
+ok
+repo_root
+projects_root
+findings
+checked_paths
+summary
+```
+
+Blocking findings include missing required ignore patterns, publishable secret/env files, real-corpus sample artifacts, and high-risk audit leaks such as secrets, prompt text, content, or corpus sample blockers. Disabled Provider adapters or missing runtime Provider secrets are warnings unless they leak sensitive content.
+
+This method must not modify files, delete files, read external corpus text, call Providers, create drafts, create confirmed chapters, update Memory Bank/RAG/export, or print plaintext secrets/sample text.
+
 ### profile_corpus(path, max_name_candidates=20)
 
 Reads one external text corpus in read-only metadata mode.

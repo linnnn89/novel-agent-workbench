@@ -544,6 +544,14 @@ findings: []
 
 For context-aware drafts, audit validates `context_generation` metadata and drafts index consistency. It does not reject normal draft body text, because draft artifacts are allowed to contain generated content for human review.
 
+Run a repository prepublish check before any GitHub publication:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root I:\AI-NOVEL\novel_agent_workbench\workspace_projects prepublish-check --repo-root I:\AI-NOVEL\novel_agent_workbench
+```
+
+This is read-only. It checks required `.gitignore` patterns, publishable source files, runtime project audit findings, and test-only corpus samples. Real corpus samples are blockers until removed or retired from runtime state. Disabled real Provider adapters or missing local Provider secrets may appear as warnings when they do not leak secrets, prompts, or content.
+
 ## Safety And Cleanup Policy
 
 Do not hard delete real project files during early MVP.

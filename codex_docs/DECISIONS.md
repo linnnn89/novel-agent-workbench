@@ -485,3 +485,11 @@ Decision: Allow bounded real-text corpus samples only as temporary local testing
 Reason: The user allowed storing real corpus-derived content during testing, with the requirement that it be removed before GitHub publication. The code must make that status machine-visible instead of relying on memory.
 
 Impact: `CorpusSampleService`, `create-corpus-sample`, `list-corpus-samples`, and `read-corpus-sample` write/read `data/corpus_samples/*.json` plus `data/corpus_samples_index.json`. Samples require a matching source SHA-256 from a boundary artifact, are bounded to 2000 characters, do not store external source paths, and are marked `test_only=true` and `publish_blocker=true`. Default reads/list/state do not return sample text. `audit-project` fails with `non_publishable_corpus_sample_present` while any sample artifact exists. Samples do not call Providers, create drafts, create confirmed chapters, or update Memory Bank/RAG/export.
+
+## 2026-05-19: MVP-15.5 Prepublish Readiness Check
+
+Decision: Add a read-only `prepublish-check` gate before any future GitHub publication.
+
+Reason: The project now has user-authorized real corpus sample quarantine and real Provider test history. Publication readiness must be machine-checkable instead of relying on chat memory.
+
+Impact: `publication.py`, `WorkbenchApplicationService.prepublish_check(...)`, and CLI command `prepublish-check` scan the source tree and runtime projects for missing ignore patterns, publishable secret/env files, corpus sample blockers, and high-risk audit findings. Real corpus samples remain blockers. Disabled Provider adapters or missing local runtime secrets are warnings when they do not expose secrets, prompts, or content. The check is read-only and does not call Providers, delete files, or print sample text/secrets.

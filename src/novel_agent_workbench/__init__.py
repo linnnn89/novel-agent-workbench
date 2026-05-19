@@ -64,6 +64,7 @@ from .providers import (
     set_model_role_config,
 )
 from .project_state import public_project_state
+from .publication import PrepublishFinding, prepublish_check
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
 from .reviews import DraftReviewError, DraftReviewResult, DraftReviewService, ReviewDecisionResult
 from .revision_candidates import (
@@ -103,6 +104,7 @@ __all__ = [
     "ContextAssemblyDryRunResult",
     "ContextPackagePreviewResult",
     "PromptRenderDryRunResult",
+    "PrepublishFinding",
     "ContextUpdateQueueError",
     "ContextUpdateQueueResult",
     "ContextUpdateQueueService",
@@ -162,6 +164,7 @@ __all__ = [
     "profile_corpus",
     "provider_real_test",
     "provider_status",
+    "prepublish_check",
     "read_provider_call_log",
     "resolve_project_secret",
     "public_project_state",

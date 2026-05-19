@@ -188,6 +188,15 @@ Corpus sample tests currently cover:
 - `audit-project` emitting `non_publishable_corpus_sample_present`,
 - CLI commands `create-corpus-sample`, `list-corpus-samples`, and `read-corpus-sample`.
 
+Prepublish tests currently cover:
+
+- required `.gitignore` publication patterns,
+- repository tree rejection for `secrets.local.json`, `.env*`, and corpus sample paths,
+- runtime project rejection while corpus sample artifacts exist,
+- project audit findings mapped into blockers or warnings,
+- CLI command `prepublish-check`,
+- output excluding sample text and plaintext secrets.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

@@ -37,6 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("list-projects")
 
+    prepublish = subparsers.add_parser("prepublish-check")
+    prepublish.add_argument("--repo-root", default="")
+
     profile_corpus = subparsers.add_parser("profile-corpus")
     profile_corpus.add_argument("path")
     profile_corpus.add_argument("--max-name-candidates", type=int, default=20)
@@ -369,6 +372,8 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.create_project(args.project_id, title=args.title)
     if command == "list-projects":
         return app.list_projects()
+    if command == "prepublish-check":
+        return app.prepublish_check(repo_root=args.repo_root or None)
     if command == "profile-corpus":
         return app.profile_corpus(args.path, max_name_candidates=args.max_name_candidates)
     if command == "save-corpus-profile":

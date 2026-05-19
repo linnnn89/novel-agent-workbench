@@ -404,6 +404,14 @@ create-corpus-sample + data/corpus_samples/*.json + publish_blocker test-only te
 
 Samples may contain bounded real text only during local testing. They must be explicit, bounded, linked to a matching source hash, marked `test_only` and `publish_blocker`, hidden from default state/list/read outputs, and flagged by audit until removed from publishable runtime state. They must not call Providers or update drafts/confirmed chapters/Memory Bank/RAG/export.
 
+MVP-15.5 prepublish readiness slice:
+
+```text
+prepublish-check + source tree scan + runtime project audit blocker scan.
+```
+
+Before any GitHub publication, the operator must be able to run one read-only check that catches publishable secrets, `.env` files, missing required ignore patterns, corpus sample artifacts, and high-risk audit leaks. Runtime Provider disabled/missing-secret findings can be warnings when they do not leak sensitive content. The check must not delete files, mutate runtime projects, call Providers, read external corpus text, or print sample text/secrets.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:
