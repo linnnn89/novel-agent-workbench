@@ -453,3 +453,11 @@ Decision: Extend `audit-project` to validate context-aware draft metadata before
 Reason: Draft artifacts may contain generated content, so audit must not blindly scan every draft body as a leak. The safer boundary is to audit the `context_generation` metadata and drafts index consistency.
 
 Impact: `audit-project` now checks context-aware draft index entries, artifact paths, required `context_generation` metadata, approved mock-only mode, text-safety flags, section-count consistency, forbidden metadata keys, and prompt/secret-like strings inside `context_generation`. It does not treat the normal draft `content` field as an audit failure. This preserves the draft review workflow while catching accidental prompt/context leakage in metadata.
+
+## 2026-05-19: MVP-13 Corpus Profiler
+
+Decision: Add a read-only metadata profiler for external `.txt` novel corpora.
+
+Reason: The project needs to learn structural facts from real long-form web-novel files before building any importer, sampler, or style workflow. The safe first step is corpus profiling that reports counts and distributions only.
+
+Impact: `corpus_profiler.py`, `WorkbenchApplicationService.profile_corpus(...)`, and the `profile-corpus` CLI command can inspect an external text file and return encoding, line/chapter structure, chapter-length distribution, dialogue proxy counts, and rough name candidates. The profiler does not create projects, write artifacts, call Providers, copy source/chapter text, create drafts, create confirmed chapters, or update Memory Bank/RAG/export. Name candidates are heuristic and may include false positives; they are not treated as a character database.

@@ -57,6 +57,27 @@ committed_chapter_count: 1
 
 The JSON output should not contain the original prompt text.
 
+## Corpus Profiler
+
+Profile a local `.txt` corpus without creating project files:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test profile-corpus "T:\path\to\novel.txt" --max-name-candidates 12
+```
+
+This command returns metadata only:
+
+```text
+encoding
+line and chapter counts
+chapter length statistics
+dialogue proxy counts
+rough name candidate frequencies
+safety flags
+```
+
+It does not write project files, call Providers, copy chapter/source text, create drafts, create confirmed chapters, or update Memory Bank/RAG/export. Name candidates are heuristic and may include common-word false positives; do not treat them as a final character list.
+
 ## Step-By-Step Flow
 
 Create a project:

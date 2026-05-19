@@ -37,6 +37,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("list-projects")
 
+    profile_corpus = subparsers.add_parser("profile-corpus")
+    profile_corpus.add_argument("path")
+    profile_corpus.add_argument("--max-name-candidates", type=int, default=20)
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
 
@@ -327,6 +331,8 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.create_project(args.project_id, title=args.title)
     if command == "list-projects":
         return app.list_projects()
+    if command == "profile-corpus":
+        return app.profile_corpus(args.path, max_name_candidates=args.max_name_candidates)
     if command == "state":
         return app.project_state(args.project_id)
     if command == "mark-chapter-planned":

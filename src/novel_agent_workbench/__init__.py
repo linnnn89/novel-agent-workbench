@@ -11,6 +11,7 @@ from .context_assembler import (
 )
 from .context_previews import ContextUpdatePreviewError, ContextUpdatePreviewResult, ContextUpdatePreviewService
 from .context_queue import ContextUpdateQueueError, ContextUpdateQueueResult, ContextUpdateQueueService
+from .corpus_profiler import CorpusProfilerError, CorpusProfileResult, profile_corpus
 from .drafts import (
     DraftCommitResult,
     DraftGenerationError,
@@ -105,6 +106,8 @@ __all__ = [
     "ContextUpdatePreviewError",
     "ContextUpdatePreviewResult",
     "ContextUpdatePreviewService",
+    "CorpusProfilerError",
+    "CorpusProfileResult",
     "audit_project",
     "chutes_generate_once",
     "configure_provider_role",
@@ -144,6 +147,7 @@ __all__ = [
     "get_model_role_config",
     "list_provider_adapters",
     "provider_dry_run",
+    "profile_corpus",
     "provider_real_test",
     "provider_status",
     "read_provider_call_log",

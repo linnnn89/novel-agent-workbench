@@ -9,6 +9,7 @@ from .context_previews import ContextUpdatePreviewService
 from .chapters import ChapterWorkflowService
 from .context_assembler import ContextAssemblerService
 from .context_queue import ContextUpdateQueueService
+from .corpus_profiler import profile_corpus
 from .drafts import DraftGenerationRequest, DraftGenerationService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
@@ -58,6 +59,9 @@ class WorkbenchApplicationService:
 
     def list_projects(self) -> list[dict[str, Any]]:
         return self.registry.list_projects()
+
+    def profile_corpus(self, path: str | Path, *, max_name_candidates: int = 20) -> dict[str, Any]:
+        return profile_corpus(path, max_name_candidates=max_name_candidates).to_dict()
 
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))

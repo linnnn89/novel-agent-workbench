@@ -149,6 +149,15 @@ Mock-only context-aware draft generation tests currently cover:
 - no export folder creation,
 - provider logs, draft artifact, public state, audit, facade output, and CLI output excluding operator prompt text, Memory Bank text, confirmed chapter text, and plaintext secrets.
 
+Corpus profiler tests currently cover:
+
+- GB18030 and UTF-8 text profiling,
+- strict chapter heading counts and chapter-length statistics,
+- dialogue proxy metadata,
+- facade and CLI output remaining metadata-only,
+- no project root creation or project file writes,
+- source heading text and dialogue text excluded from returned JSON.
+
 Formal context task queue tests currently cover:
 
 - creating `data/formal_context_task_queue.json`,

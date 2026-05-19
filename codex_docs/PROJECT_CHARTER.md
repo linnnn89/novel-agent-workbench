@@ -372,6 +372,14 @@ audit-project + context_generation metadata checks + draft index consistency.
 
 Audit must validate context-aware draft metadata before any real Provider uses assembled context. It should check metadata, indexes, and leak-prone fields without treating normal draft body content as an error. It must remain read-only.
 
+MVP-13 corpus profiler slice:
+
+```text
+profile-corpus + read-only metadata statistics for external txt corpora.
+```
+
+Corpus profiling may inspect external `.txt` files and return encoding, structure, chapter-length, dialogue proxy, and rough name-candidate statistics. It must not copy source text into the project, write corpus artifacts, call Providers, generate drafts, update Memory Bank/RAG/export, or create confirmed chapters. Name candidates are heuristic only and require later human or algorithmic validation before any character database is built.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:

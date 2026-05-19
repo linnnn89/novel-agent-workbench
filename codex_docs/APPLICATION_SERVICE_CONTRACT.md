@@ -55,6 +55,26 @@ Returns registry entries.
 
 Metadata-only. Must not return prompt text, generated content, or plaintext secrets.
 
+### profile_corpus(path, max_name_candidates=20)
+
+Reads one external text corpus in read-only metadata mode.
+
+Returns:
+
+```text
+source file metadata
+encoding detection
+line/chapter structure counts
+chapter length statistics
+dialogue proxy counts
+rough name candidate frequencies
+safety flags
+```
+
+This method must not initialize a project root, write project files, call Providers, copy chapter/source text, create drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
+
+Name candidates are frequency heuristics only and may include false positives. They are not a character database.
+
 ### project_state(project_id)
 
 Returns safe public project state.
