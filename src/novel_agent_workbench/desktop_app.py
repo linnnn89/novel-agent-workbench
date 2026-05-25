@@ -196,9 +196,7 @@ SINGLETON_PLANNING_TYPES = {"outline", "world_plan"}
 
 def default_projects_root() -> Path:
     if getattr(sys, "frozen", False):
-        base = os.environ.get("LOCALAPPDATA")
-        root = Path(base) if base else Path.home() / "AppData" / "Local"
-        return root / "NovelAgentWorkbench" / DEFAULT_PROJECTS_DIRNAME
+        return Path(sys.executable).resolve().parent / "用户数据" / DEFAULT_PROJECTS_DIRNAME
     return Path(__file__).resolve().parents[2] / DEFAULT_PROJECTS_DIRNAME
 
 
