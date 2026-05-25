@@ -131,10 +131,10 @@ Audit must not write project files. It should detect obvious confirmed chapter i
 MVP-2 provider adapter skeleton slice:
 
 ```text
-Provider adapter registry + project_secret resolver + disabled real-provider placeholders + provider-status CLI + Provider-aware audit.
+Provider adapter registry + project_secret resolver + HTTP Provider placeholders + provider-status CLI + Provider-aware audit.
 ```
 
-`mock` remains the only enabled adapter. `openai_compatible` and `deepseek` are reserved but disabled and must not send network requests. Real Provider work requires a passing `audit-project` gate and an explicit later decision.
+`mock` remains the no-network local adapter. HTTP Provider adapters must not send network requests from status or dry-run commands. Real Provider work requires a user-triggered generation or connection-test command and a passing `audit-project` gate.
 
 MVP-2 provider config preflight slice:
 
@@ -142,12 +142,12 @@ MVP-2 provider config preflight slice:
 safe Provider config write path + project-local secret write path + masked CLI/status output.
 ```
 
-This allows rehearsal of real Provider setup while adapters remain disabled. It must not turn on HTTP calls or allow generation through real Provider ids.
+This allows rehearsal of real Provider setup. It must not send HTTP calls from configuration or status commands.
 
 MVP-2 provider dry-run adapter slice:
 
 ```text
-disabled real-provider dry-run adapter + OpenAI-compatible safe request summary + provider-dry-run CLI.
+real-provider dry-run adapter + OpenAI-compatible safe request summary + provider-dry-run CLI.
 ```
 
 Dry-run may expose only safe counts and config metadata. It must not expose prompt text, request bodies, API keys, or raw responses, and it must not write preflight logs by default.
@@ -168,21 +168,21 @@ provider-real-test for chutes_openai + safe metadata-only result + no draft/conf
 
 This path may send a real request only after explicit user approval. It must remain separate from normal draft generation.
 
-MVP-2 Chutes controlled real generation gate slice:
+MVP-2 Chutes controlled real generation slice:
 
 ```text
-enable-real-provider / disable-real-provider + chutes_openai writer-only real draft generation + audit leak gate.
+chutes_openai writer-only real draft generation + audit leak checks.
 ```
 
-`chutes_openai` remains disabled in the adapter registry and is not generally enabled. Normal draft generation may use it only when the writer role is configured for Chutes, `settings.real_generation_enabled=true`, the local project secret resolves, and audit has no key/prompt/content leak findings. Real output is written only as a draft artifact and must not auto-commit or update Memory Bank, RAG, or exports.
+Normal draft generation may use `chutes_openai` when the writer role is configured for Chutes, the local project secret resolves, and audit has no key/prompt/content leak findings. Real output is written only as a draft artifact and must not auto-commit or update Memory Bank, RAG, or exports.
 
 MVP-2.5 real Provider runbook slice:
 
 ```text
-chutes-generate-once + audit precheck/postcheck + automatic gate disable + optional secret cleanup.
+chutes-generate-once + audit precheck/postcheck + optional secret cleanup.
 ```
 
-The runbook is the preferred operator path for real Chutes tests. It requires explicit `--allow-network`, returns metadata only, and keeps generated content confined to draft artifacts.
+The runbook is the preferred operator path for real Chutes tests. It returns metadata only and keeps generated content confined to draft artifacts.
 
 MVP-3 chapter workflow slice:
 
@@ -199,6 +199,8 @@ reviews/*.json + reviews_index.json + mock scorer review + review_ready workflow
 ```
 
 Draft Review / Quality Check is backend-only and metadata-only. It may record scores, issues, recommendation, Provider/model/usage, draft id, and chapter id. It must not store draft content, original prompts, raw Provider responses, or plaintext secrets. It must not auto-commit, auto-revise, update Memory Bank, update RAG, create exports, create DOCX, or enable new real Providers.
+
+Manual rewrite submitted draft candidates require an explicit review gate before Draft Review. The accepted gates are a matching `selected_for_review` manual rewrite comparison or a matching `pending_review` handoff. The gate must be checked before any scorer Provider call and must not affect ordinary drafts.
 
 MVP-4 manual review decision slice:
 
@@ -484,6 +486,14 @@ manual rewrite task -> human-submitted draft candidate -> metadata-only comparis
 
 Manual rewrite comparisons must be created only from a task that already has both `draft_id` and `submitted_draft_id`. The comparison artifact may store ids, structural metrics, deltas, link checks, safety flags, and a one-time decision. It must not store source/submitted draft text, prompt text, Provider raw output, or plaintext secrets. It must not call Providers, overwrite drafts, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
 
+MVP-18.5 review handoff slice:
+
+```text
+selected manual rewrite comparison -> metadata-only pending review handoff
+```
+
+Review handoffs must be created only from manual rewrite comparisons explicitly decided as `selected_for_review`. They may store ids, selected draft reference, source decision metadata, pending-review status, and safety flags. They must not store draft text, prompt text, Provider raw output, or plaintext secrets. They must not call Providers, auto-review, overwrite drafts, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
 Do not start MVP-0 with frontend, LLM calls, prompt design, or chapter generation.
 
 MVP-0 verification mode:
@@ -516,6 +526,102 @@ Checkpoint policy:
 
 ```text
 Checkpoints exclude secrets by default. Restore must not hard delete; overwritten files are retired with .trash.
+```
+
+MVP-19 Planning Library slice:
+
+```text
+Planning Library items are manual planning references for local prompt assembly. They may store operator-provided outline/plan text in `data/planning_library.json`, but default state/list/read/context outputs must be metadata-only. Text may be returned only when an explicit include flag is used for human review. Only active and enabled items may enter context selection; inactive or disabled items must be skipped. This slice must not call Providers, create or overwrite drafts, auto-commit, create confirmed chapters, update Memory Bank/RAG/export, create DOCX, or add UI.
+```
+
+MVP-19.5 review-draft guard slice:
+
+```text
+Only submitted manual rewrite draft candidates are guarded. Without a matching `selected_for_review` comparison or `pending_review` handoff, review-draft must fail before writing a review, calling Providers, or changing chapter workflow. Rejected or needs-more-work comparisons are not valid gates. Passing the gate allows the existing metadata-only review path.
+```
+
+MVP-20 final Provider assembly gate slice:
+
+```text
+Final assembly gates are explicit metadata-only approvals for future real context-aware Provider requests. They must be created from the current prompt render dry-run, approved once, and matched against the later request/context/provider hashes before any real context-aware Provider path can proceed. They do not store prompt/context text and do not enable real context-aware generation by themselves.
+```
+
+MVP-20.5 review handoff consumption slice:
+
+```text
+After a selected manual rewrite draft is reviewed through a pending-review handoff, the handoff may be marked `review_created` with the created review id. This is queue metadata only and must not edit drafts, create drafts, auto-commit, create confirmed chapters, update Memory Bank/RAG/export, create DOCX, add UI, or call any Provider beyond the explicit review action.
+```
+
+MVP-21 accepted review commit gate slice:
+
+```text
+Confirmed chapter promotion requires an accepted review for the same draft. Gate failures must be no-side-effect refusals: no confirmed files, no checkpoint, no commit log, no draft status mutation, and no workflow block. Successful commits may record metadata-only commit gate fields.
+```
+
+MVP-22 final Provider runbook slice:
+
+```text
+Final Provider runbooks are metadata-only operator checklists derived from approved final assembly gates. They stop at pending_operator_authorization and must not call real LLMs, write drafts, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or auto-commit.
+```
+
+MVP-23 final Provider authorization checkpoint slice:
+
+```text
+Final Provider authorizations are metadata-only records derived from pending runbooks. They create a no-secrets pre-authorization checkpoint summary and stop at authorized_pending_execution. They must not enable real Providers, call real LLMs, write drafts, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or auto-commit.
+```
+
+MVP-24 final Provider execution preflight verifier slice:
+
+```text
+Final Provider execution preflights verify the gate/runbook/authorization/current-provider chain and record passed or blocked metadata. They are not execution commands and must not enable real Providers, call real LLMs, write drafts, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or auto-commit.
+```
+
+MVP-25 final Provider execution stub / abort gate slice:
+
+```text
+Final Provider execution attempts are a no-network execution rehearsal. They require a passed zero-issue preflight and then fail closed with aborted_real_llm_disabled. They must not enable real Providers, call real LLMs, write drafts, update Memory Bank/RAG/export, create DOCX, add UI, delete files, auto-commit, or start execution. Real Provider execution is handled by the separate explicit real execution path.
+```
+
+MVP-26 final Provider real execution readiness slice:
+
+```text
+Final Provider real execution readiness reports may check an aborted attempt against current Chutes writer config, api_key_ref presence, project-secret presence, and manual authorization requirements. They must not read secret values for use, call real LLMs, write drafts, update Memory Bank/RAG/export, create DOCX, add UI, delete files, auto-commit, or start execution.
+```
+
+MVP-27 final Provider real execution path slice:
+
+```text
+Final Provider real execution may run only after a ready report and approved gate digest match. It may call the writer Provider and write one new draft artifact. It must not auto-commit, create confirmed chapters, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or store prompt/context/generated text in execution metadata.
+```
+
+MVP-28 Provider live smoke-test harness slice:
+
+```text
+Provider connectivity smoke tests are infrastructure checks, not writing tasks. User-triggered runs may call the configured Provider through the safe real-test path, but they must persist only metadata, classify outputs as sample-only/non-committable, and never create drafts, create confirmed chapters, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or store prompt text, response text, raw request bodies, or plaintext secrets.
+```
+
+MVP-29 Provider smoke-test audit gate slice:
+
+```text
+Provider smoke-test artifacts must be audited as durable safety state. audit-project must reject prompt/response/secret text, draft or confirmed-chapter linkage, invalid status, invalid passed/network-attempted state, invalid sample-only/non-committable classification, and invalid safety flags. prepublish-check must treat these smoke-test audit failures as blockers.
+```
+
+MVP-30 Provider config snapshot / drift audit slice:
+
+```text
+New Provider smoke-test artifacts must record a safe config snapshot for provider/model/host/api-key reference without storing key values. audit-project should warn when the latest passed smoke-test snapshot no longer matches the current role config. prepublish-check should surface this drift as a warning, not a blocker.
+```
+
+MVP-31 runtime project health summary and upload ignore guard slice:
+
+```text
+Project health is a metadata-only read model for operator readiness. It may summarize public project state, Provider role config, draft/review/commit counts, latest smoke-test metadata, audit results, and optional prepublish upload readiness. It must not return prompt text, draft/chapter content, Provider responses, raw request bodies, plaintext secrets, secret values, or corpus sample text. Upload readiness must require ignore coverage for runtime projects, local secrets, env files, logs, exports/backups, build artifacts, and coverage artifacts. This slice must not call Providers, clear or rotate keys, write drafts, create confirmed chapters, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or auto-commit.
+```
+
+MVP-32 desktop launcher and Windows EXE packaging slice:
+
+```text
+The desktop launcher is a local-first UI shell over existing backend services. It may select a projects root, list/create projects, run metadata-only project health and prepublish checks, configure model Providers, expose explicit user-triggered model actions, and open local folders. It must not expose hidden/automatic real-LLM execution, call Providers on startup, disable/enable the real Provider safety gate without explicit operator action, update Memory Bank/RAG/export from background flows, create DOCX, auto-commit, delete real files, or modify the old reference project. Windows packaging should use a multi-size `.ico` that includes 256 px and small shell sizes for Win11 display.
 ```
 
 ## Construction Strategy

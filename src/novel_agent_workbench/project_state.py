@@ -9,12 +9,22 @@ from .corpus_boundaries import CorpusBoundaryService
 from .corpus_profiles import CorpusProfileArtifactService
 from .corpus_samples import CorpusSampleService
 from .drafts import DraftGenerationService
+from .final_assembly_gates import FinalAssemblyGateService
+from .final_provider_authorizations import FinalProviderAuthorizationService
+from .final_provider_execution_attempts import FinalProviderExecutionAttemptService
+from .final_provider_execution_preflights import FinalProviderExecutionPreflightService
+from .final_provider_real_executions import FinalProviderRealExecutionService
+from .final_provider_real_execution_readiness import FinalProviderRealExecutionReadinessService
+from .final_provider_runbooks import FinalProviderRunbookService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
 from .manual_rewrite import ManualRewriteTaskService
 from .manual_rewrite_comparison import ManualRewriteComparisonService
 from .memory_apply_preview import MemoryApplyPreviewService
-from .providers import MODEL_ROLES, REAL_GENERATION_FLAG, ProviderConfigError, get_model_role_config
+from .planning_library import normalize_library
+from .provider_smoke_tests import ProviderSmokeTestService
+from .providers import MODEL_ROLES, ProviderConfigError, get_model_role_config, safe_url_host
+from .review_handoffs import ReviewHandoffService
 from .reviews import DraftReviewService
 from .revisions import RevisionRequestService
 from .self_style import SelfStyleBaselineService
@@ -40,7 +50,16 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     formal_context_task_service = FormalContextTaskQueueService(store)
     manual_rewrite_task_service = ManualRewriteTaskService(store)
     manual_rewrite_comparison_service = ManualRewriteComparisonService(store)
+    review_handoff_service = ReviewHandoffService(store)
     memory_apply_preview_service = MemoryApplyPreviewService(store)
+    final_assembly_gate_service = FinalAssemblyGateService(store)
+    final_provider_runbook_service = FinalProviderRunbookService(store)
+    final_provider_authorization_service = FinalProviderAuthorizationService(store)
+    final_provider_execution_preflight_service = FinalProviderExecutionPreflightService(store)
+    final_provider_execution_attempt_service = FinalProviderExecutionAttemptService(store)
+    final_provider_real_execution_readiness_service = FinalProviderRealExecutionReadinessService(store)
+    final_provider_real_execution_service = FinalProviderRealExecutionService(store)
+    provider_smoke_test_service = ProviderSmokeTestService(store)
     drafts = draft_service.list_drafts()
     reviews = review_service.list_reviews()
     revision_requests = revision_request_service.list_revision_requests()
@@ -58,8 +77,19 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
     formal_context_tasks = formal_context_task_service.list_tasks()
     manual_rewrite_tasks = manual_rewrite_task_service.list_tasks()
     manual_rewrite_comparisons = manual_rewrite_comparison_service.list_comparisons()
+    review_handoffs = review_handoff_service.list_handoffs()
     memory_apply_previews = memory_apply_preview_service.list_memory_apply_previews()
+    final_assembly_gates = final_assembly_gate_service.list_gates()
+    final_provider_runbooks = final_provider_runbook_service.list_runbooks()
+    final_provider_authorizations = final_provider_authorization_service.list_authorizations()
+    final_provider_execution_preflights = final_provider_execution_preflight_service.list_preflights()
+    final_provider_execution_attempts = final_provider_execution_attempt_service.list_attempts()
+    final_provider_real_execution_readiness = final_provider_real_execution_readiness_service.list_readiness()
+    final_provider_real_executions = final_provider_real_execution_service.list_executions()
+    provider_smoke_tests = provider_smoke_test_service.list_smoke_tests()
+    planning_items = safe_planning_items(store)
     memory_bank_items = safe_memory_bank_items(store)
+    visible_chapters = visible_chapter_summaries(chapters, drafts, confirmed)
     store_state = store.public_state()
     config = store_state.get("config") if isinstance(store_state.get("config"), dict) else {}
     return {
@@ -85,11 +115,22 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "formal_context_task_count": len(formal_context_tasks),
         "manual_rewrite_task_count": len(manual_rewrite_tasks),
         "manual_rewrite_comparison_count": len(manual_rewrite_comparisons),
+        "review_handoff_count": len(review_handoffs),
         "memory_apply_preview_count": len(memory_apply_previews),
+        "final_assembly_gate_count": len(final_assembly_gates),
+        "final_provider_runbook_count": len(final_provider_runbooks),
+        "final_provider_authorization_count": len(final_provider_authorizations),
+        "final_provider_execution_preflight_count": len(final_provider_execution_preflights),
+        "final_provider_execution_attempt_count": len(final_provider_execution_attempts),
+        "final_provider_real_execution_readiness_count": len(final_provider_real_execution_readiness),
+        "final_provider_real_execution_count": len(final_provider_real_executions),
+        "provider_smoke_test_count": len(provider_smoke_tests),
+        "planning_item_count": len(planning_items),
+        "active_planning_reference_count": sum(1 for item in planning_items if planning_item_active(item)),
         "memory_bank_item_count": len(memory_bank_items),
-        "chapter_count": len(chapters),
+        "chapter_count": len(visible_chapters),
         "committed_chapter_count": len(confirmed),
-        "latest_chapter": safe_chapter_summary(latest_by(chapters, "updated_at")),
+        "latest_chapter": safe_chapter_summary(latest_by(visible_chapters, "updated_at")),
         "latest_draft": safe_draft_summary(latest_by(drafts, "created_at")),
         "latest_review": safe_review_summary(latest_by(reviews, "created_at")),
         "latest_revision_request": safe_revision_request_summary(latest_by(revision_requests, "created_at")),
@@ -113,9 +154,33 @@ def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dic
         "latest_manual_rewrite_comparison": safe_manual_rewrite_comparison_summary(
             latest_by(manual_rewrite_comparisons, "updated_at")
         ),
+        "latest_review_handoff": safe_review_handoff_summary(latest_by(review_handoffs, "updated_at")),
         "latest_memory_apply_preview": safe_memory_apply_preview_summary(
             latest_by(memory_apply_previews, "created_at")
         ),
+        "latest_final_assembly_gate": safe_final_assembly_gate_summary(latest_by(final_assembly_gates, "created_at")),
+        "latest_final_provider_runbook": safe_final_provider_runbook_summary(
+            latest_by(final_provider_runbooks, "created_at")
+        ),
+        "latest_final_provider_authorization": safe_final_provider_authorization_summary(
+            latest_by(final_provider_authorizations, "created_at")
+        ),
+        "latest_final_provider_execution_preflight": safe_final_provider_execution_preflight_summary(
+            latest_by(final_provider_execution_preflights, "created_at")
+        ),
+        "latest_final_provider_execution_attempt": safe_final_provider_execution_attempt_summary(
+            latest_by(final_provider_execution_attempts, "created_at")
+        ),
+        "latest_final_provider_real_execution_readiness": safe_final_provider_real_execution_readiness_summary(
+            latest_by(final_provider_real_execution_readiness, "created_at")
+        ),
+        "latest_final_provider_real_execution": safe_final_provider_real_execution_summary(
+            latest_by(final_provider_real_executions, "created_at")
+        ),
+        "latest_provider_smoke_test": safe_provider_smoke_test_summary(
+            latest_by(provider_smoke_tests, "created_at")
+        ),
+        "latest_planning_item": safe_planning_item_summary(latest_by(planning_items, "updated_at")),
         "latest_memory_bank_item": safe_memory_bank_item_summary(latest_by(memory_bank_items, "updated_at")),
         "latest_committed_chapter": safe_confirmed_summary(latest_by(confirmed, "committed_at")),
         "provider_roles": provider_roles_summary(store),
@@ -138,12 +203,38 @@ def provider_roles_summary(store: ProjectStore) -> dict[str, dict[str, Any]]:
             "configured": role_config.is_configured(),
             "provider": role_config.provider,
             "model": role_config.model,
+            "base_url_host": safe_url_host(role_config.base_url),
+            "api_key_ref": role_config.api_key_ref,
             "has_api_key": bool(secret_state.get("has_value")) if isinstance(secret_state, dict) else False,
             "masked_key": str(secret_state.get("masked") or "") if isinstance(secret_state, dict) else "",
-            "real_generation_enabled": bool(role_config.settings.get(REAL_GENERATION_FLAG)),
             "config_error": config_error,
         }
     return summary
+
+
+def visible_chapter_summaries(
+    chapters: list[dict[str, Any]],
+    drafts: list[dict[str, Any]],
+    confirmed: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    draft_chapter_ids = {str(item.get("chapter_id") or "") for item in drafts if item.get("chapter_id")}
+    confirmed_chapter_ids = {str(item.get("chapter_id") or "") for item in confirmed if item.get("chapter_id")}
+    visible_ids = draft_chapter_ids | confirmed_chapter_ids
+    if not visible_ids:
+        return []
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for chapter in chapters:
+        chapter_id = str(chapter.get("chapter_id") or "")
+        if not chapter_id or chapter_id in seen:
+            continue
+        if chapter_id not in visible_ids and str(chapter.get("status") or "") != "planned":
+            continue
+        result.append(chapter)
+        seen.add(chapter_id)
+    for chapter_id in sorted(visible_ids - seen):
+        result.append({"chapter_id": chapter_id, "status": "draft_ready", "updated_at": ""})
+    return result
 
 
 def latest_by(items: list[dict[str, Any]], key: str) -> dict[str, Any] | None:
@@ -422,6 +513,27 @@ def safe_manual_rewrite_comparison_summary(item: dict[str, Any] | None) -> dict[
     }
 
 
+def safe_review_handoff_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "handoff_id": item.get("handoff_id"),
+        "comparison_id": item.get("comparison_id"),
+        "task_id": item.get("task_id"),
+        "suggestion_id": item.get("suggestion_id"),
+        "check_id": item.get("check_id"),
+        "chapter_id": item.get("chapter_id"),
+        "title": item.get("title"),
+        "source_draft_id": item.get("source_draft_id"),
+        "selected_draft_id": item.get("selected_draft_id"),
+        "status": item.get("status"),
+        "review": item.get("review") if isinstance(item.get("review"), dict) else {},
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+        "safety": item.get("safety") if isinstance(item.get("safety"), dict) else {},
+    }
+
+
 def safe_memory_apply_preview_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
     if item is None:
         return None
@@ -435,10 +547,185 @@ def safe_memory_apply_preview_summary(item: dict[str, Any] | None) -> dict[str, 
     }
 
 
+def safe_final_assembly_gate_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    prompt_summary = item.get("prompt_summary") if isinstance(item.get("prompt_summary"), dict) else {}
+    writer_role = item.get("writer_role") if isinstance(item.get("writer_role"), dict) else {}
+    return {
+        "gate_id": item.get("gate_id"),
+        "chapter_id": item.get("chapter_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "approved_at": item.get("approved_at"),
+        "provider": writer_role.get("provider"),
+        "model": writer_role.get("model"),
+        "context_section_count": prompt_summary.get("context_section_count"),
+        "estimated_total_tokens": prompt_summary.get("estimated_total_tokens"),
+    }
+
+
+def safe_final_provider_runbook_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    writer_role = item.get("writer_role") if isinstance(item.get("writer_role"), dict) else {}
+    return {
+        "runbook_id": item.get("runbook_id"),
+        "gate_id": item.get("gate_id"),
+        "chapter_id": item.get("chapter_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "provider": item.get("provider") or writer_role.get("provider"),
+        "model": item.get("model") or writer_role.get("model"),
+        "context_section_count": item.get("context_section_count"),
+        "estimated_total_tokens": item.get("estimated_total_tokens"),
+    }
+
+
+def safe_final_provider_authorization_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    writer_role = item.get("writer_role") if isinstance(item.get("writer_role"), dict) else {}
+    return {
+        "authorization_id": item.get("authorization_id"),
+        "runbook_id": item.get("runbook_id"),
+        "gate_id": item.get("gate_id"),
+        "chapter_id": item.get("chapter_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "provider": item.get("provider") or writer_role.get("provider"),
+        "model": item.get("model") or writer_role.get("model"),
+        "checkpoint_id": item.get("checkpoint_id"),
+    }
+
+
+def safe_final_provider_execution_preflight_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "preflight_id": item.get("preflight_id"),
+        "authorization_id": item.get("authorization_id"),
+        "runbook_id": item.get("runbook_id"),
+        "gate_id": item.get("gate_id"),
+        "chapter_id": item.get("chapter_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "provider": item.get("provider"),
+        "model": item.get("model"),
+        "issue_count": item.get("issue_count"),
+        "issue_codes": item.get("issue_codes") if isinstance(item.get("issue_codes"), list) else [],
+    }
+
+
+def safe_final_provider_execution_attempt_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "attempt_id": item.get("attempt_id"),
+        "preflight_id": item.get("preflight_id"),
+        "authorization_id": item.get("authorization_id"),
+        "runbook_id": item.get("runbook_id"),
+        "gate_id": item.get("gate_id"),
+        "chapter_id": item.get("chapter_id"),
+        "status": item.get("status"),
+        "abort_reason_code": item.get("abort_reason_code"),
+        "created_at": item.get("created_at"),
+        "provider": item.get("provider"),
+        "model": item.get("model"),
+    }
+
+
+def safe_final_provider_real_execution_readiness_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "readiness_id": item.get("readiness_id"),
+        "attempt_id": item.get("attempt_id"),
+        "preflight_id": item.get("preflight_id"),
+        "authorization_id": item.get("authorization_id"),
+        "runbook_id": item.get("runbook_id"),
+        "gate_id": item.get("gate_id"),
+        "chapter_id": item.get("chapter_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "provider": item.get("provider"),
+        "model": item.get("model"),
+        "issue_count": item.get("issue_count"),
+        "issue_codes": item.get("issue_codes") if isinstance(item.get("issue_codes"), list) else [],
+    }
+
+
+def safe_final_provider_real_execution_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "execution_id": item.get("execution_id"),
+        "readiness_id": item.get("readiness_id"),
+        "attempt_id": item.get("attempt_id"),
+        "preflight_id": item.get("preflight_id"),
+        "authorization_id": item.get("authorization_id"),
+        "runbook_id": item.get("runbook_id"),
+        "gate_id": item.get("gate_id"),
+        "chapter_id": item.get("chapter_id"),
+        "draft_id": item.get("draft_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+        "provider": item.get("provider"),
+        "model": item.get("model"),
+    }
+
+
+def safe_provider_smoke_test_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "smoke_test_id": item.get("smoke_test_id"),
+        "purpose": item.get("purpose"),
+        "status": item.get("status"),
+        "ok": item.get("ok"),
+        "created_at": item.get("created_at"),
+        "role": item.get("role"),
+        "provider": item.get("provider"),
+        "model": item.get("model"),
+        "base_url_host": item.get("base_url_host"),
+        "network_attempted": item.get("network_attempted"),
+    }
+
+
 def safe_memory_bank_items(store: ProjectStore) -> list[dict[str, Any]]:
     value = store.read_json(store.data_file_path("memory_bank.json"), default={"items": []})
     items = value.get("items") if isinstance(value, dict) and isinstance(value.get("items"), list) else []
     return [item for item in items if isinstance(item, dict)]
+
+
+def safe_planning_items(store: ProjectStore) -> list[dict[str, Any]]:
+    value = store.read_json(store.data_file_path("planning_library.json"), default={})
+    return normalize_library(value)["items"]
+
+
+def planning_item_active(item: dict[str, Any]) -> bool:
+    enabled = item.get("enabled") if isinstance(item.get("enabled"), bool) else True
+    return bool(enabled and item.get("active"))
+
+
+def safe_planning_item_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "planning_id": item.get("planning_id") or item.get("id"),
+        "title": item.get("title"),
+        "item_type": item.get("item_type") or "outline",
+        "active": bool(item.get("active")),
+        "enabled": item.get("enabled") if isinstance(item.get("enabled"), bool) else True,
+        "priority": item.get("priority"),
+        "adherence_level": item.get("adherence_level") or "balanced",
+        "send_mode": item.get("send_mode") or "reference_text",
+        "chapter_range": item.get("chapter_range") or "",
+        "text_status": item.get("text_status"),
+        "text_chars": len(str(item.get("text") or "")),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
 
 
 def safe_memory_bank_item_summary(item: dict[str, Any] | None) -> dict[str, Any] | None:

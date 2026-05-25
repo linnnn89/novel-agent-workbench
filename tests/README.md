@@ -17,6 +17,11 @@ Current backend verification command:
 py -3.13 -m unittest discover -s tests
 ```
 
+Provider boundary for tests:
+
+- Automated tests and Codex QA should use mocks, dry-runs, or patched clients unless the user explicitly authorizes a real Provider run.
+- This testing boundary is not a product limitation. The app may expose explicit user-triggered Provider actions, but normal regression tests must not spend API credits or hit external endpoints.
+
 Current implemented tests cover storage, registry, foundation config, Provider config/interface, draft generation, draft review, manual review decisions, revision requests, mock revision draft candidates, explicit draft commit, and safe project state summaries.
 
 Chapter workflow tests currently cover:
@@ -343,15 +348,14 @@ Provider config tests currently cover:
 - Provider adapter registry state,
 - project secret resolver reads only `secrets.local.json`,
 - resolver errors for invalid, missing, and empty secret refs,
-- disabled real-provider adapters failing locally without draft/confirmed/Memory/RAG/export side effects,
+- real Provider configuration failures staying local without draft/confirmed/Memory/RAG/export side effects,
 - safe disabled Provider config writes with `project_secret.*` refs,
 - project-local secret writes returning masked metadata only,
 - rejection of missing real-provider secret refs and raw key settings,
 - disabled Provider dry-run summaries for `deepseek` and `openai_compatible`,
-- disabled Chutes OpenAI-compatible dry-run summary,
+- Chutes OpenAI-compatible dry-run summary,
 - mocked Chutes real-test metadata path without log/draft side effects,
-- Chutes `generate-draft` blocked until `settings.real_generation_enabled=true`,
-- Chutes real-generation disable path can recover incomplete Chutes config,
+- Chutes `generate-draft` no longer requiring a separate network-enable gate,
 - mocked Chutes real draft generation writing draft content only to `data/drafts/*.json`,
 - Chutes real generation audit gate blocking prompt/key/content leak findings,
 - dry-run secret error handling without request summaries,
@@ -401,7 +405,7 @@ Application service facade tests currently cover:
 - revision request create/list/read through the backend facade,
 - facade state exclusion of prompt text, chapter content, and plaintext secrets,
 - failed generation leaving no draft behind,
-- facade enable/disable real-provider flag updates without plaintext secret exposure,
+- facade Provider status without a separate real-generation flag,
 - facade Chutes one-command runbook output excluding prompt, key, and generated content.
 
 CLI tests currently cover:
@@ -420,12 +424,28 @@ CLI tests currently cover:
 - `provider-dry-run` output excluding prompt text, system prompt text, and plaintext secrets.
 - Chutes `provider-dry-run` CLI output with `llm.chutes.ai` host and no prompt/key leak.
 - Chutes `provider-real-test` CLI output with mocked HTTP and no prompt/key/response-text leak.
-- `enable-real-provider` / `disable-real-provider` only changing config and making no network call.
 - Chutes real `generate-draft` CLI output with mocked HTTP excluding prompt/key/generated content.
-- `chutes-generate-once` requiring `--allow-network`, using mocked HTTP for success, cleaning secrets, disabling the gate, and excluding prompt/key/generated content.
+- `chutes-generate-once` using mocked HTTP for success, cleaning secrets, and excluding prompt/key/generated content.
 - `chutes-generate-once` mocked success leaving zero file hits for the fake key after cleanup.
 - `chutes-generate-once` audit-gate blocking without network or draft side effects.
 - manual rewrite candidate comparison creation, duplicate rejection, decision states, CLI/facade output safety, audit blocking of text-field contamination, and no Provider/confirmed/Memory Bank/RAG/export side effects.
+- review handoff creation from `selected_for_review` manual rewrite comparisons only, pending-review metadata storage, duplicate rejection, CLI/facade output safety, audit blocking of text-field contamination, and no automatic review, Provider call, confirmed chapter, Memory Bank, RAG, or export side effects.
+- Planning Library creation, duplicate/secret-like rejection, metadata-only default list/read/state/CLI output, explicit text inclusion, active-reference tracking, context package/prompt render integration, inactive item skipping, and no Provider/draft/confirmed chapter/Memory Bank/RAG/export side effects.
+- review-draft guard for manual rewrite submitted draft candidates: no-gate rejection before Provider calls, rejected/needs-more-work comparison rejection, selected comparison allow, pending handoff allow, audit rejection when manual rewrite review gate metadata is missing, and ordinary draft review unaffected.
+- final assembly gate creation, approval, duplicate approval rejection, metadata-only CLI/facade output, audit safety, safe public state summary, mandatory approved gate before real context-aware Provider attempts, prompt/context mismatch rejection, and no Provider/workflow side effects on blocked real context generation.
+- final Provider runbook creation from approved gates only, metadata-only CLI/facade output, audit safety, safe public state summary, no real LLM call, no draft write, and no Memory Bank/RAG/export side effects.
+- final Provider authorization creation from pending runbooks only, duplicate authorization rejection, no-secrets checkpoint metadata, metadata-only CLI/facade output, audit safety, safe public state summary, no real LLM call, no draft write, and no Memory Bank/RAG/export side effects.
+- final Provider execution preflight creation from authorizations only, passed vs blocked chain checks, provider config drift detection, metadata-only CLI/facade output, audit safety, safe public state summary, no real LLM call, no draft write, and no Memory Bank/RAG/export side effects.
+- final Provider execution attempt creation from passed zero-issue preflights only, duplicate attempt rejection, forced `aborted_real_llm_disabled` result, metadata-only CLI/facade output, audit safety, safe public state summary, no real LLM call, no draft write, and no Memory Bank/RAG/export side effects.
+- final Provider real execution readiness creation from aborted attempts only, ready vs blocked config checks, duplicate readiness rejection, metadata-only CLI/facade output, audit safety, safe public state summary, no secret value read, no real LLM call, no draft write, and no Memory Bank/RAG/export side effects.
+- final Provider real execution path requiring prompt/context digest match, mocked Chutes client execution in tests, one new draft write, metadata-only execution artifact, no auto-commit, and no Memory Bank/RAG/export side effects.
+- Provider live smoke-test harness behavior: user-triggered mocked Provider connectivity pass, metadata-only CLI output, no prompt/secret/response text exposure, no draft creation, no confirmed chapter creation, and safe public state summary.
+- Provider smoke-test audit and prepublish gate behavior: valid smoke metadata passes audit, prompt/response/secret/draft-link style metadata is rejected, invalid sample-only/non-committable classification is rejected, invalid safety flags are rejected, and prepublish treats invalid smoke artifacts as blockers.
+- Provider smoke-test config snapshot and drift behavior: new smoke artifacts store safe provider/model/host/api-key-ref snapshots without key values, audit warns when the latest passed snapshot drifts from current config, and prepublish reports that drift as a warning rather than a blocker.
+- runtime project health and upload ignore guard behavior: metadata-only health summaries join public state, audit, Provider smoke metadata, and prepublish upload readiness without leaking prompts, while prepublish requires build and coverage artifact ignore patterns and excludes non-publishing Provider readiness warnings from upload-readiness findings.
+- desktop launcher formatting and asset path behavior: health/provider summaries remain metadata-only and resolve the Win11 `.ico` asset path.
+- review handoff consumption after guarded review creation: pending handoff gates can be consumed into `review_created`, record the created review id, and disappear from the pending handoff list without draft, commit, Memory Bank/RAG/export, or Provider side effects beyond the explicit review itself.
+- accepted-review commit gate behavior: unreviewed drafts are rejected from `commit_draft` without workflow side effects, accepted reviews allow commit, confirmed chapter artifacts and commit logs record metadata-only `commit_gate`, and confirmed-chapter fixtures now follow review -> accepted decision -> commit.
 
 Audit tests currently cover:
 

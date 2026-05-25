@@ -40,6 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
     prepublish = subparsers.add_parser("prepublish-check")
     prepublish.add_argument("--repo-root", default="")
 
+    project_health = subparsers.add_parser("project-health")
+    project_health.add_argument("project_id")
+    project_health.add_argument("--repo-root", default="")
+
     profile_corpus = subparsers.add_parser("profile-corpus")
     profile_corpus.add_argument("path")
     profile_corpus.add_argument("--max-name-candidates", type=int, default=20)
@@ -184,8 +188,63 @@ def build_parser() -> argparse.ArgumentParser:
     )
     decide_manual_rewrite_comparison.add_argument("--reason-code", default="")
 
+    create_review_handoff = subparsers.add_parser("create-review-handoff-from-manual-comparison")
+    create_review_handoff.add_argument("project_id")
+    create_review_handoff.add_argument("comparison_id")
+
+    list_review_handoffs = subparsers.add_parser("list-review-handoffs")
+    list_review_handoffs.add_argument("project_id")
+    list_review_handoffs.add_argument("--status", default="")
+
+    read_review_handoff = subparsers.add_parser("read-review-handoff")
+    read_review_handoff.add_argument("project_id")
+    read_review_handoff.add_argument("handoff_id")
+
     state = subparsers.add_parser("state")
     state.add_argument("project_id")
+
+    create_planning_item = subparsers.add_parser("create-planning-item")
+    create_planning_item.add_argument("project_id")
+    create_planning_item.add_argument("planning_id")
+    create_planning_item.add_argument("--title", default="")
+    create_planning_item.add_argument(
+        "--item-type",
+        default="outline",
+        choices=["outline", "beat_sheet", "chapter_plan", "character_plan", "world_plan", "constraint", "other"],
+    )
+    planning_text_group = create_planning_item.add_mutually_exclusive_group(required=True)
+    planning_text_group.add_argument("--text")
+    planning_text_group.add_argument("--text-stdin", action="store_true")
+    create_planning_item.add_argument("--active", action="store_true")
+    create_planning_item.add_argument("--disabled", action="store_true")
+    create_planning_item.add_argument("--priority", type=int, default=10)
+    create_planning_item.add_argument("--adherence-level", default="balanced", choices=["soft", "balanced", "strict"])
+    create_planning_item.add_argument("--send-mode", default="reference_text", choices=["reference_text", "metadata_only"])
+    create_planning_item.add_argument("--chapter-range", default="")
+
+    list_planning_items = subparsers.add_parser("list-planning-items")
+    list_planning_items.add_argument("project_id")
+
+    read_planning_item = subparsers.add_parser("read-planning-item")
+    read_planning_item.add_argument("project_id")
+    read_planning_item.add_argument("planning_id")
+    read_planning_item.add_argument("--include-text", action="store_true")
+
+    activate_planning_item = subparsers.add_parser("activate-planning-item")
+    activate_planning_item.add_argument("project_id")
+    activate_planning_item.add_argument("planning_id")
+
+    deactivate_planning_item = subparsers.add_parser("deactivate-planning-item")
+    deactivate_planning_item.add_argument("project_id")
+    deactivate_planning_item.add_argument("planning_id")
+
+    enable_planning_item = subparsers.add_parser("enable-planning-item")
+    enable_planning_item.add_argument("project_id")
+    enable_planning_item.add_argument("planning_id")
+
+    disable_planning_item = subparsers.add_parser("disable-planning-item")
+    disable_planning_item.add_argument("project_id")
+    disable_planning_item.add_argument("planning_id")
 
     mark_chapter = subparsers.add_parser("mark-chapter-planned")
     mark_chapter.add_argument("project_id")
@@ -218,16 +277,6 @@ def build_parser() -> argparse.ArgumentParser:
     value_group.add_argument("--value")
     value_group.add_argument("--value-stdin", action="store_true")
 
-    enable_real = subparsers.add_parser("enable-real-provider")
-    enable_real.add_argument("project_id")
-    enable_real.add_argument("role", choices=["writer"])
-    enable_real.add_argument("--provider", required=True)
-
-    disable_real = subparsers.add_parser("disable-real-provider")
-    disable_real.add_argument("project_id")
-    disable_real.add_argument("role", choices=["writer"])
-    disable_real.add_argument("--provider", default="chutes_openai")
-
     generate = subparsers.add_parser("generate-draft")
     generate.add_argument("project_id")
     generate.add_argument("--chapter-id", required=True)
@@ -244,6 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate_context.add_argument("--title", default="")
     generate_context.add_argument("--system-prompt", default="")
     generate_context.add_argument("--max-context-tokens", type=int, default=None)
+    generate_context.add_argument("--final-assembly-gate-id", default="")
     generate_context.add_argument("--max-tokens", type=int, default=None)
     generate_context.add_argument("--temperature", type=float, default=None)
 
@@ -351,6 +401,112 @@ def build_parser() -> argparse.ArgumentParser:
     prompt_render.add_argument("--include-prompt-text", action="store_true")
     prompt_render.add_argument("--include-context-text", action="store_true")
 
+    create_final_gate = subparsers.add_parser("create-final-assembly-gate")
+    create_final_gate.add_argument("project_id")
+    create_final_gate.add_argument("--chapter-id", required=True)
+    create_final_gate.add_argument("--prompt", required=True)
+    create_final_gate.add_argument("--system-prompt", default="")
+    create_final_gate.add_argument("--max-context-tokens", type=int, default=None)
+
+    approve_final_gate = subparsers.add_parser("approve-final-assembly-gate")
+    approve_final_gate.add_argument("project_id")
+    approve_final_gate.add_argument("gate_id")
+    approve_final_gate.add_argument("--reason-code", default="")
+
+    list_final_gates = subparsers.add_parser("list-final-assembly-gates")
+    list_final_gates.add_argument("project_id")
+    list_final_gates.add_argument("--status", default="")
+
+    read_final_gate = subparsers.add_parser("read-final-assembly-gate")
+    read_final_gate.add_argument("project_id")
+    read_final_gate.add_argument("gate_id")
+
+    create_final_runbook = subparsers.add_parser("create-final-provider-runbook")
+    create_final_runbook.add_argument("project_id")
+    create_final_runbook.add_argument("gate_id")
+
+    list_final_runbooks = subparsers.add_parser("list-final-provider-runbooks")
+    list_final_runbooks.add_argument("project_id")
+    list_final_runbooks.add_argument("--status", default="")
+
+    read_final_runbook = subparsers.add_parser("read-final-provider-runbook")
+    read_final_runbook.add_argument("project_id")
+    read_final_runbook.add_argument("runbook_id")
+
+    authorize_final_runbook = subparsers.add_parser("authorize-final-provider-runbook")
+    authorize_final_runbook.add_argument("project_id")
+    authorize_final_runbook.add_argument("runbook_id")
+    authorize_final_runbook.add_argument("--reason-code", default="")
+
+    list_final_authorizations = subparsers.add_parser("list-final-provider-authorizations")
+    list_final_authorizations.add_argument("project_id")
+    list_final_authorizations.add_argument("--status", default="")
+
+    read_final_authorization = subparsers.add_parser("read-final-provider-authorization")
+    read_final_authorization.add_argument("project_id")
+    read_final_authorization.add_argument("authorization_id")
+
+    create_final_preflight = subparsers.add_parser("create-final-provider-execution-preflight")
+    create_final_preflight.add_argument("project_id")
+    create_final_preflight.add_argument("authorization_id")
+
+    list_final_preflights = subparsers.add_parser("list-final-provider-execution-preflights")
+    list_final_preflights.add_argument("project_id")
+    list_final_preflights.add_argument("--status", default="")
+
+    read_final_preflight = subparsers.add_parser("read-final-provider-execution-preflight")
+    read_final_preflight.add_argument("project_id")
+    read_final_preflight.add_argument("preflight_id")
+
+    attempt_final_execution = subparsers.add_parser("attempt-final-provider-execution")
+    attempt_final_execution.add_argument("project_id")
+    attempt_final_execution.add_argument("preflight_id")
+
+    list_final_attempts = subparsers.add_parser("list-final-provider-execution-attempts")
+    list_final_attempts.add_argument("project_id")
+    list_final_attempts.add_argument("--status", default="")
+
+    read_final_attempt = subparsers.add_parser("read-final-provider-execution-attempt")
+    read_final_attempt.add_argument("project_id")
+    read_final_attempt.add_argument("attempt_id")
+
+    create_final_readiness = subparsers.add_parser("create-final-provider-real-execution-readiness")
+    create_final_readiness.add_argument("project_id")
+    create_final_readiness.add_argument("attempt_id")
+
+    list_final_readiness = subparsers.add_parser("list-final-provider-real-execution-readiness")
+    list_final_readiness.add_argument("project_id")
+    list_final_readiness.add_argument("--status", default="")
+
+    read_final_readiness = subparsers.add_parser("read-final-provider-real-execution-readiness")
+    read_final_readiness.add_argument("project_id")
+    read_final_readiness.add_argument("readiness_id")
+
+    execute_final_real = subparsers.add_parser("execute-final-provider-real")
+    execute_final_real.add_argument("project_id")
+    execute_final_real.add_argument("readiness_id")
+    execute_prompt_group = execute_final_real.add_mutually_exclusive_group(required=True)
+    execute_prompt_group.add_argument("--prompt")
+    execute_prompt_group.add_argument("--prompt-stdin", action="store_true")
+    execute_final_real.add_argument("--system-prompt", default="")
+    execute_final_real.add_argument("--title", default="")
+    execute_final_real.add_argument("--max-context-tokens", type=int, default=None)
+    execute_final_real.add_argument("--temperature", type=float, default=None)
+    execute_final_real.add_argument("--max-tokens", type=int, default=None)
+    execute_final_real.add_argument("--reason-code", default="")
+
+    list_final_executions = subparsers.add_parser("list-final-provider-real-executions")
+    list_final_executions.add_argument("project_id")
+    list_final_executions.add_argument("--status", default="")
+
+    read_final_execution = subparsers.add_parser("read-final-provider-real-execution")
+    read_final_execution.add_argument("project_id")
+    read_final_execution.add_argument("execution_id")
+
+    postcheck_final_execution = subparsers.add_parser("postcheck-final-provider-real-execution")
+    postcheck_final_execution.add_argument("project_id")
+    postcheck_final_execution.add_argument("execution_id")
+
     enqueue_formal_context_tasks = subparsers.add_parser("enqueue-formal-context-tasks")
     enqueue_formal_context_tasks.add_argument("project_id")
     enqueue_formal_context_tasks.add_argument("plan_id")
@@ -435,6 +591,23 @@ def build_parser() -> argparse.ArgumentParser:
     provider_real_test.add_argument("--max-tokens", type=int, default=16)
     provider_real_test.add_argument("--temperature", type=float, default=0)
 
+    provider_smoke_test = subparsers.add_parser("run-provider-smoke-test")
+    provider_smoke_test.add_argument("project_id")
+    provider_smoke_test.add_argument("role", choices=["writer", "scorer", "reviser"])
+    provider_smoke_test.add_argument("--prompt", default="Return exactly OK.")
+    provider_smoke_test.add_argument("--system-prompt", default="")
+    provider_smoke_test.add_argument("--max-tokens", type=int, default=16)
+    provider_smoke_test.add_argument("--temperature", type=float, default=0)
+    provider_smoke_test.add_argument("--reason-code", default="")
+
+    list_provider_smoke_tests = subparsers.add_parser("list-provider-smoke-tests")
+    list_provider_smoke_tests.add_argument("project_id")
+    list_provider_smoke_tests.add_argument("--status", default="")
+
+    read_provider_smoke_test = subparsers.add_parser("read-provider-smoke-test")
+    read_provider_smoke_test.add_argument("project_id")
+    read_provider_smoke_test.add_argument("smoke_test_id")
+
     chutes_once = subparsers.add_parser("chutes-generate-once")
     chutes_once.add_argument("project_id")
     chutes_once.add_argument("--chapter-id", required=True)
@@ -449,7 +622,6 @@ def build_parser() -> argparse.ArgumentParser:
     secret_value_group.add_argument("--secret-value-stdin", action="store_true")
     chutes_once.add_argument("--max-tokens", type=int, default=96)
     chutes_once.add_argument("--temperature", type=float, default=0.2)
-    chutes_once.add_argument("--allow-network", action="store_true")
     clear_group = chutes_once.add_mutually_exclusive_group()
     clear_group.add_argument("--clear-secret-after-run", dest="clear_secret_after_run", action="store_true", default=True)
     clear_group.add_argument("--keep-secret-after-run", dest="clear_secret_after_run", action="store_false")
@@ -476,6 +648,8 @@ def run_command(args: argparse.Namespace) -> Any:
         return app.list_projects()
     if command == "prepublish-check":
         return app.prepublish_check(repo_root=args.repo_root or None)
+    if command == "project-health":
+        return app.project_health(args.project_id, repo_root=args.repo_root or None)
     if command == "profile-corpus":
         return app.profile_corpus(args.path, max_name_candidates=args.max_name_candidates)
     if command == "save-corpus-profile":
@@ -564,8 +738,41 @@ def run_command(args: argparse.Namespace) -> Any:
             decision=args.decision,
             reason_code=args.reason_code,
         )
+    if command == "create-review-handoff-from-manual-comparison":
+        return app.create_review_handoff_from_manual_comparison(args.project_id, args.comparison_id)
+    if command == "list-review-handoffs":
+        return app.list_review_handoffs(args.project_id, status=args.status)
+    if command == "read-review-handoff":
+        return app.read_review_handoff(args.project_id, args.handoff_id)
     if command == "state":
         return app.project_state(args.project_id)
+    if command == "create-planning-item":
+        text = sys.stdin.read() if args.text_stdin else args.text
+        return app.create_planning_item(
+            args.project_id,
+            args.planning_id,
+            text=text,
+            title=args.title,
+            item_type=args.item_type,
+            active=args.active,
+            enabled=not args.disabled,
+            priority=args.priority,
+            adherence_level=args.adherence_level,
+            send_mode=args.send_mode,
+            chapter_range=args.chapter_range,
+        )
+    if command == "list-planning-items":
+        return app.list_planning_items(args.project_id)
+    if command == "read-planning-item":
+        return app.read_planning_item(args.project_id, args.planning_id, include_text=args.include_text)
+    if command == "activate-planning-item":
+        return app.set_planning_item_active(args.project_id, args.planning_id, active=True)
+    if command == "deactivate-planning-item":
+        return app.set_planning_item_active(args.project_id, args.planning_id, active=False)
+    if command == "enable-planning-item":
+        return app.set_planning_item_enabled(args.project_id, args.planning_id, enabled=True)
+    if command == "disable-planning-item":
+        return app.set_planning_item_enabled(args.project_id, args.planning_id, enabled=False)
     if command == "mark-chapter-planned":
         return app.mark_chapter_planned(args.project_id, args.chapter_id, title=args.title)
     if command == "chapter-status":
@@ -586,10 +793,6 @@ def run_command(args: argparse.Namespace) -> Any:
     if command == "set-project-secret":
         value = sys.stdin.read().strip() if args.value_stdin else args.value
         return app.set_project_secret(args.project_id, args.name, value)
-    if command == "enable-real-provider":
-        return app.enable_real_provider(args.project_id, args.role, provider=args.provider)
-    if command == "disable-real-provider":
-        return app.disable_real_provider(args.project_id, args.role, provider=args.provider)
     if command == "generate-draft":
         return app.generate_draft(
             args.project_id,
@@ -608,6 +811,7 @@ def run_command(args: argparse.Namespace) -> Any:
             prompt=args.prompt,
             system_prompt=args.system_prompt,
             max_context_tokens=args.max_context_tokens,
+            final_assembly_gate_id=args.final_assembly_gate_id,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
         )
@@ -677,6 +881,73 @@ def run_command(args: argparse.Namespace) -> Any:
             include_prompt_text=args.include_prompt_text,
             include_context_text=args.include_context_text,
         )
+    if command == "create-final-assembly-gate":
+        return app.create_final_assembly_gate(
+            args.project_id,
+            chapter_id=args.chapter_id,
+            prompt=args.prompt,
+            system_prompt=args.system_prompt,
+            max_context_tokens=args.max_context_tokens,
+        )
+    if command == "approve-final-assembly-gate":
+        return app.approve_final_assembly_gate(args.project_id, args.gate_id, reason_code=args.reason_code)
+    if command == "list-final-assembly-gates":
+        return app.list_final_assembly_gates(args.project_id, status=args.status)
+    if command == "read-final-assembly-gate":
+        return app.read_final_assembly_gate(args.project_id, args.gate_id)
+    if command == "create-final-provider-runbook":
+        return app.create_final_provider_runbook(args.project_id, args.gate_id)
+    if command == "list-final-provider-runbooks":
+        return app.list_final_provider_runbooks(args.project_id, status=args.status)
+    if command == "read-final-provider-runbook":
+        return app.read_final_provider_runbook(args.project_id, args.runbook_id)
+    if command == "authorize-final-provider-runbook":
+        return app.authorize_final_provider_runbook(
+            args.project_id,
+            args.runbook_id,
+            reason_code=args.reason_code,
+        )
+    if command == "list-final-provider-authorizations":
+        return app.list_final_provider_authorizations(args.project_id, status=args.status)
+    if command == "read-final-provider-authorization":
+        return app.read_final_provider_authorization(args.project_id, args.authorization_id)
+    if command == "create-final-provider-execution-preflight":
+        return app.create_final_provider_execution_preflight(args.project_id, args.authorization_id)
+    if command == "list-final-provider-execution-preflights":
+        return app.list_final_provider_execution_preflights(args.project_id, status=args.status)
+    if command == "read-final-provider-execution-preflight":
+        return app.read_final_provider_execution_preflight(args.project_id, args.preflight_id)
+    if command == "attempt-final-provider-execution":
+        return app.attempt_final_provider_execution(args.project_id, args.preflight_id)
+    if command == "list-final-provider-execution-attempts":
+        return app.list_final_provider_execution_attempts(args.project_id, status=args.status)
+    if command == "read-final-provider-execution-attempt":
+        return app.read_final_provider_execution_attempt(args.project_id, args.attempt_id)
+    if command == "create-final-provider-real-execution-readiness":
+        return app.create_final_provider_real_execution_readiness(args.project_id, args.attempt_id)
+    if command == "list-final-provider-real-execution-readiness":
+        return app.list_final_provider_real_execution_readiness(args.project_id, status=args.status)
+    if command == "read-final-provider-real-execution-readiness":
+        return app.read_final_provider_real_execution_readiness(args.project_id, args.readiness_id)
+    if command == "execute-final-provider-real":
+        prompt = read_stdin_for_exact_prompt_match() if args.prompt_stdin else args.prompt
+        return app.execute_final_provider_real(
+            args.project_id,
+            args.readiness_id,
+            prompt=prompt,
+            system_prompt=args.system_prompt,
+            title=args.title,
+            max_context_tokens=args.max_context_tokens,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            reason_code=args.reason_code,
+        )
+    if command == "list-final-provider-real-executions":
+        return app.list_final_provider_real_executions(args.project_id, status=args.status)
+    if command == "read-final-provider-real-execution":
+        return app.read_final_provider_real_execution(args.project_id, args.execution_id)
+    if command == "postcheck-final-provider-real-execution":
+        return app.postcheck_final_provider_real_execution(args.project_id, args.execution_id)
     if command == "enqueue-formal-context-tasks":
         return app.enqueue_formal_context_tasks(args.project_id, args.plan_id)
     if command == "list-formal-context-tasks":
@@ -743,6 +1014,20 @@ def run_command(args: argparse.Namespace) -> Any:
             max_tokens=args.max_tokens,
             temperature=args.temperature,
         )
+    if command == "run-provider-smoke-test":
+        return app.run_provider_smoke_test(
+            args.project_id,
+            args.role,
+            prompt=args.prompt,
+            system_prompt=args.system_prompt,
+            max_tokens=args.max_tokens,
+            temperature=args.temperature,
+            reason_code=args.reason_code,
+        )
+    if command == "list-provider-smoke-tests":
+        return app.list_provider_smoke_tests(args.project_id, status=args.status)
+    if command == "read-provider-smoke-test":
+        return app.read_provider_smoke_test(args.project_id, args.smoke_test_id)
     if command == "chutes-generate-once":
         secret_value = sys.stdin.read().strip() if args.secret_value_stdin else (args.secret_value or "")
         return app.chutes_generate_once(
@@ -757,7 +1042,6 @@ def run_command(args: argparse.Namespace) -> Any:
             secret_value=secret_value,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
-            allow_network=args.allow_network,
             clear_secret_after_run=args.clear_secret_after_run,
         )
     if command == "list-provider-adapters":
@@ -776,12 +1060,21 @@ def run_smoke(app: WorkbenchApplicationService, args: argparse.Namespace) -> dic
         title=args.chapter_title,
         prompt=args.prompt,
     )
-    committed = app.commit_draft(args.project_id, draft["draft_id"]) if args.commit else None
+    review = None
+    decision = None
+    committed = None
+    if args.commit:
+        app.configure_provider_role(args.project_id, "scorer", provider="mock", model="mock-scorer")
+        review = app.review_draft(args.project_id, draft["draft_id"])
+        decision = app.decide_review(args.project_id, review["review_id"], decision="accepted", reason_code="smoke_accept")
+        committed = app.commit_draft(args.project_id, draft["draft_id"])
     state = app.project_state(args.project_id)
     return {
         "project": {"project_id": created["project_id"], "title": created["title"], "path": created["path"]},
         "writer": {"provider": writer["provider"], "model": writer["model"], "configured": bool(writer["provider"])},
         "draft": draft,
+        "review": review,
+        "review_decision": decision,
         "committed": committed,
         "state": state,
     }
@@ -791,6 +1084,10 @@ def write_json(value: Any, *, stderr: bool = False) -> None:
     stream = sys.stderr if stderr else sys.stdout
     stream.write(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
     stream.write("\n")
+
+
+def read_stdin_for_exact_prompt_match() -> str:
+    return sys.stdin.read().strip()
 
 
 if __name__ == "__main__":

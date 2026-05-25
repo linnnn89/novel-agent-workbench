@@ -7,6 +7,10 @@ dependencies = []
 
 [project.scripts]
 novel-agent-workbench = "novel_agent_workbench.cli:main"
+novel-agent-workbench-desktop = "novel_agent_workbench.desktop_app:main"
+
+[tool.setuptools.package-data]
+novel_agent_workbench = ["assets/*.ico", "assets/*.png"]
 
 [tool.unittest]
 testpaths = ["tests"]

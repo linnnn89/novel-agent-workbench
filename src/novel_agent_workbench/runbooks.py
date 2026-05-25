@@ -11,7 +11,6 @@ from .providers import (
     ProviderConfigError,
     ProviderError,
     configure_provider_role,
-    set_real_generation_enabled,
     validate_secret_name,
 )
 from .storage import ProjectStore, atomic_write_json_file
@@ -33,7 +32,6 @@ class ChutesGenerateOnceRequest:
     secret_value: str = ""
     temperature: float | None = None
     max_tokens: int | None = None
-    allow_network: bool = False
     clear_secret_after_run: bool = True
 
 
@@ -67,9 +65,6 @@ def chutes_generate_once(store: ProjectStore, request: ChutesGenerateOnceRequest
         return error_summary(run_summary, "audit_gate_failed", f"Audit gate failed before runbook: {', '.join(blocking_codes)}")
     append_step(run_summary, "audit_precheck", "ok")
 
-    if not request.allow_network:
-        return error_summary(run_summary, "network_not_allowed", "Pass --allow-network to run a real Provider request.")
-
     try:
         append_step(run_summary, "configure_secret", "started")
         if request.secret_value:
@@ -89,10 +84,6 @@ def chutes_generate_once(store: ProjectStore, request: ChutesGenerateOnceRequest
 
         if not str(store.read_secrets().get(secret_name) or ""):
             return error_summary(run_summary, "missing_secret", "Chutes secret is missing or empty.")
-
-        append_step(run_summary, "enable_gate", "started")
-        set_real_generation_enabled(store, "writer", provider=CHUTES_PROVIDER_ID, enabled=True)
-        append_step(run_summary, "enable_gate", "ok")
 
         append_step(run_summary, "generate_draft", "started")
         draft = DraftGenerationService(store).generate_draft(
@@ -115,12 +106,6 @@ def chutes_generate_once(store: ProjectStore, request: ChutesGenerateOnceRequest
         error_type = getattr(exc, "error_type", exc.__class__.__name__)
         return error_summary(run_summary, str(error_type), str(exc))
     finally:
-        append_step(run_summary, "disable_gate", "started")
-        try:
-            set_real_generation_enabled(store, "writer", provider=CHUTES_PROVIDER_ID, enabled=False)
-            append_step(run_summary, "disable_gate", "ok")
-        except Exception as exc:
-            append_step(run_summary, "disable_gate", "error", {"error_type": exc.__class__.__name__})
         if request.clear_secret_after_run:
             append_step(run_summary, "clear_secret", "started")
             clear_project_secret_no_backup(store, secret_name)

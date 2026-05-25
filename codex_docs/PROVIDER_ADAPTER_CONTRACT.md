@@ -42,9 +42,9 @@ description
 
 `mock` is enabled and has `network_allowed=false`.
 
-`openai_compatible`, `deepseek`, and `chutes_openai` are registered only as future placeholders. They have `enabled=false` and `network_allowed=false`.
+`openai_compatible`, `local_openai_compatible`, `deepseek`, and `chutes_openai` are registered HTTP adapters. They use the network only when the user starts a connection test or generation command.
 
-`chutes_openai` has one narrow exception: normal `generate-draft` may use it for the writer role only when the project explicitly sets `settings.real_generation_enabled=true`, the local secret resolves, and the audit leak gate passes. The adapter registry entry remains disabled so status/dry-run tools still report the higher-risk boundary.
+`chutes_openai` may generate a writer draft when the writer role is configured for Chutes, the local secret resolves, and audit leak checks pass. There is no separate network-enable gate.
 
 ## Secret Lookup
 
@@ -198,18 +198,14 @@ Real test must not create drafts, confirmed chapters, Memory Bank updates, RAG u
 ```text
 role: writer
 provider: chutes_openai
-settings.real_generation_enabled: true
 api_key_ref: project_secret.<name>
 local secret: present and non-empty in data/secrets.local.json
 audit leak gate: no key/prompt/content leak findings
 ```
 
-Enabling the gate is intentionally strict and requires model, base URL, and `api_key_ref` to be configured. Disabling the gate is intentionally lenient so a partially broken Chutes config can always be moved back to a non-real-generation state.
-
 Stable blocking errors include:
 
 ```text
-real_generation_disabled
 unsupported_real_provider
 missing_secret
 empty_secret
@@ -239,14 +235,6 @@ because `read-draft` is the human review surface. It must not be copied into pro
 ## Chutes Generate Once Runbook
 
 `chutes-generate-once` is the preferred CLI path for real Chutes draft trials.
-
-It must require:
-
-```text
---allow-network
-```
-
-before any HTTP request can occur.
 
 It must run:
 

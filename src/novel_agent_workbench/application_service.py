@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .audit import audit_project
+from .config import (
+    GENERATION_SETTINGS_SCOPE_GLOBAL,
+    GENERATION_SETTINGS_SCOPE_PROJECT,
+    deep_merge,
+    default_generation_settings,
+    default_global_settings,
+    effective_generation_settings,
+    effective_layered_generation_settings,
+    project_has_generation_settings_override,
+)
 from .context_previews import ContextUpdatePreviewService
 from .chapters import ChapterWorkflowService
 from .context_assembler import ContextAssemblerService
@@ -13,32 +24,57 @@ from .corpus_boundaries import CorpusBoundaryService
 from .corpus_profiler import profile_corpus
 from .corpus_profiles import CorpusProfileArtifactService
 from .corpus_samples import CorpusSampleService
-from .drafts import DraftGenerationRequest, DraftGenerationService
+from .drafts import (
+    DraftGenerationRequest,
+    DraftGenerationService,
+    render_context_prompt,
+    sanitize_provider_draft_text,
+    stream_sanitizer_callback,
+)
+from .final_assembly_gates import FinalAssemblyGateService
+from .final_provider_authorizations import FinalProviderAuthorizationService
+from .final_provider_execution_attempts import FinalProviderExecutionAttemptService
+from .final_provider_execution_preflights import FinalProviderExecutionPreflightService
+from .final_provider_real_executions import FinalProviderRealExecutionService
+from .final_provider_real_execution_readiness import FinalProviderRealExecutionReadinessService
+from .final_provider_runbooks import FinalProviderRunbookService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
 from .manual_rewrite import ManualRewriteTaskService
 from .manual_rewrite_comparison import ManualRewriteComparisonService
 from .memory_apply_preview import MemoryApplyPreviewService
 from .memory_bank import MemoryBankService
+from .planning_library import PlanningLibraryService
 from .project_state import public_project_state
+from .project_health import project_health
+from .provider_smoke_tests import ProviderSmokeTestService
 from .publication import prepublish_check
 from .providers import (
     ProviderRequest,
     configure_provider_role,
+    generate_with_provider,
+    get_model_role_config,
     list_provider_adapters,
     provider_dry_run,
     provider_real_test,
+    provider_request_role_or_writer_fallback,
     provider_status,
-    set_real_generation_enabled,
     set_model_role_config,
     set_project_secret,
 )
+from .review_handoffs import ReviewHandoffService
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
-from .reviews import DraftReviewService
+from .reviews import DraftReviewService, is_ai_review, render_context_stats
 from .revision_candidates import RevisionCandidateService
 from .revisions import RevisionRequestService
 from .self_style import SelfStyleBaselineService
-from .storage import ProjectRegistry, ProjectStore
+from .storage import ProjectRegistry, ProjectStore, atomic_write_json_file
+
+
+GLOBAL_SETTINGS_FILENAME = "global_settings.json"
+AI_REFINEMENT_SYSTEM_PROMPT = (
+    "你是一名专业小说改稿编辑。你根据审稿意见精修当前草稿，只输出修订后的小说正文，不输出说明或 <think>。"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +106,9 @@ class WorkbenchApplicationService:
     def prepublish_check(self, *, repo_root: str | Path | None = None) -> dict[str, Any]:
         root = Path(repo_root).resolve() if repo_root is not None else Path(__file__).resolve().parents[2]
         return prepublish_check(root, projects_root=self.registry.projects_root)
+
+    def project_health(self, project_id: str, *, repo_root: str | Path | None = None) -> dict[str, Any]:
+        return project_health(self._open_store(project_id), repo_root=repo_root).to_dict()
 
     def profile_corpus(self, path: str | Path, *, max_name_candidates: int = 20) -> dict[str, Any]:
         return profile_corpus(path, max_name_candidates=max_name_candidates).to_dict()
@@ -235,8 +274,169 @@ class WorkbenchApplicationService:
             reason_code=reason_code,
         ).to_dict()
 
+    def create_review_handoff_from_manual_comparison(self, project_id: str, comparison_id: str) -> dict[str, Any]:
+        return ReviewHandoffService(self._open_store(project_id)).create_from_manual_comparison(comparison_id).to_dict()
+
+    def list_review_handoffs(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return ReviewHandoffService(self._open_store(project_id)).list_handoffs(status=status)
+
+    def read_review_handoff(self, project_id: str, handoff_id: str) -> dict[str, Any]:
+        return ReviewHandoffService(self._open_store(project_id)).read_handoff(handoff_id)
+
     def project_state(self, project_id: str) -> dict[str, Any]:
         return public_project_state(self._open_store(project_id))
+
+    def global_generation_settings(self) -> dict[str, Any]:
+        return effective_generation_settings(self._read_global_settings())
+
+    def update_global_generation_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        updated = deep_merge(self.global_generation_settings(), settings)
+        self._write_global_settings({"schema_version": 1, "generation_settings": updated})
+        return updated
+
+    def reset_global_generation_settings(self) -> dict[str, Any]:
+        defaults = default_generation_settings()
+        self._write_global_settings(default_global_settings())
+        return defaults
+
+    def generation_settings(self, project_id: str) -> dict[str, Any]:
+        store = self._open_store(project_id)
+        store.initialize()
+        settings, _ = self._effective_project_generation_settings(store)
+        return settings
+
+    def project_generation_settings_state(self, project_id: str) -> dict[str, Any]:
+        store = self._open_store(project_id)
+        store.initialize()
+        settings, has_override = self._effective_project_generation_settings(store)
+        return {
+            "project_id": project_id,
+            "source": "project" if has_override else "global",
+            "has_project_override": has_override,
+            "settings": settings,
+            "project_config_path": str(store.config_path),
+            "global_settings_path": str(self._global_settings_path()),
+        }
+
+    def update_generation_settings(self, project_id: str, settings: dict[str, Any]) -> dict[str, Any]:
+        store = self._open_store(project_id)
+        store.initialize()
+        with store.lock():
+            config = store.read_config()
+            current, _ = self._effective_project_generation_settings(store, config=config)
+            updated = deep_merge(current, settings)
+            config["generation_settings"] = updated
+            config["generation_settings_scope"] = GENERATION_SETTINGS_SCOPE_PROJECT
+            context_settings = updated.get("context") if isinstance(updated.get("context"), dict) else {}
+            context_policy = config.get("context_policy") if isinstance(config.get("context_policy"), dict) else {}
+            if isinstance(context_settings.get("max_context_tokens"), int):
+                context_policy["max_context_tokens"] = context_settings["max_context_tokens"]
+            if isinstance(context_settings.get("recent_confirmed_chapter_count"), int):
+                context_policy["recent_confirmed_chapter_count"] = context_settings["recent_confirmed_chapter_count"]
+            config["context_policy"] = context_policy
+            config["model_roles"] = merged_writer_sampling_settings(config.get("model_roles"), updated)
+            store.write_config(config)
+            return effective_generation_settings(config)
+
+    def reset_generation_settings(self, project_id: str) -> dict[str, Any]:
+        return self.clear_project_generation_settings(project_id)
+
+    def clear_project_generation_settings(self, project_id: str) -> dict[str, Any]:
+        store = self._open_store(project_id)
+        store.initialize()
+        with store.lock():
+            config = store.read_config()
+            global_settings = self.global_generation_settings()
+            self._apply_generation_settings_to_config(
+                config,
+                global_settings,
+                scope=GENERATION_SETTINGS_SCOPE_GLOBAL,
+            )
+            store.write_config(config)
+            return global_settings
+
+    def create_planning_item(
+        self,
+        project_id: str,
+        planning_id: str,
+        *,
+        text: str,
+        title: str = "",
+        item_type: str = "outline",
+        active: bool = False,
+        enabled: bool = True,
+        priority: int = 10,
+        adherence_level: str = "balanced",
+        send_mode: str = "reference_text",
+        chapter_range: str = "",
+    ) -> dict[str, Any]:
+        return PlanningLibraryService(self._open_store(project_id)).create_planning_item(
+            planning_id,
+            text=text,
+            title=title,
+            item_type=item_type,
+            active=active,
+            enabled=enabled,
+            priority=priority,
+            adherence_level=adherence_level,
+            send_mode=send_mode,
+            chapter_range=chapter_range,
+        ).to_dict()
+
+    def update_planning_item(
+        self,
+        project_id: str,
+        planning_id: str,
+        *,
+        text: str,
+        title: str = "",
+        item_type: str = "outline",
+        active: bool = False,
+        enabled: bool = True,
+        priority: int = 10,
+        adherence_level: str = "balanced",
+        send_mode: str = "reference_text",
+        chapter_range: str = "",
+    ) -> dict[str, Any]:
+        return PlanningLibraryService(self._open_store(project_id)).update_planning_item(
+            planning_id,
+            text=text,
+            title=title,
+            item_type=item_type,
+            active=active,
+            enabled=enabled,
+            priority=priority,
+            adherence_level=adherence_level,
+            send_mode=send_mode,
+            chapter_range=chapter_range,
+        ).to_dict()
+
+    def list_planning_items(self, project_id: str, *, include_text: bool = False) -> list[dict[str, Any]]:
+        return PlanningLibraryService(self._open_store(project_id)).list_planning_items(include_text=include_text)
+
+    def read_planning_item(
+        self,
+        project_id: str,
+        planning_id: str,
+        *,
+        include_text: bool = False,
+    ) -> dict[str, Any]:
+        return PlanningLibraryService(self._open_store(project_id)).read_planning_item(
+            planning_id,
+            include_text=include_text,
+        )
+
+    def set_planning_item_active(self, project_id: str, planning_id: str, *, active: bool) -> dict[str, Any]:
+        return PlanningLibraryService(self._open_store(project_id)).set_planning_item_active(
+            planning_id,
+            active=active,
+        ).to_dict()
+
+    def set_planning_item_enabled(self, project_id: str, planning_id: str, *, enabled: bool) -> dict[str, Any]:
+        return PlanningLibraryService(self._open_store(project_id)).set_planning_item_enabled(
+            planning_id,
+            enabled=enabled,
+        ).to_dict()
 
     def mark_chapter_planned(self, project_id: str, chapter_id: str, *, title: str = "") -> dict[str, Any]:
         return ChapterWorkflowService(self._open_store(project_id)).mark_planned(chapter_id, title=title)
@@ -261,6 +461,7 @@ class WorkbenchApplicationService:
         model: str,
         api_key_ref: str = "",
         base_url: str = "",
+        settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         store = self._open_store(project_id)
         role_config = configure_provider_role(
@@ -270,19 +471,15 @@ class WorkbenchApplicationService:
             model=model,
             api_key_ref=api_key_ref,
             base_url=base_url,
+            settings=settings,
         )
         return role_config.to_dict()
 
+    def model_role_config(self, project_id: str, role: str) -> dict[str, Any]:
+        return get_model_role_config(self._sync_project_generation_settings_for_runtime(project_id), role).to_dict()
+
     def set_project_secret(self, project_id: str, name: str, value: str) -> dict[str, Any]:
         return set_project_secret(self._open_store(project_id), name, value)
-
-    def enable_real_provider(self, project_id: str, role: str, *, provider: str) -> dict[str, Any]:
-        role_config = set_real_generation_enabled(self._open_store(project_id), role, provider=provider, enabled=True)
-        return role_config.to_dict()
-
-    def disable_real_provider(self, project_id: str, role: str, *, provider: str = "chutes_openai") -> dict[str, Any]:
-        role_config = set_real_generation_enabled(self._open_store(project_id), role, provider=provider, enabled=False)
-        return role_config.to_dict()
 
     def generate_draft(
         self,
@@ -293,7 +490,16 @@ class WorkbenchApplicationService:
         title: str = "",
         system_prompt: str = "",
         temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
         max_tokens: int | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+        repetition_penalty: float | None = None,
+        stream: bool | None = None,
+        stream_callback: Callable[[str], None] | None = None,
+        reasoning_callback: Callable[[str], None] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         store = self._open_store(project_id)
@@ -305,7 +511,16 @@ class WorkbenchApplicationService:
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
                 max_tokens=max_tokens,
+                presence_penalty=presence_penalty,
+                frequency_penalty=frequency_penalty,
+                repetition_penalty=repetition_penalty,
+                stream=stream,
+                stream_callback=stream_callback,
+                reasoning_callback=reasoning_callback,
                 metadata=metadata or {},
             )
         )
@@ -320,11 +535,21 @@ class WorkbenchApplicationService:
         title: str = "",
         system_prompt: str = "",
         temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
         max_tokens: int | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+        repetition_penalty: float | None = None,
+        stream: bool | None = None,
         max_context_tokens: int | None = None,
+        final_assembly_gate_id: str = "",
+        stream_callback: Callable[[str], None] | None = None,
+        reasoning_callback: Callable[[str], None] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        store = self._open_store(project_id)
+        store = self._sync_project_generation_settings_for_runtime(project_id)
         service = DraftGenerationService(store)
         result = service.generate_context_draft(
             DraftGenerationRequest(
@@ -333,10 +558,20 @@ class WorkbenchApplicationService:
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
                 max_tokens=max_tokens,
+                presence_penalty=presence_penalty,
+                frequency_penalty=frequency_penalty,
+                repetition_penalty=repetition_penalty,
+                stream=stream,
+                stream_callback=stream_callback,
+                reasoning_callback=reasoning_callback,
                 metadata=metadata or {},
             ),
             max_context_tokens=max_context_tokens,
+            final_assembly_gate_id=final_assembly_gate_id,
         )
         return result.to_dict()
 
@@ -346,12 +581,58 @@ class WorkbenchApplicationService:
     def read_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
         return DraftGenerationService(self._open_store(project_id)).read_draft(draft_id)
 
-    def commit_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
-        result = DraftGenerationService(self._open_store(project_id)).commit_draft(draft_id)
+    def verify_draft_index_entry(self, project_id: str, draft_id: str) -> dict[str, Any]:
+        return DraftGenerationService(self._open_store(project_id)).verify_draft_index_entry(draft_id)
+
+    def remove_missing_draft_index_entries(self, project_id: str, draft_ids: list[str]) -> dict[str, Any]:
+        return DraftGenerationService(self._open_store(project_id)).remove_missing_draft_index_entries(draft_ids)
+
+    def update_draft_content(self, project_id: str, draft_id: str, *, text: str) -> dict[str, Any]:
+        return DraftGenerationService(self._open_store(project_id)).update_draft_content(draft_id, text=text)
+
+    def commit_draft(self, project_id: str, draft_id: str, *, replace_existing: bool = False) -> dict[str, Any]:
+        result = DraftGenerationService(self._open_store(project_id)).commit_draft(
+            draft_id,
+            replace_existing=replace_existing,
+        )
         return result.to_dict()
 
     def review_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
-        result = DraftReviewService(self._open_store(project_id)).review_draft(draft_id)
+        result = DraftReviewService(self._sync_project_generation_settings_for_runtime(project_id)).review_draft(draft_id)
+        return result.to_dict()
+
+    def ai_review_draft(
+        self,
+        project_id: str,
+        draft_id: str,
+        *,
+        max_context_tokens: int | None = None,
+        stream: bool | None = None,
+        stream_callback: Callable[[str], None] | None = None,
+        reasoning_callback: Callable[[str], None] | None = None,
+        extra_instruction: str = "",
+    ) -> dict[str, Any]:
+        result = DraftReviewService(self._sync_project_generation_settings_for_runtime(project_id)).ai_review_draft(
+            draft_id,
+            max_context_tokens=max_context_tokens,
+            stream=stream,
+            stream_callback=stream_callback,
+            reasoning_callback=reasoning_callback,
+            extra_instruction=extra_instruction,
+        )
+        return result.to_dict()
+
+    def accept_draft_manually(
+        self,
+        project_id: str,
+        draft_id: str,
+        *,
+        reason_code: str = "desktop_confirm",
+    ) -> dict[str, Any]:
+        result = DraftReviewService(self._open_store(project_id)).accept_draft_manually(
+            draft_id,
+            reason_code=reason_code,
+        )
         return result.to_dict()
 
     def list_reviews(self, project_id: str) -> list[dict[str, Any]]:
@@ -359,6 +640,12 @@ class WorkbenchApplicationService:
 
     def read_review(self, project_id: str, review_id: str) -> dict[str, Any]:
         return DraftReviewService(self._open_store(project_id)).read_review(review_id)
+
+    def find_review_for_draft(self, project_id: str, draft_id: str) -> dict[str, Any] | None:
+        return DraftReviewService(self._open_store(project_id)).find_review_for_draft(draft_id)
+
+    def find_ai_review_for_draft(self, project_id: str, draft_id: str) -> dict[str, Any] | None:
+        return DraftReviewService(self._open_store(project_id)).find_ai_review_for_draft(draft_id)
 
     def decide_review(self, project_id: str, review_id: str, *, decision: str, reason_code: str = "") -> dict[str, Any]:
         result = DraftReviewService(self._open_store(project_id)).decide_review(
@@ -380,6 +667,133 @@ class WorkbenchApplicationService:
 
     def generate_revision_draft(self, project_id: str, revision_request_id: str) -> dict[str, Any]:
         result = RevisionRequestService(self._open_store(project_id)).generate_revision_draft(revision_request_id)
+        return result.to_dict()
+
+    def refine_draft_from_ai_review(
+        self,
+        project_id: str,
+        draft_id: str,
+        *,
+        review_id: str = "",
+        instruction: str = "",
+        max_context_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        max_tokens: int | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+        repetition_penalty: float | None = None,
+        stream: bool | None = None,
+        stream_callback: Callable[[str], None] | None = None,
+        reasoning_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        store = self._sync_project_generation_settings_for_runtime(project_id)
+        draft_service = DraftGenerationService(store)
+        review_service = DraftReviewService(store)
+        draft = draft_service.read_draft(draft_id)
+        review = review_service.read_review(review_id) if review_id else review_service.find_ai_review_for_draft(draft_id)
+        if not isinstance(review, dict) or not review:
+            raise RuntimeError("Current draft has no AI review; local/manual review cannot drive AI refinement.")
+        if str(review.get("draft_id") or "") != draft_id or not is_ai_review(review):
+            raise RuntimeError("Only an AI review for this exact draft can drive AI refinement.")
+        chapter_id = str(draft.get("chapter_id") or "")
+        title = str(draft.get("title") or "")
+        settings, _ = self._effective_project_generation_settings(store)
+        prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
+        system_prompt = str(prompting.get("system_prompt") or "") or AI_REFINEMENT_SYSTEM_PROMPT
+        task_prompt = ai_refinement_task_prompt(
+            chapter_id=chapter_id,
+            title=title,
+            instruction=instruction,
+        )
+        render = ContextAssemblerService(store).prompt_render_dry_run(
+            prompt=task_prompt,
+            system_prompt=system_prompt,
+            max_context_tokens=max_context_tokens,
+            chapter_id=chapter_id,
+            include_prompt_text=True,
+            include_context_text=True,
+        ).to_dict()
+        provider_prompt = render_ai_refinement_prompt(render, draft=draft, review=review, instruction=instruction)
+        request_role = provider_request_role_or_writer_fallback(store, "reviser")
+        safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
+        try:
+            response = generate_with_provider(
+                store,
+                ProviderRequest(
+                    role=request_role,
+                    prompt=provider_prompt,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    max_tokens=max_tokens,
+                    presence_penalty=presence_penalty,
+                    frequency_penalty=frequency_penalty,
+                    repetition_penalty=repetition_penalty,
+                    stream=stream,
+                    stream_callback=safe_stream_callback,
+                    metadata={
+                        "ai_review_refinement": True,
+                        "chapter_id": chapter_id,
+                        "draft_id": draft_id,
+                        "review_id": str(review.get("review_id") or ""),
+                        "context_aware_refinement": True,
+                    },
+                ),
+            )
+        except Exception as exc:
+            ChapterWorkflowService(store).record_error(
+                chapter_id,
+                title=title,
+                stage="ai_review_refine_draft",
+                error_type=getattr(exc, "error_type", exc.__class__.__name__),
+                message=str(exc),
+            )
+            raise
+        context_stats = render_context_stats(render)
+        source_sanitized = sanitize_provider_draft_text(str(draft.get("content") or ""))
+        result = draft_service.save_provider_draft_version(
+            chapter_id=chapter_id,
+            title=title,
+            content=response.text,
+            provider_role="reviser",
+            provider=response.provider,
+            model=response.model,
+            finish_reason=response.finish_reason,
+            usage=response.usage,
+            request_summary={
+                "prompt_chars": len(provider_prompt),
+                "system_prompt_chars": len(system_prompt),
+                "review_chars": len(str(review.get("comment") or "")),
+                "source_draft_chars": len(str(draft.get("content") or "")),
+                "provider_source_draft_chars": len(source_sanitized["content"]),
+                "provider_request_role": request_role,
+                "logical_role": "reviser",
+                "metadata_keys": [
+                    "ai_review_refinement",
+                    "chapter_id",
+                    "context_aware_refinement",
+                    "draft_id",
+                    "review_id",
+                ],
+                "source_draft_sanitizer": source_sanitized["summary"],
+                **context_stats,
+            },
+            artifact_metadata={
+                "revision": {
+                    "mode": "ai_review_refinement",
+                    "source_draft_id": draft_id,
+                    "source_review_id": str(review.get("review_id") or ""),
+                    "source_review_type": str(review.get("review_type") or ""),
+                    "source_draft_status": str(draft.get("status") or ""),
+                    "instruction": str(instruction or "").strip(),
+                }
+            },
+        )
         return result.to_dict()
 
     def list_revision_candidates(self, project_id: str, revision_request_id: str) -> dict[str, Any]:
@@ -428,7 +842,7 @@ class WorkbenchApplicationService:
         return FormalContextPlanService(self._open_store(project_id)).read_formal_context_plan(plan_id)
 
     def context_assembly_dry_run(self, project_id: str, *, max_context_tokens: int | None = None) -> dict[str, Any]:
-        return ContextAssemblerService(self._open_store(project_id)).dry_run(
+        return ContextAssemblerService(self._sync_project_generation_settings_for_runtime(project_id)).dry_run(
             max_context_tokens=max_context_tokens,
         ).to_dict()
 
@@ -437,10 +851,12 @@ class WorkbenchApplicationService:
         project_id: str,
         *,
         max_context_tokens: int | None = None,
+        chapter_id: str = "",
         include_text: bool = False,
     ) -> dict[str, Any]:
-        return ContextAssemblerService(self._open_store(project_id)).package_preview(
+        return ContextAssemblerService(self._sync_project_generation_settings_for_runtime(project_id)).package_preview(
             max_context_tokens=max_context_tokens,
+            chapter_id=chapter_id,
             include_text=include_text,
         ).to_dict()
 
@@ -451,15 +867,144 @@ class WorkbenchApplicationService:
         prompt: str,
         system_prompt: str = "",
         max_context_tokens: int | None = None,
+        chapter_id: str = "",
         include_prompt_text: bool = False,
         include_context_text: bool = False,
     ) -> dict[str, Any]:
-        return ContextAssemblerService(self._open_store(project_id)).prompt_render_dry_run(
+        return ContextAssemblerService(self._sync_project_generation_settings_for_runtime(project_id)).prompt_render_dry_run(
             prompt=prompt,
             system_prompt=system_prompt,
             max_context_tokens=max_context_tokens,
+            chapter_id=chapter_id,
             include_prompt_text=include_prompt_text,
             include_context_text=include_context_text,
+        ).to_dict()
+
+    def create_final_assembly_gate(
+        self,
+        project_id: str,
+        *,
+        chapter_id: str,
+        prompt: str,
+        system_prompt: str = "",
+        max_context_tokens: int | None = None,
+    ) -> dict[str, Any]:
+        return FinalAssemblyGateService(self._sync_project_generation_settings_for_runtime(project_id)).create_gate(
+            chapter_id=chapter_id,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_context_tokens=max_context_tokens,
+        ).to_dict()
+
+    def approve_final_assembly_gate(
+        self,
+        project_id: str,
+        gate_id: str,
+        *,
+        reason_code: str = "",
+    ) -> dict[str, Any]:
+        return FinalAssemblyGateService(self._open_store(project_id)).approve_gate(
+            gate_id,
+            reason_code=reason_code,
+        ).to_dict()
+
+    def list_final_assembly_gates(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return FinalAssemblyGateService(self._open_store(project_id)).list_gates(status=status)
+
+    def read_final_assembly_gate(self, project_id: str, gate_id: str) -> dict[str, Any]:
+        return FinalAssemblyGateService(self._open_store(project_id)).read_gate(gate_id)
+
+    def create_final_provider_runbook(self, project_id: str, gate_id: str) -> dict[str, Any]:
+        return FinalProviderRunbookService(self._open_store(project_id)).create_runbook(gate_id).to_dict()
+
+    def list_final_provider_runbooks(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return FinalProviderRunbookService(self._open_store(project_id)).list_runbooks(status=status)
+
+    def read_final_provider_runbook(self, project_id: str, runbook_id: str) -> dict[str, Any]:
+        return FinalProviderRunbookService(self._open_store(project_id)).read_runbook(runbook_id)
+
+    def authorize_final_provider_runbook(
+        self,
+        project_id: str,
+        runbook_id: str,
+        *,
+        reason_code: str = "",
+    ) -> dict[str, Any]:
+        return FinalProviderAuthorizationService(self._open_store(project_id)).authorize_runbook(
+            runbook_id,
+            reason_code=reason_code,
+        ).to_dict()
+
+    def list_final_provider_authorizations(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return FinalProviderAuthorizationService(self._open_store(project_id)).list_authorizations(status=status)
+
+    def read_final_provider_authorization(self, project_id: str, authorization_id: str) -> dict[str, Any]:
+        return FinalProviderAuthorizationService(self._open_store(project_id)).read_authorization(authorization_id)
+
+    def create_final_provider_execution_preflight(self, project_id: str, authorization_id: str) -> dict[str, Any]:
+        return FinalProviderExecutionPreflightService(self._open_store(project_id)).create_preflight(
+            authorization_id,
+        ).to_dict()
+
+    def list_final_provider_execution_preflights(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return FinalProviderExecutionPreflightService(self._open_store(project_id)).list_preflights(status=status)
+
+    def read_final_provider_execution_preflight(self, project_id: str, preflight_id: str) -> dict[str, Any]:
+        return FinalProviderExecutionPreflightService(self._open_store(project_id)).read_preflight(preflight_id)
+
+    def attempt_final_provider_execution(self, project_id: str, preflight_id: str) -> dict[str, Any]:
+        return FinalProviderExecutionAttemptService(self._open_store(project_id)).create_attempt(preflight_id).to_dict()
+
+    def list_final_provider_execution_attempts(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return FinalProviderExecutionAttemptService(self._open_store(project_id)).list_attempts(status=status)
+
+    def read_final_provider_execution_attempt(self, project_id: str, attempt_id: str) -> dict[str, Any]:
+        return FinalProviderExecutionAttemptService(self._open_store(project_id)).read_attempt(attempt_id)
+
+    def create_final_provider_real_execution_readiness(self, project_id: str, attempt_id: str) -> dict[str, Any]:
+        return FinalProviderRealExecutionReadinessService(self._open_store(project_id)).create_readiness(
+            attempt_id,
+        ).to_dict()
+
+    def list_final_provider_real_execution_readiness(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return FinalProviderRealExecutionReadinessService(self._open_store(project_id)).list_readiness(status=status)
+
+    def read_final_provider_real_execution_readiness(self, project_id: str, readiness_id: str) -> dict[str, Any]:
+        return FinalProviderRealExecutionReadinessService(self._open_store(project_id)).read_readiness(readiness_id)
+
+    def execute_final_provider_real(
+        self,
+        project_id: str,
+        readiness_id: str,
+        *,
+        prompt: str,
+        system_prompt: str = "",
+        title: str = "",
+        max_context_tokens: int | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        reason_code: str = "",
+    ) -> dict[str, Any]:
+        return FinalProviderRealExecutionService(self._open_store(project_id)).execute(
+            readiness_id,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            title=title,
+            max_context_tokens=max_context_tokens,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reason_code=reason_code,
+        ).to_dict()
+
+    def list_final_provider_real_executions(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return FinalProviderRealExecutionService(self._open_store(project_id)).list_executions(status=status)
+
+    def read_final_provider_real_execution(self, project_id: str, execution_id: str) -> dict[str, Any]:
+        return FinalProviderRealExecutionService(self._open_store(project_id)).read_execution(execution_id)
+
+    def postcheck_final_provider_real_execution(self, project_id: str, execution_id: str) -> dict[str, Any]:
+        return FinalProviderRealExecutionService(self._open_store(project_id)).postcheck_execution(
+            execution_id,
         ).to_dict()
 
     def enqueue_formal_context_tasks(self, project_id: str, plan_id: str) -> dict[str, Any]:
@@ -494,11 +1039,27 @@ class WorkbenchApplicationService:
     def list_memory_items(self, project_id: str, *, include_text: bool = False) -> list[dict[str, Any]]:
         return MemoryBankService(self._open_store(project_id)).list_memory_items(include_text=include_text)
 
+    def ensure_main_memory_item(self, project_id: str) -> dict[str, Any]:
+        return MemoryBankService(self._open_store(project_id)).ensure_main_memory_item()
+
     def read_memory_item(self, project_id: str, memory_id: str, *, include_text: bool = False) -> dict[str, Any]:
         return MemoryBankService(self._open_store(project_id)).read_memory_item(memory_id, include_text=include_text)
 
-    def set_memory_text(self, project_id: str, memory_id: str, text: str) -> dict[str, Any]:
-        return MemoryBankService(self._open_store(project_id)).set_memory_text(memory_id, text).to_dict()
+    def set_memory_text(
+        self,
+        project_id: str,
+        memory_id: str,
+        text: str,
+        *,
+        source_chapter_ids: list[str] | None = None,
+        target_token_budget: int | None = None,
+    ) -> dict[str, Any]:
+        return MemoryBankService(self._open_store(project_id)).set_memory_text(
+            memory_id,
+            text,
+            source_chapter_ids=source_chapter_ids,
+            target_token_budget=target_token_budget,
+        ).to_dict()
 
     def set_memory_item_enabled(
         self,
@@ -507,11 +1068,13 @@ class WorkbenchApplicationService:
         *,
         enabled: bool,
         reason_code: str = "",
+        target_token_budget: int | None = None,
     ) -> dict[str, Any]:
         return MemoryBankService(self._open_store(project_id)).set_memory_item_enabled(
             memory_id,
             enabled=enabled,
             reason_code=reason_code,
+            target_token_budget=target_token_budget,
         ).to_dict()
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
@@ -572,6 +1135,32 @@ class WorkbenchApplicationService:
             ),
         ).to_dict()
 
+    def run_provider_smoke_test(
+        self,
+        project_id: str,
+        role: str = "writer",
+        *,
+        prompt: str = "Return exactly OK.",
+        system_prompt: str = "",
+        temperature: float | None = 0,
+        max_tokens: int | None = 16,
+        reason_code: str = "",
+    ) -> dict[str, Any]:
+        return ProviderSmokeTestService(self._open_store(project_id)).run_smoke_test(
+            role=role,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reason_code=reason_code,
+        ).to_dict()
+
+    def list_provider_smoke_tests(self, project_id: str, *, status: str = "") -> list[dict[str, Any]]:
+        return ProviderSmokeTestService(self._open_store(project_id)).list_smoke_tests(status=status)
+
+    def read_provider_smoke_test(self, project_id: str, smoke_test_id: str) -> dict[str, Any]:
+        return ProviderSmokeTestService(self._open_store(project_id)).read_smoke_test(smoke_test_id)
+
     def chutes_generate_once(
         self,
         project_id: str,
@@ -586,7 +1175,6 @@ class WorkbenchApplicationService:
         secret_value: str = "",
         temperature: float | None = None,
         max_tokens: int | None = None,
-        allow_network: bool = False,
         clear_secret_after_run: bool = True,
     ) -> dict[str, Any]:
         return chutes_generate_once(
@@ -602,7 +1190,6 @@ class WorkbenchApplicationService:
                 secret_value=secret_value,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                allow_network=allow_network,
                 clear_secret_after_run=clear_secret_after_run,
             ),
         )
@@ -610,5 +1197,160 @@ class WorkbenchApplicationService:
     def list_provider_adapters(self) -> list[dict[str, Any]]:
         return list_provider_adapters()
 
+    def _global_settings_path(self) -> Path:
+        return self.registry.projects_root / GLOBAL_SETTINGS_FILENAME
+
+    def _read_global_settings(self) -> dict[str, Any]:
+        self.registry.initialize()
+        path = self._global_settings_path()
+        if not path.exists():
+            return default_global_settings()
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            return default_global_settings()
+        value = json.loads(text)
+        return value if isinstance(value, dict) else default_global_settings()
+
+    def _write_global_settings(self, settings: dict[str, Any]) -> None:
+        self.registry.initialize()
+        atomic_write_json_file(self._global_settings_path(), settings)
+
+    def _effective_project_generation_settings(
+        self,
+        store: ProjectStore,
+        *,
+        config: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        source_config = config if config is not None else store.read_config()
+        global_settings = self.global_generation_settings()
+        has_override = project_has_generation_settings_override(source_config)
+        settings = effective_layered_generation_settings(global_settings, source_config)
+        if not has_override and config is None:
+            synced = dict(source_config)
+            self._apply_generation_settings_to_config(
+                synced,
+                settings,
+                scope=GENERATION_SETTINGS_SCOPE_GLOBAL,
+            )
+            if synced != source_config:
+                store.write_config(synced)
+        return settings, has_override
+
+    def _sync_project_generation_settings_for_runtime(self, project_id: str) -> ProjectStore:
+        store = self._open_store(project_id)
+        store.initialize()
+        self._effective_project_generation_settings(store)
+        return store
+
+    def _apply_generation_settings_to_config(
+        self,
+        config: dict[str, Any],
+        settings: dict[str, Any],
+        *,
+        scope: str,
+    ) -> None:
+        config["generation_settings"] = settings
+        config["generation_settings_scope"] = scope
+        context_settings = settings.get("context") if isinstance(settings.get("context"), dict) else {}
+        context_policy = config.get("context_policy") if isinstance(config.get("context_policy"), dict) else {}
+        if isinstance(context_settings.get("max_context_tokens"), int):
+            context_policy["max_context_tokens"] = context_settings["max_context_tokens"]
+        if isinstance(context_settings.get("recent_confirmed_chapter_count"), int):
+            context_policy["recent_confirmed_chapter_count"] = context_settings["recent_confirmed_chapter_count"]
+        config["context_policy"] = context_policy
+        config["model_roles"] = merged_writer_sampling_settings(config.get("model_roles"), settings)
+
     def _open_store(self, project_id: str) -> ProjectStore:
         return self.registry.open_project(project_id)
+
+
+def ai_refinement_task_prompt(*, chapter_id: str, title: str = "", instruction: str = "") -> str:
+    heading = f"{chapter_id}"
+    if title:
+        heading = f"{heading}（{title}）"
+    user_instruction = str(instruction or "").strip()
+    lines = [
+        f"请根据 AI 审稿意见精修当前章节：{heading}。",
+        "保持主线、人物动机和已有设定一致；优先解决审稿指出的问题。",
+        "输出必须是修订后的小说正文，不要写分析过程、修改说明、免责声明或 <think>。",
+    ]
+    if user_instruction:
+        lines.append(f"额外精修要求：{user_instruction}")
+    return "\n".join(lines)
+
+
+def render_ai_refinement_prompt(
+    render: dict[str, Any],
+    *,
+    draft: dict[str, Any],
+    review: dict[str, Any],
+    instruction: str = "",
+) -> str:
+    context_text = render_context_prompt(render)
+    draft_text = sanitize_provider_draft_text(str(draft.get("content") or ""))["content"]
+    review_text = str(review.get("comment") or "").strip()
+    chapter_id = str(draft.get("chapter_id") or "")
+    title = str(draft.get("title") or "")
+    version_label = str(draft.get("version_label") or "")
+    lines = [
+        "【精修任务】",
+        "你将根据 AI 审稿意见，把当前草稿改成一个新的修订版。",
+        "只输出小说正文，不要输出修改说明。",
+        "",
+        "【目标章节】",
+        f"章节 ID：{chapter_id}",
+        f"标题：{title or chapter_id}",
+        f"源草稿版本：{version_label or '-'}",
+        "",
+        "【上下文与资料】",
+        context_text or "无额外上下文。",
+        "",
+        "【AI 审稿意见】",
+        review_text or "（无审稿意见）",
+        "",
+        "【当前草稿正文】",
+        draft_text or "（空草稿）",
+    ]
+    if str(instruction or "").strip():
+        lines.extend(["", "【用户额外要求】", str(instruction or "").strip()])
+    lines.extend(
+        [
+            "",
+            "【输出要求】",
+            "直接输出精修后的完整章节正文。",
+            "不要输出审稿、分析、提纲、说明、免责声明或 <think>。",
+        ]
+    )
+    return "\n".join(lines).strip()
+
+
+def merged_writer_sampling_settings(model_roles: object, generation_settings: dict[str, Any]) -> dict[str, Any]:
+    roles = model_roles if isinstance(model_roles, dict) else {}
+    writer = roles.get("writer") if isinstance(roles.get("writer"), dict) else {}
+    writer_settings = writer.get("settings") if isinstance(writer.get("settings"), dict) else {}
+    sampling = generation_settings.get("sampling") if isinstance(generation_settings.get("sampling"), dict) else {}
+    mapped = {
+        key: sampling.get(key)
+        for key in (
+            "temperature",
+            "top_p",
+            "top_k",
+            "min_p",
+            "max_tokens",
+            "presence_penalty",
+            "frequency_penalty",
+            "repetition_penalty",
+            "stream",
+        )
+        if key in sampling
+    }
+    return {
+        **roles,
+        "writer": {
+            **writer,
+            "settings": {
+                **writer_settings,
+                **mapped,
+            },
+        },
+    }

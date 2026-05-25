@@ -7,7 +7,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from .providers import CHUTES_PROVIDER_ID, REAL_GENERATION_FLAG, ModelRoleConfig, get_provider_adapter
+from .providers import (
+    ModelRoleConfig,
+    get_model_role_config,
+    get_provider_adapter,
+    safe_url_host,
+)
 from .project_state import public_project_state
 from .storage import ProjectStore
 
@@ -96,6 +101,7 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
             ("possible_secret_in_memory_bank", SECRET_PATTERNS),
         ],
     )
+    audit_planning_library(store, checked_paths=checked_paths, findings=findings)
     audit_context_previews(store, checked_paths=checked_paths, findings=findings)
     audit_corpus_boundaries(store, checked_paths=checked_paths, findings=findings)
     audit_corpus_profiles(store, checked_paths=checked_paths, findings=findings)
@@ -105,6 +111,15 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
     audit_style_suggestions(store, checked_paths=checked_paths, findings=findings)
     audit_manual_rewrite_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_manual_rewrite_comparisons(store, checked_paths=checked_paths, findings=findings)
+    audit_review_handoffs(store, checked_paths=checked_paths, findings=findings)
+    audit_final_assembly_gates(store, checked_paths=checked_paths, findings=findings)
+    audit_final_provider_runbooks(store, checked_paths=checked_paths, findings=findings)
+    audit_final_provider_authorizations(store, checked_paths=checked_paths, findings=findings)
+    audit_final_provider_execution_preflights(store, checked_paths=checked_paths, findings=findings)
+    audit_final_provider_execution_attempts(store, checked_paths=checked_paths, findings=findings)
+    audit_final_provider_real_execution_readiness(store, checked_paths=checked_paths, findings=findings)
+    audit_final_provider_real_executions(store, checked_paths=checked_paths, findings=findings)
+    audit_provider_smoke_tests(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_plans(store, checked_paths=checked_paths, findings=findings)
     audit_formal_context_tasks(store, checked_paths=checked_paths, findings=findings)
     audit_memory_apply_previews(store, checked_paths=checked_paths, findings=findings)
@@ -122,6 +137,65 @@ def audit_project(store: ProjectStore) -> dict[str, Any]:
         "findings": [finding.to_dict() for finding in findings],
         "checked_paths": checked_paths,
     }
+
+
+def audit_planning_library(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    path = store.data_dir / "planning_library.json"
+    check_text_file(
+        path,
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=[("possible_secret_in_planning_library", SECRET_PATTERNS)],
+    )
+    library = read_json_file(path, checked_paths=checked_paths, findings=findings)
+    items = list_items(library, "items")
+    active_reference_ids = (
+        library.get("active_reference_ids")
+        if isinstance(library, dict) and isinstance(library.get("active_reference_ids"), list)
+        else []
+    )
+    expected_ids: list[str] = []
+    seen_ids: set[str] = set()
+    for item in items:
+        planning_id = str(item.get("planning_id") or item.get("id") or "")
+        if not planning_id:
+            findings.append(
+                AuditFinding(
+                    code="planning_library_item_missing_id",
+                    path=str(path),
+                    message="Planning Library item has no planning_id.",
+                )
+            )
+            continue
+        if planning_id in seen_ids:
+            findings.append(
+                AuditFinding(
+                    code="planning_library_duplicate_id",
+                    path=str(path),
+                    message=f"Planning Library item id is duplicated: {planning_id}",
+                )
+            )
+        seen_ids.add(planning_id)
+        enabled = item.get("enabled") if isinstance(item.get("enabled"), bool) else True
+        if enabled and bool(item.get("active")):
+            expected_ids.append(planning_id)
+        safety = item.get("safety") if isinstance(item.get("safety"), dict) else {}
+        if safety.get("provider_called") is not False or safety.get("auto_commit") is not False:
+            findings.append(
+                AuditFinding(
+                    code="planning_library_safety_flag_invalid",
+                    path=str(path),
+                    message="Planning Library items must remain manual/local and must not auto-commit.",
+                )
+            )
+    if [str(item) for item in active_reference_ids] != expected_ids:
+        findings.append(
+            AuditFinding(
+                code="planning_library_active_reference_ids_stale",
+                path=str(path),
+                message="Planning Library active_reference_ids does not match active enabled items.",
+            )
+        )
 
 
 def check_text_file(
@@ -160,6 +234,59 @@ def audit_reviews(store: ProjectStore, *, checked_paths: list[str], findings: li
         return
     for path in sorted(reviews_dir.glob("*.json")):
         check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is not None:
+            audit_review_manual_rewrite_gate(store, artifact, path=str(path), checked_paths=checked_paths, findings=findings)
+
+
+def audit_review_manual_rewrite_gate(
+    store: ProjectStore,
+    review: dict[str, Any],
+    *,
+    path: str,
+    checked_paths: list[str],
+    findings: list[AuditFinding],
+) -> None:
+    draft_id = str(review.get("draft_id") or "")
+    if not draft_id:
+        return
+    draft_entry = None
+    draft_index = read_json_file(store.data_dir / "drafts_index.json", checked_paths=checked_paths, findings=findings)
+    for item in list_items(draft_index, "drafts"):
+        if str(item.get("draft_id") or "") == draft_id:
+            draft_entry = item
+            break
+    if draft_entry is None:
+        return
+    path_value = draft_entry.get("path")
+    if not isinstance(path_value, str) or not path_value:
+        return
+    draft_path = project_relative_artifact_path(store, path_value)
+    if draft_path is None:
+        return
+    draft = read_json_file(draft_path, checked_paths=checked_paths, findings=findings)
+    manual_rewrite = draft.get("manual_rewrite") if isinstance(draft, dict) and isinstance(draft.get("manual_rewrite"), dict) else {}
+    if str(manual_rewrite.get("mode") or "") != "manual_rewrite_draft_candidate":
+        return
+    request_summary = review.get("request_summary") if isinstance(review.get("request_summary"), dict) else {}
+    gate = request_summary.get("manual_rewrite_review_gate") if isinstance(request_summary.get("manual_rewrite_review_gate"), dict) else {}
+    if gate.get("required") is not True or gate.get("allowed") is not True:
+        findings.append(
+            AuditFinding(
+                code="manual_rewrite_review_gate_missing",
+                path=path,
+                message="Review of a manual rewrite submitted draft must record an allowed manual rewrite review gate.",
+            )
+        )
+        return
+    if str(gate.get("matched_gate") or "") not in {"selected_for_review_comparison", "pending_review_handoff"}:
+        findings.append(
+            AuditFinding(
+                code="manual_rewrite_review_gate_invalid",
+                path=path,
+                message="Manual rewrite review gate must be selected_for_review comparison or pending_review handoff.",
+            )
+        )
 
 
 def audit_revision_requests(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
@@ -593,6 +720,1103 @@ def audit_manual_rewrite_comparisons(
                     message="Manual rewrite comparisons must not touch confirmed chapters, Memory Bank, RAG, or exports.",
                 )
             )
+
+
+def audit_review_handoffs(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_review_handoff", PROMPT_PATTERNS),
+        ("possible_secret_in_review_handoff", SECRET_PATTERNS),
+        ("possible_content_in_review_handoff", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "review_handoffs_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    handoffs_dir = store.data_dir / "review_handoffs"
+    checked_paths.append(str(handoffs_dir))
+    if not handoffs_dir.exists():
+        return
+    for path in sorted(handoffs_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_self_style_text(artifact):
+            findings.append(
+                AuditFinding(
+                    code="review_handoff_text_stored",
+                    path=str(path),
+                    message="Review handoffs must not store draft, prompt, or corpus text.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        if safety.get("provider_called") is not False or safety.get("external_corpus_used") is not False:
+            findings.append(
+                AuditFinding(
+                    code="review_handoff_boundary_invalid",
+                    path=str(path),
+                    message="Review handoffs must be local-only and must not use Providers or external corpora.",
+                )
+            )
+        if (
+            safety.get("auto_review") is not False
+            or safety.get("auto_apply") is not False
+            or safety.get("auto_generate_draft") is not False
+            or safety.get("auto_revision_request") is not False
+            or safety.get("auto_commit") is not False
+        ):
+            findings.append(
+                AuditFinding(
+                    code="review_handoff_side_effect_flag_invalid",
+                    path=str(path),
+                    message="Review handoffs must not auto-review, auto-generate, auto-revise, or auto-commit.",
+                )
+            )
+        if (
+            safety.get("confirmed_touched") is not False
+            or safety.get("memory_bank_touched") is not False
+            or safety.get("rag_touched") is not False
+            or safety.get("exports_touched") is not False
+        ):
+            findings.append(
+                AuditFinding(
+                    code="review_handoff_formal_context_flag_invalid",
+                    path=str(path),
+                    message="Review handoffs must not touch confirmed chapters, Memory Bank, RAG, or exports.",
+                )
+            )
+
+
+def audit_final_assembly_gates(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_final_assembly_gate", PROMPT_PATTERNS),
+        ("possible_secret_in_final_assembly_gate", SECRET_PATTERNS),
+        ("possible_content_in_final_assembly_gate", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "final_assembly_gates_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    gates_dir = store.data_dir / "final_assembly_gates"
+    checked_paths.append(str(gates_dir))
+    if not gates_dir.exists():
+        return
+    for path in sorted(gates_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_final_assembly_text_key(artifact):
+            findings.append(
+                AuditFinding(
+                    code="final_assembly_gate_text_stored",
+                    path=str(path),
+                    message="Final assembly gates must store digests and metadata only, not prompt/context text.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        for key in (
+            "provider_called",
+            "prompt_text_stored",
+            "context_text_stored",
+            "chapter_text_stored",
+            "secret_text_stored",
+            "writes_draft",
+            "auto_commit",
+            "memory_bank_touched",
+            "rag_touched",
+            "exports_touched",
+            "ui_touched",
+            "docx_touched",
+        ):
+            if safety.get(key) is not False:
+                findings.append(
+                    AuditFinding(
+                        code="final_assembly_gate_safety_flag_invalid",
+                        path=str(path),
+                        message=f"Final assembly gate safety flag must be false: {key}",
+                    )
+                )
+        if str(artifact.get("status") or "") == "approved":
+            approval = artifact.get("approval") if isinstance(artifact.get("approval"), dict) else {}
+            if str(approval.get("status") or "") != "approved" or not str(approval.get("approved_at") or ""):
+                findings.append(
+                    AuditFinding(
+                        code="final_assembly_gate_approval_invalid",
+                        path=str(path),
+                        message="Approved final assembly gate must contain approval metadata.",
+                    )
+                )
+
+
+def contains_forbidden_final_assembly_text_key(value: object) -> bool:
+    forbidden = {"prompt", "system_prompt", "text", "content", "context_text", "prompt_text", "chapter_text"}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                return True
+            if contains_forbidden_final_assembly_text_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_final_assembly_text_key(item) for item in value)
+    return False
+
+
+def audit_final_provider_runbooks(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_final_provider_runbook", PROMPT_PATTERNS),
+        ("possible_secret_in_final_provider_runbook", SECRET_PATTERNS),
+        ("possible_content_in_final_provider_runbook", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "final_provider_runbooks_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    runbooks_dir = store.data_dir / "final_provider_runbooks"
+    checked_paths.append(str(runbooks_dir))
+    if not runbooks_dir.exists():
+        return
+    for path in sorted(runbooks_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_final_provider_runbook_text_key(artifact):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_runbook_text_stored",
+                    path=str(path),
+                    message="Final Provider runbooks must store digests and metadata only, not prompt/context/chapter text.",
+                )
+            )
+        if str(artifact.get("status") or "") != "pending_operator_authorization":
+            findings.append(
+                AuditFinding(
+                    code="final_provider_runbook_status_invalid",
+                    path=str(path),
+                    message="Final Provider runbook status must remain pending_operator_authorization.",
+                )
+            )
+        source_gate = artifact.get("source_gate") if isinstance(artifact.get("source_gate"), dict) else {}
+        if str(source_gate.get("status") or "") != "approved" or not str(source_gate.get("approved_at") or ""):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_runbook_gate_not_approved",
+                    path=str(path),
+                    message="Final Provider runbooks must be derived from an approved final assembly gate.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        for key in (
+            "provider_called",
+            "real_llm_called",
+            "prompt_text_stored",
+            "context_text_stored",
+            "chapter_text_stored",
+            "secret_text_stored",
+            "writes_draft",
+            "auto_commit",
+            "memory_bank_touched",
+            "rag_touched",
+            "exports_touched",
+            "ui_touched",
+            "docx_touched",
+        ):
+            if safety.get(key) is not False:
+                findings.append(
+                    AuditFinding(
+                        code="final_provider_runbook_safety_flag_invalid",
+                        path=str(path),
+                        message=f"Final Provider runbook safety flag must be false: {key}",
+                    )
+                )
+
+
+def contains_forbidden_final_provider_runbook_text_key(value: object) -> bool:
+    forbidden = {
+        "prompt",
+        "system_prompt",
+        "text",
+        "content",
+        "context_text",
+        "prompt_text",
+        "chapter_text",
+        "raw_response",
+        "request_body",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                return True
+            if contains_forbidden_final_provider_runbook_text_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_final_provider_runbook_text_key(item) for item in value)
+    return False
+
+
+def audit_final_provider_authorizations(
+    store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]
+) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_final_provider_authorization", PROMPT_PATTERNS),
+        ("possible_secret_in_final_provider_authorization", SECRET_PATTERNS),
+        ("possible_content_in_final_provider_authorization", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "final_provider_authorizations_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    authorizations_dir = store.data_dir / "final_provider_authorizations"
+    checked_paths.append(str(authorizations_dir))
+    if not authorizations_dir.exists():
+        return
+    for path in sorted(authorizations_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_final_provider_authorization_text_key(artifact):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_authorization_text_stored",
+                    path=str(path),
+                    message="Final Provider authorizations must store digests and metadata only, not prompt/context/chapter text.",
+                )
+            )
+        if str(artifact.get("status") or "") != "authorized_pending_execution":
+            findings.append(
+                AuditFinding(
+                    code="final_provider_authorization_status_invalid",
+                    path=str(path),
+                    message="Final Provider authorization status must remain authorized_pending_execution.",
+                )
+            )
+        source_gate = artifact.get("source_gate") if isinstance(artifact.get("source_gate"), dict) else {}
+        if str(source_gate.get("status") or "") != "approved" or not str(source_gate.get("approved_at") or ""):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_authorization_gate_not_approved",
+                    path=str(path),
+                    message="Final Provider authorizations must reference an approved source gate.",
+                )
+            )
+        source_runbook = artifact.get("source_runbook") if isinstance(artifact.get("source_runbook"), dict) else {}
+        if str(source_runbook.get("status") or "") != "pending_operator_authorization":
+            findings.append(
+                AuditFinding(
+                    code="final_provider_authorization_runbook_status_invalid",
+                    path=str(path),
+                    message="Final Provider authorizations must reference a pending operator runbook.",
+                )
+            )
+        checkpoint = artifact.get("checkpoint") if isinstance(artifact.get("checkpoint"), dict) else {}
+        if not str(checkpoint.get("checkpoint_id") or "") or checkpoint.get("include_secrets") is not False:
+            findings.append(
+                AuditFinding(
+                    code="final_provider_authorization_checkpoint_invalid",
+                    path=str(path),
+                    message="Final Provider authorization must record a no-secrets pre-authorization checkpoint.",
+                )
+            )
+        execution_boundary = artifact.get("execution_boundary") if isinstance(artifact.get("execution_boundary"), dict) else {}
+        if (
+            execution_boundary.get("execution_started") is not False
+            or execution_boundary.get("requires_separate_operator_execute_authorization") is not True
+        ):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_authorization_execution_boundary_invalid",
+                    path=str(path),
+                    message="Final Provider authorization must not start execution or enable the real Provider.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        for key in (
+            "provider_called",
+            "real_llm_called",
+            "prompt_text_stored",
+            "context_text_stored",
+            "chapter_text_stored",
+            "secret_text_stored",
+            "writes_draft",
+            "auto_commit",
+            "memory_bank_touched",
+            "rag_touched",
+            "exports_touched",
+            "ui_touched",
+            "docx_touched",
+        ):
+            if safety.get(key) is not False:
+                findings.append(
+                    AuditFinding(
+                        code="final_provider_authorization_safety_flag_invalid",
+                        path=str(path),
+                        message=f"Final Provider authorization safety flag must be false: {key}",
+                    )
+                )
+
+
+def contains_forbidden_final_provider_authorization_text_key(value: object) -> bool:
+    forbidden = {
+        "prompt",
+        "system_prompt",
+        "text",
+        "content",
+        "context_text",
+        "prompt_text",
+        "chapter_text",
+        "raw_response",
+        "request_body",
+        "plain_token",
+        "token",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                return True
+            if contains_forbidden_final_provider_authorization_text_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_final_provider_authorization_text_key(item) for item in value)
+    return False
+
+
+def audit_final_provider_execution_preflights(
+    store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]
+) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_final_provider_execution_preflight", PROMPT_PATTERNS),
+        ("possible_secret_in_final_provider_execution_preflight", SECRET_PATTERNS),
+        ("possible_content_in_final_provider_execution_preflight", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "final_provider_execution_preflights_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    preflights_dir = store.data_dir / "final_provider_execution_preflights"
+    checked_paths.append(str(preflights_dir))
+    if not preflights_dir.exists():
+        return
+    for path in sorted(preflights_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_final_provider_execution_preflight_text_key(artifact):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_preflight_text_stored",
+                    path=str(path),
+                    message="Final Provider execution preflights must store digests and metadata only, not prompt/context/chapter text.",
+                )
+            )
+        status = str(artifact.get("status") or "")
+        if status not in {"passed_pending_execute_authorization", "blocked"}:
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_preflight_status_invalid",
+                    path=str(path),
+                    message="Final Provider execution preflight status must be passed_pending_execute_authorization or blocked.",
+                )
+            )
+        checks = artifact.get("check_results") if isinstance(artifact.get("check_results"), list) else []
+        issues = [item for item in checks if isinstance(item, dict) and item.get("passed") is not True]
+        if status == "passed_pending_execute_authorization" and issues:
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_preflight_passed_with_issues",
+                    path=str(path),
+                    message="Passed final Provider execution preflight must not contain failed checks.",
+                )
+            )
+        if status == "blocked" and not issues:
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_preflight_blocked_without_issues",
+                    path=str(path),
+                    message="Blocked final Provider execution preflight must contain failed checks.",
+                )
+            )
+        execution_boundary = artifact.get("execution_boundary") if isinstance(artifact.get("execution_boundary"), dict) else {}
+        if (
+            execution_boundary.get("preflight_only") is not True
+            or execution_boundary.get("execution_started") is not False
+            or execution_boundary.get("requires_separate_operator_execute_authorization") is not True
+        ):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_preflight_boundary_invalid",
+                    path=str(path),
+                    message="Final Provider execution preflight must remain a preflight-only, no-execution artifact.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        for key in (
+            "provider_called",
+            "real_llm_called",
+            "prompt_text_stored",
+            "context_text_stored",
+            "chapter_text_stored",
+            "secret_text_stored",
+            "writes_draft",
+            "auto_commit",
+            "memory_bank_touched",
+            "rag_touched",
+            "exports_touched",
+            "ui_touched",
+            "docx_touched",
+        ):
+            if safety.get(key) is not False:
+                findings.append(
+                    AuditFinding(
+                        code="final_provider_execution_preflight_safety_flag_invalid",
+                        path=str(path),
+                        message=f"Final Provider execution preflight safety flag must be false: {key}",
+                    )
+                )
+
+
+def contains_forbidden_final_provider_execution_preflight_text_key(value: object) -> bool:
+    forbidden = {
+        "prompt",
+        "system_prompt",
+        "text",
+        "content",
+        "context_text",
+        "prompt_text",
+        "chapter_text",
+        "raw_response",
+        "request_body",
+        "plain_token",
+        "token",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                return True
+            if contains_forbidden_final_provider_execution_preflight_text_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_final_provider_execution_preflight_text_key(item) for item in value)
+    return False
+
+
+def audit_final_provider_execution_attempts(
+    store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]
+) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_final_provider_execution_attempt", PROMPT_PATTERNS),
+        ("possible_secret_in_final_provider_execution_attempt", SECRET_PATTERNS),
+        ("possible_content_in_final_provider_execution_attempt", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "final_provider_execution_attempts_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    attempts_dir = store.data_dir / "final_provider_execution_attempts"
+    checked_paths.append(str(attempts_dir))
+    if not attempts_dir.exists():
+        return
+    for path in sorted(attempts_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_final_provider_execution_attempt_text_key(artifact):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_attempt_text_stored",
+                    path=str(path),
+                    message="Final Provider execution attempts must store metadata only, not prompt/context/chapter text.",
+                )
+            )
+        if str(artifact.get("status") or "") != "aborted_real_llm_disabled":
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_attempt_status_invalid",
+                    path=str(path),
+                    message="Final Provider execution attempt status must remain aborted_real_llm_disabled.",
+                )
+            )
+        if str(artifact.get("abort_reason_code") or "") != "real_llm_disabled_by_policy":
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_attempt_abort_reason_invalid",
+                    path=str(path),
+                    message="Final Provider execution attempt must record real_llm_disabled_by_policy.",
+                )
+            )
+        source_preflight = artifact.get("source_preflight") if isinstance(artifact.get("source_preflight"), dict) else {}
+        if str(source_preflight.get("status") or "") != "passed_pending_execute_authorization" or int(source_preflight.get("issue_count") or 0) != 0:
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_attempt_preflight_invalid",
+                    path=str(path),
+                    message="Final Provider execution attempts must reference a passed zero-issue preflight.",
+                )
+            )
+        execution_boundary = artifact.get("execution_boundary") if isinstance(artifact.get("execution_boundary"), dict) else {}
+        if (
+            execution_boundary.get("stub_only") is not True
+            or execution_boundary.get("execution_started") is not False
+            or execution_boundary.get("execution_aborted") is not True
+            or execution_boundary.get("provider_called") is not False
+            or execution_boundary.get("requires_explicit_real_llm_authorization") is not True
+        ):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_execution_attempt_boundary_invalid",
+                    path=str(path),
+                    message="Final Provider execution attempt must remain a fail-closed abort stub.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        for key in (
+            "provider_called",
+            "real_llm_called",
+            "prompt_text_stored",
+            "context_text_stored",
+            "chapter_text_stored",
+            "secret_text_stored",
+            "writes_draft",
+            "auto_commit",
+            "memory_bank_touched",
+            "rag_touched",
+            "exports_touched",
+            "ui_touched",
+            "docx_touched",
+        ):
+            if safety.get(key) is not False:
+                findings.append(
+                    AuditFinding(
+                        code="final_provider_execution_attempt_safety_flag_invalid",
+                        path=str(path),
+                        message=f"Final Provider execution attempt safety flag must be false: {key}",
+                    )
+                )
+
+
+def contains_forbidden_final_provider_execution_attempt_text_key(value: object) -> bool:
+    forbidden = {
+        "prompt",
+        "system_prompt",
+        "text",
+        "content",
+        "context_text",
+        "prompt_text",
+        "chapter_text",
+        "raw_response",
+        "request_body",
+        "plain_token",
+        "token",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                return True
+            if contains_forbidden_final_provider_execution_attempt_text_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_final_provider_execution_attempt_text_key(item) for item in value)
+    return False
+
+
+def audit_final_provider_real_execution_readiness(
+    store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]
+) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_final_provider_real_execution_readiness", PROMPT_PATTERNS),
+        ("possible_secret_in_final_provider_real_execution_readiness", SECRET_PATTERNS),
+        ("possible_content_in_final_provider_real_execution_readiness", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "final_provider_real_execution_readiness_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    readiness_dir = store.data_dir / "final_provider_real_execution_readiness"
+    checked_paths.append(str(readiness_dir))
+    if not readiness_dir.exists():
+        return
+    for path in sorted(readiness_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_final_provider_real_execution_readiness_text_key(artifact):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_readiness_text_stored",
+                    path=str(path),
+                    message="Final Provider real execution readiness must store metadata only, not prompt/context/chapter text.",
+                )
+            )
+        status = str(artifact.get("status") or "")
+        if status not in {"ready_for_manual_real_llm_authorization", "blocked"}:
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_readiness_status_invalid",
+                    path=str(path),
+                    message="Final Provider real execution readiness status is invalid.",
+                )
+            )
+        issue_count = int(artifact.get("issue_count") or 0)
+        if status == "ready_for_manual_real_llm_authorization" and issue_count != 0:
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_readiness_ready_with_issues",
+                    path=str(path),
+                    message="Ready real execution readiness reports must have zero issues.",
+                )
+            )
+        if status == "blocked" and issue_count == 0:
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_readiness_blocked_without_issues",
+                    path=str(path),
+                    message="Blocked real execution readiness reports must record at least one issue.",
+                )
+            )
+        source_attempt = artifact.get("source_attempt") if isinstance(artifact.get("source_attempt"), dict) else {}
+        if (
+            str(source_attempt.get("status") or "") != "aborted_real_llm_disabled"
+            or str(source_attempt.get("abort_reason_code") or "") != "real_llm_disabled_by_policy"
+        ):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_readiness_attempt_invalid",
+                    path=str(path),
+                    message="Real execution readiness must derive from a fail-closed aborted execution attempt.",
+                )
+            )
+        execution_boundary = artifact.get("execution_boundary") if isinstance(artifact.get("execution_boundary"), dict) else {}
+        if (
+            execution_boundary.get("readiness_only") is not True
+            or execution_boundary.get("execution_started") is not False
+            or execution_boundary.get("provider_called") is not False
+            or execution_boundary.get("real_llm_called") is not False
+            or execution_boundary.get("requires_explicit_real_llm_authorization") is not True
+            or execution_boundary.get("requires_key_before_execution") is not True
+            or execution_boundary.get("requires_network_before_execution") is not True
+            or execution_boundary.get("writes_draft") is not False
+        ):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_readiness_boundary_invalid",
+                    path=str(path),
+                    message="Real execution readiness must remain no-network and no-execution.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        for key in (
+            "provider_called",
+            "real_llm_called",
+            "secret_value_read",
+            "prompt_text_stored",
+            "context_text_stored",
+            "chapter_text_stored",
+            "secret_text_stored",
+            "writes_draft",
+            "auto_commit",
+            "memory_bank_touched",
+            "rag_touched",
+            "exports_touched",
+            "ui_touched",
+            "docx_touched",
+        ):
+            if safety.get(key) is not False:
+                findings.append(
+                    AuditFinding(
+                        code="final_provider_real_execution_readiness_safety_flag_invalid",
+                        path=str(path),
+                        message=f"Final Provider real execution readiness safety flag must be false: {key}",
+                    )
+                )
+
+
+def contains_forbidden_final_provider_real_execution_readiness_text_key(value: object) -> bool:
+    forbidden = {
+        "prompt",
+        "system_prompt",
+        "text",
+        "content",
+        "context_text",
+        "prompt_text",
+        "chapter_text",
+        "raw_response",
+        "request_body",
+        "plain_token",
+        "token",
+        "api_key",
+        "secret_value",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                return True
+            if contains_forbidden_final_provider_real_execution_readiness_text_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_final_provider_real_execution_readiness_text_key(item) for item in value)
+    return False
+
+
+def audit_final_provider_real_executions(
+    store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]
+) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_final_provider_real_execution", PROMPT_PATTERNS),
+        ("possible_secret_in_final_provider_real_execution", SECRET_PATTERNS),
+        ("possible_content_in_final_provider_real_execution", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "final_provider_real_executions_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    executions_dir = store.data_dir / "final_provider_real_executions"
+    checked_paths.append(str(executions_dir))
+    if not executions_dir.exists():
+        return
+    for path in sorted(executions_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_final_provider_real_execution_text_key(artifact):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_text_stored",
+                    path=str(path),
+                    message="Final Provider real execution artifacts must store metadata only, not prompt/context/chapter text.",
+                )
+            )
+        if str(artifact.get("status") or "") != "draft_created":
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_status_invalid",
+                    path=str(path),
+                    message="Final Provider real execution status must be draft_created in this phase.",
+                )
+            )
+        source_readiness = artifact.get("source_readiness") if isinstance(artifact.get("source_readiness"), dict) else {}
+        if (
+            str(source_readiness.get("status") or "") != "ready_for_manual_real_llm_authorization"
+            or int(source_readiness.get("issue_count") or 0) != 0
+        ):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_readiness_invalid",
+                    path=str(path),
+                    message="Final Provider real execution must derive from a ready zero-issue readiness report.",
+                )
+            )
+        trigger = artifact.get("operator_trigger") if isinstance(artifact.get("operator_trigger"), dict) else {}
+        legacy_authorization = (
+            artifact.get("operator_authorization") if isinstance(artifact.get("operator_authorization"), dict) else {}
+        )
+        user_triggered = trigger.get("user_triggered") is True or legacy_authorization.get("allow_network") is True
+        if not user_triggered:
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_authorization_invalid",
+                    path=str(path),
+                    message="Final Provider real execution must record a user-triggered execution.",
+                )
+            )
+        execution_boundary = artifact.get("execution_boundary") if isinstance(artifact.get("execution_boundary"), dict) else {}
+        boundary_user_triggered = (
+            execution_boundary.get("user_triggered") is True
+            and execution_boundary.get("network_gate_removed") is True
+        )
+        legacy_boundary = (
+            execution_boundary.get("real_provider_enabled_temporarily") is True
+            and execution_boundary.get("real_provider_disabled_after_run") is True
+        )
+        if (
+            execution_boundary.get("execution_started") is not True
+            or execution_boundary.get("provider_called") is not True
+            or execution_boundary.get("real_llm_called") is not True
+            or execution_boundary.get("writes_draft") is not True
+            or execution_boundary.get("auto_commit") is not False
+            or (not boundary_user_triggered and not legacy_boundary)
+        ):
+            findings.append(
+                AuditFinding(
+                    code="final_provider_real_execution_boundary_invalid",
+                    path=str(path),
+                    message="Final Provider real execution boundary metadata is invalid.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        expected_true = {"provider_called", "real_llm_called", "secret_value_read", "writes_draft"}
+        safety_keys = [
+            "provider_called",
+            "real_llm_called",
+            "secret_value_read",
+            "prompt_text_stored",
+            "context_text_stored",
+            "chapter_text_stored",
+            "secret_text_stored",
+            "writes_draft",
+            "auto_commit",
+            "memory_bank_touched",
+            "rag_touched",
+            "exports_touched",
+            "ui_touched",
+            "docx_touched",
+        ]
+        if "operator_trigger" in artifact or "user_triggered" in safety:
+            expected_true.add("user_triggered")
+            safety_keys.insert(2, "user_triggered")
+        if "real_provider_enabled" in safety:
+            expected_true.add("real_provider_enabled")
+            safety_keys.insert(2, "real_provider_enabled")
+        for key in safety_keys:
+            expected = key in expected_true
+            if safety.get(key) is not expected:
+                findings.append(
+                    AuditFinding(
+                        code="final_provider_real_execution_safety_flag_invalid",
+                        path=str(path),
+                        message=f"Final Provider real execution safety flag is invalid: {key}",
+                    )
+                )
+
+
+def contains_forbidden_final_provider_real_execution_text_key(value: object) -> bool:
+    forbidden = {
+        "prompt",
+        "system_prompt",
+        "text",
+        "content",
+        "context_text",
+        "prompt_text",
+        "chapter_text",
+        "generated_text",
+        "raw_response",
+        "request_body",
+        "plain_token",
+        "token",
+        "api_key",
+        "secret_value",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                return True
+            if contains_forbidden_final_provider_real_execution_text_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_final_provider_real_execution_text_key(item) for item in value)
+    return False
+
+
+def audit_provider_smoke_tests(store: ProjectStore, *, checked_paths: list[str], findings: list[AuditFinding]) -> None:
+    pattern_groups = [
+        ("possible_prompt_in_provider_smoke_test", PROMPT_PATTERNS),
+        ("possible_secret_in_provider_smoke_test", SECRET_PATTERNS),
+        ("possible_content_in_provider_smoke_test", CONTENT_PATTERNS),
+    ]
+    check_text_file(
+        store.data_dir / "provider_smoke_tests_index.json",
+        checked_paths=checked_paths,
+        findings=findings,
+        pattern_groups=pattern_groups,
+    )
+    smoke_dir = store.data_dir / "provider_smoke_tests"
+    checked_paths.append(str(smoke_dir))
+    if not smoke_dir.exists():
+        return
+    passed_artifacts_with_snapshot: list[tuple[dict[str, Any], str]] = []
+    for path in sorted(smoke_dir.glob("*.json")):
+        check_text_file(path, checked_paths=checked_paths, findings=findings, pattern_groups=pattern_groups)
+        artifact = read_json_file(path, checked_paths=checked_paths, findings=findings)
+        if artifact is None:
+            continue
+        if contains_forbidden_provider_smoke_test_text_key(artifact):
+            findings.append(
+                AuditFinding(
+                    code="provider_smoke_test_text_stored",
+                    path=str(path),
+                    message="Provider smoke-test artifacts must store metadata only, not prompt/response/request/draft text.",
+                )
+            )
+        status = str(artifact.get("status") or "")
+        if status not in {"passed", "failed", "blocked_network_not_authorized"}:
+            findings.append(
+                AuditFinding(
+                    code="provider_smoke_test_status_invalid",
+                    path=str(path),
+                    message="Provider smoke-test status is invalid.",
+                )
+            )
+        network_attempted = bool(artifact.get("network_attempted"))
+        ok = bool(artifact.get("ok"))
+        trigger = artifact.get("operator_trigger") if isinstance(artifact.get("operator_trigger"), dict) else {}
+        legacy_authorization = (
+            artifact.get("operator_authorization") if isinstance(artifact.get("operator_authorization"), dict) else {}
+        )
+        user_triggered = trigger.get("user_triggered") is True or legacy_authorization.get("allow_network") is True
+        if status == "passed" and (ok is not True or network_attempted is not True or not user_triggered):
+            findings.append(
+                AuditFinding(
+                    code="provider_smoke_test_passed_state_invalid",
+                    path=str(path),
+                    message="Passed Provider smoke tests must record ok=true, network_attempted=true, and user_triggered=true.",
+                )
+            )
+        if status == "blocked_network_not_authorized" and (
+            ok is not False or network_attempted is not False or legacy_authorization.get("allow_network") is not False
+        ):
+            findings.append(
+                AuditFinding(
+                    code="provider_smoke_test_blocked_state_invalid",
+                    path=str(path),
+                    message="Legacy blocked Provider smoke tests must not be ok, must not attempt network, and must record allow_network=false.",
+                )
+            )
+        classification = artifact.get("classification") if isinstance(artifact.get("classification"), dict) else {}
+        if (
+            classification.get("sample_only") is not True
+            or classification.get("non_committable") is not True
+            or classification.get("writes_draft") is not False
+            or classification.get("auto_commit") is not False
+        ):
+            findings.append(
+                AuditFinding(
+                    code="provider_smoke_test_classification_invalid",
+                    path=str(path),
+                    message="Provider smoke tests must be sample-only, non-committable, and must not write or commit drafts.",
+                )
+            )
+        safety = artifact.get("safety") if isinstance(artifact.get("safety"), dict) else {}
+        expected_values = {
+            "provider_called": network_attempted,
+            "real_llm_called": network_attempted,
+            "prompt_text_stored": False,
+            "system_prompt_text_stored": False,
+            "response_text_stored": False,
+            "secret_text_stored": False,
+            "draft_created": False,
+            "auto_commit": False,
+            "confirmed_chapter_created": False,
+            "memory_bank_touched": False,
+            "rag_touched": False,
+            "exports_touched": False,
+            "ui_touched": False,
+            "docx_touched": False,
+        }
+        if "operator_trigger" in artifact or "user_triggered" in safety:
+            expected_values["user_triggered"] = True
+        if "allow_network_required" in safety:
+            expected_values["allow_network_required"] = True
+        if "allow_network_authorized" in safety:
+            expected_values["allow_network_authorized"] = legacy_authorization.get("allow_network") is True
+        for key, expected in expected_values.items():
+            if safety.get(key) is not expected:
+                findings.append(
+                    AuditFinding(
+                        code="provider_smoke_test_safety_flag_invalid",
+                        path=str(path),
+                        message=f"Provider smoke-test safety flag is invalid: {key}",
+                    )
+                )
+        snapshot = artifact.get("config_snapshot") if isinstance(artifact.get("config_snapshot"), dict) else {}
+        if status == "passed" and snapshot:
+            passed_artifacts_with_snapshot.append((artifact, str(path)))
+    audit_latest_provider_smoke_config_drift(store, passed_artifacts_with_snapshot, findings=findings)
+
+
+def audit_latest_provider_smoke_config_drift(
+    store: ProjectStore,
+    passed_artifacts_with_snapshot: list[tuple[dict[str, Any], str]],
+    *,
+    findings: list[AuditFinding],
+) -> None:
+    if not passed_artifacts_with_snapshot:
+        return
+    latest, path = max(passed_artifacts_with_snapshot, key=lambda item: str(item[0].get("created_at") or ""))
+    snapshot = latest.get("config_snapshot") if isinstance(latest.get("config_snapshot"), dict) else {}
+    role = str(latest.get("role") or snapshot.get("role") or "")
+    if not role:
+        return
+    try:
+        role_config = get_model_role_config(store, role)
+    except Exception as exc:
+        findings.append(
+            AuditFinding(
+                code="provider_smoke_test_config_drift",
+                path=path,
+                message=f"Provider smoke-test config drift detected for role {role}: {exc.__class__.__name__}.",
+            )
+        )
+        return
+    current = {
+        "provider": role_config.provider,
+        "model": role_config.model,
+        "base_url_host": safe_url_host(role_config.base_url),
+        "api_key_ref": role_config.api_key_ref,
+    }
+    drift_keys = [
+        key
+        for key, value in current.items()
+        if str(snapshot.get(key)) != str(value)
+    ]
+    if drift_keys:
+        findings.append(
+            AuditFinding(
+                code="provider_smoke_test_config_drift",
+                path=path,
+                message=f"Latest passed Provider smoke-test config differs from current role config: {','.join(drift_keys)}.",
+            )
+        )
+
+
+def contains_forbidden_provider_smoke_test_text_key(value: object) -> bool:
+    forbidden = {
+        "prompt",
+        "system_prompt",
+        "text",
+        "content",
+        "prompt_text",
+        "system_prompt_text",
+        "response_text",
+        "generated_text",
+        "raw_response",
+        "request_body",
+        "api_key",
+        "secret",
+        "secret_value",
+        "draft_id",
+        "source_draft_id",
+        "confirmed_chapter_id",
+        "confirmed_id",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) in forbidden:
+                return True
+            if contains_forbidden_provider_smoke_test_text_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_forbidden_provider_smoke_test_text_key(item) for item in value)
+    return False
 
 
 def contains_forbidden_self_style_text(value: object) -> bool:
@@ -1203,15 +2427,6 @@ def audit_provider_adapter_config(
                     message=f"Role {role} uses disabled provider adapter {role_config.provider!r}; audit did not test network.",
                 )
             )
-        real_generation_enabled = bool(role_config.settings.get(REAL_GENERATION_FLAG))
-        if real_generation_enabled and (str(role) != "writer" or role_config.provider != CHUTES_PROVIDER_ID):
-            findings.append(
-                AuditFinding(
-                    code="real_generation_unsupported",
-                    path=str(store.config_path),
-                    message="Real generation is only allowed for writer with chutes_openai in this phase.",
-                )
-            )
         if adapter.requires_secret and not role_config.api_key_ref:
             findings.append(
                 AuditFinding(
@@ -1220,14 +2435,6 @@ def audit_provider_adapter_config(
                     message=f"Role {role} provider {role_config.provider!r} requires project_secret.<name>.",
                 )
             )
-            if real_generation_enabled:
-                findings.append(
-                    AuditFinding(
-                        code="real_generation_enabled_missing_secret",
-                        path=str(store.config_path),
-                        message=f"Role {role} has real generation enabled but no api_key_ref.",
-                    )
-                )
         if role_config.api_key_ref:
             try:
                 secret_name = role_config.secret_name()
@@ -1248,14 +2455,6 @@ def audit_provider_adapter_config(
                         message=f"Role {role} references a missing or empty project secret.",
                     )
                 )
-                if real_generation_enabled:
-                    findings.append(
-                        AuditFinding(
-                            code="real_generation_enabled_missing_secret",
-                            path=str(store.config_path),
-                            message=f"Role {role} has real generation enabled but the referenced secret is missing or empty.",
-                        )
-                    )
 
 
 def read_json_file(path: Path, *, checked_paths: list[str], findings: list[AuditFinding]) -> dict[str, Any] | None:

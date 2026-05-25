@@ -76,3 +76,29 @@ actual Memory Bank extraction
 deduplication against real world book entries
 final ProviderRequest message rendering
 ```
+
+## OI-002 Final Real Provider Safety Disable Reminder
+
+Status: open, high priority.
+
+### Problem
+
+The current Chutes writer path intentionally keeps the real Provider adapter/generation state safety-disabled outside explicit authorized execution windows. This is correct for engineering validation and upload readiness, but it must not be forgotten when the project reaches final production-use preparation.
+
+### Required Final Reminder
+
+Before the final real production workflow is used, explicitly remind the operator to decide whether to close the safety-disabled state for the real Provider path.
+
+The reminder must include:
+
+```text
+1. confirm the intended Provider/model/key reference
+2. close or keep the safety-disabled state by explicit operator decision
+3. run Provider smoke test after any change
+4. run project-health
+5. run prepublish-check
+```
+
+### Boundary
+
+Do not automatically close the safety-disabled state. Do not call the Provider, rotate keys, clear keys, or change runtime Provider config unless the operator explicitly authorizes that specific step.

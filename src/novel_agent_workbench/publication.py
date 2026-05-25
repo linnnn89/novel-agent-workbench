@@ -19,6 +19,12 @@ REQUIRED_GITIGNORE_PATTERNS = [
     "run_logs/",
     "usage_logs/",
     "*.log",
+    "build/",
+    "dist/",
+    "*.egg-info/",
+    "*.spec",
+    ".coverage",
+    "htmlcov/",
 ]
 
 BLOCKING_PROJECT_AUDIT_CODES = {
@@ -28,6 +34,17 @@ BLOCKING_PROJECT_AUDIT_CODES = {
     "corpus_boundary_text_field_stored",
     "corpus_profile_source_path_stored",
     "corpus_profile_candidate_names_stored",
+    "provider_smoke_test_text_stored",
+    "provider_smoke_test_status_invalid",
+    "provider_smoke_test_passed_state_invalid",
+    "provider_smoke_test_classification_invalid",
+    "provider_smoke_test_safety_flag_invalid",
+}
+
+NON_PUBLISHING_PROJECT_AUDIT_WARNING_CODES = {
+    "provider_adapter_disabled",
+    "provider_missing_secret",
+    "provider_missing_secret_ref",
 }
 
 SKIP_REPO_DIRS = {
@@ -45,6 +62,9 @@ SKIP_REPO_DIRS = {
     "backups",
     "run_logs",
     "usage_logs",
+    "build",
+    "dist",
+    "htmlcov",
 }
 
 
@@ -190,12 +210,15 @@ def check_projects(projects_root: Path, *, checked_paths: list[str], findings: l
         for finding in audit.get("findings", []):
             if not isinstance(finding, dict):
                 continue
+            finding_code = str(finding.get("code") or "")
+            if finding_code in NON_PUBLISHING_PROJECT_AUDIT_WARNING_CODES:
+                continue
             findings.append(
                 PrepublishFinding(
-                    code=f"project_audit_{finding.get('code')}",
+                    code=f"project_audit_{finding_code}",
                     path=str(finding.get("path") or child),
-                    message=f"Project {project_id}: {finding.get('message') or finding.get('code')}",
-                    severity=project_audit_severity(str(finding.get("code") or "")),
+                    message=f"Project {project_id}: {finding.get('message') or finding_code}",
+                    severity=project_audit_severity(finding_code),
                 )
             )
 

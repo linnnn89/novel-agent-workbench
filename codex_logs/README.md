@@ -13,6 +13,28 @@ Each folder should contain a `README.md` with operation, files changed, verifica
 Recent log:
 
 ```text
+2026-05-24_desktop_memory_bank_ui
+2026-05-22_desktop_launcher_windows_exe
+2026-05-22_mvp31_runtime_project_health_upload_ignore_guard
+2026-05-22_mvp30_provider_config_snapshot_drift_audit
+2026-05-22_mvp29_provider_smoke_test_audit_gate
+2026-05-22_mvp28_provider_live_smoke_test_harness
+2026-05-19_mvp274_sample_only_commit_blocker
+2026-05-19_mvp273_provider_response_sanitizer
+2026-05-19_mvp272_reasoning_leak_review_guard
+2026-05-19_mvp271_real_execution_hardening
+2026-05-19_mvp27_final_provider_real_execution_path
+2026-05-19_mvp26_final_provider_real_execution_readiness
+2026-05-19_mvp25_final_provider_execution_abort_gate
+2026-05-19_mvp24_final_provider_execution_preflight
+2026-05-19_mvp23_final_provider_authorization_checkpoint
+2026-05-19_mvp22_final_provider_runbook_plan
+2026-05-19_mvp21_accepted_review_commit_gate
+2026-05-19_mvp205_review_handoff_consumption
+2026-05-19_mvp20_final_assembly_gate
+2026-05-19_mvp195_review_draft_guard
+2026-05-19_mvp19_planning_library
+2026-05-19_mvp185_review_handoff
 2026-05-19_mvp18_manual_rewrite_comparison_gate
 2026-05-19_mvp175_manual_rewrite_draft_submission
 2026-05-19_mvp17_manual_rewrite_workspace

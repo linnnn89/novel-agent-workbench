@@ -16,11 +16,49 @@ from .corpus_profiler import CorpusProfilerError, CorpusProfileResult, profile_c
 from .corpus_profiles import CorpusProfileArtifactError, CorpusProfileArtifactResult, CorpusProfileArtifactService
 from .corpus_samples import CorpusSampleError, CorpusSampleResult, CorpusSampleService
 from .drafts import (
+    DraftCommitGateError,
     DraftCommitResult,
     DraftGenerationError,
     DraftGenerationRequest,
     DraftGenerationResult,
     DraftGenerationService,
+)
+from .final_assembly_gates import (
+    FinalAssemblyGateApprovalResult,
+    FinalAssemblyGateError,
+    FinalAssemblyGateResult,
+    FinalAssemblyGateService,
+)
+from .final_provider_authorizations import (
+    FinalProviderAuthorizationError,
+    FinalProviderAuthorizationResult,
+    FinalProviderAuthorizationService,
+)
+from .final_provider_execution_attempts import (
+    FinalProviderExecutionAttemptError,
+    FinalProviderExecutionAttemptResult,
+    FinalProviderExecutionAttemptService,
+)
+from .final_provider_execution_preflights import (
+    FinalProviderExecutionPreflightError,
+    FinalProviderExecutionPreflightResult,
+    FinalProviderExecutionPreflightService,
+)
+from .final_provider_real_executions import (
+    FinalProviderRealExecutionError,
+    FinalProviderRealExecutionPostcheckResult,
+    FinalProviderRealExecutionResult,
+    FinalProviderRealExecutionService,
+)
+from .final_provider_real_execution_readiness import (
+    FinalProviderRealExecutionReadinessError,
+    FinalProviderRealExecutionReadinessResult,
+    FinalProviderRealExecutionReadinessService,
+)
+from .final_provider_runbooks import (
+    FinalProviderRunbookError,
+    FinalProviderRunbookResult,
+    FinalProviderRunbookService,
 )
 from .formal_context import FormalContextPlanError, FormalContextPlanResult, FormalContextPlanService
 from .formal_context_tasks import (
@@ -48,8 +86,10 @@ from .memory_apply_preview import (
     MemoryApplyPreviewService,
 )
 from .memory_bank import MemoryBankError, MemoryBankLifecycleResult, MemoryBankService, MemoryBankUpdateResult
+from .planning_library import PlanningLibraryError, PlanningLibraryItemResult, PlanningLibraryService
 from .providers import (
     CHUTES_PROVIDER_ID,
+    OPENROUTER_PROVIDER_ID,
     ModelRoleConfig,
     MockProviderClient,
     ProviderAdapterInfo,
@@ -72,12 +112,14 @@ from .providers import (
     provider_status,
     read_provider_call_log,
     resolve_project_secret,
-    set_real_generation_enabled,
     set_project_secret,
     set_model_role_config,
 )
+from .project_health import ProjectHealthResult, project_health
+from .provider_smoke_tests import ProviderSmokeTestError, ProviderSmokeTestResult, ProviderSmokeTestService
 from .project_state import public_project_state
 from .publication import PrepublishFinding, prepublish_check
+from .review_handoffs import ReviewHandoffError, ReviewHandoffResult, ReviewHandoffService
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
 from .reviews import DraftReviewError, DraftReviewResult, DraftReviewService, ReviewDecisionResult
 from .revision_candidates import (
@@ -110,6 +152,10 @@ __all__ = [
     "ProviderRequest",
     "ProviderRealTestResult",
     "ProviderResponse",
+    "ProjectHealthResult",
+    "ProviderSmokeTestError",
+    "ProviderSmokeTestResult",
+    "ProviderSmokeTestService",
     "ProjectLockError",
     "ProjectRegistry",
     "ProjectStore",
@@ -123,6 +169,7 @@ __all__ = [
     "WorkbenchApplicationService",
     "AuditFinding",
     "CHUTES_PROVIDER_ID",
+    "OPENROUTER_PROVIDER_ID",
     "ChutesGenerateOnceRequest",
     "ChapterWorkflowEntry",
     "ChapterWorkflowError",
@@ -132,6 +179,12 @@ __all__ = [
     "ContextPackagePreviewResult",
     "PromptRenderDryRunResult",
     "PrepublishFinding",
+    "PlanningLibraryError",
+    "PlanningLibraryItemResult",
+    "PlanningLibraryService",
+    "ReviewHandoffError",
+    "ReviewHandoffResult",
+    "ReviewHandoffService",
     "ContextUpdateQueueError",
     "ContextUpdateQueueResult",
     "ContextUpdateQueueService",
@@ -154,10 +207,34 @@ __all__ = [
     "configure_provider_role",
     "create_provider_client",
     "DraftCommitResult",
+    "DraftCommitGateError",
     "DraftGenerationError",
     "DraftGenerationRequest",
     "DraftGenerationResult",
     "DraftGenerationService",
+    "FinalAssemblyGateApprovalResult",
+    "FinalAssemblyGateError",
+    "FinalAssemblyGateResult",
+    "FinalAssemblyGateService",
+    "FinalProviderAuthorizationError",
+    "FinalProviderAuthorizationResult",
+    "FinalProviderAuthorizationService",
+    "FinalProviderExecutionAttemptError",
+    "FinalProviderExecutionAttemptResult",
+    "FinalProviderExecutionAttemptService",
+    "FinalProviderExecutionPreflightError",
+    "FinalProviderExecutionPreflightResult",
+    "FinalProviderExecutionPreflightService",
+    "FinalProviderRealExecutionError",
+    "FinalProviderRealExecutionPostcheckResult",
+    "FinalProviderRealExecutionResult",
+    "FinalProviderRealExecutionService",
+    "FinalProviderRealExecutionReadinessError",
+    "FinalProviderRealExecutionReadinessResult",
+    "FinalProviderRealExecutionReadinessService",
+    "FinalProviderRunbookError",
+    "FinalProviderRunbookResult",
+    "FinalProviderRunbookService",
     "DraftReviewError",
     "DraftReviewResult",
     "DraftReviewService",
@@ -201,10 +278,10 @@ __all__ = [
     "provider_real_test",
     "provider_status",
     "prepublish_check",
+    "project_health",
     "read_provider_call_log",
     "resolve_project_secret",
     "public_project_state",
-    "set_real_generation_enabled",
     "set_project_secret",
     "set_model_role_config",
 ]

@@ -161,13 +161,18 @@ class RevisionRequestService:
             )
             new_id = new_draft_id()
             created_at = utc_stamp()
-            draft_path = self.store.data_dir / "drafts" / f"{safe_filename(chapter_id)}__{new_id}.json"
+            draft_service = DraftGenerationService(self.store)
+            version = draft_service.next_chapter_draft_version(chapter_id)
+            version_label = f"ver{version}"
+            draft_path = self.store.data_dir / "drafts" / f"{safe_filename(chapter_id)}__{version_label}__{new_id}.json"
             artifact = {
                 "schema_version": 1,
                 "status": "draft",
                 "draft_id": new_id,
                 "chapter_id": chapter_id,
                 "title": title,
+                "version": version,
+                "version_label": version_label,
                 "created_at": created_at,
                 "content": response.text,
                 "provider": {
@@ -196,6 +201,8 @@ class RevisionRequestService:
                     "title": title,
                     "created_at": created_at,
                     "status": "draft",
+                    "version": version,
+                    "version_label": version_label,
                     "path": str(draft_path.relative_to(self.store.root)),
                     "provider": response.provider,
                     "model": response.model,

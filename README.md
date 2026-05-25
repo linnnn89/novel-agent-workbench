@@ -26,6 +26,12 @@ I:\AI-NOVEL\novel_agent_workbench
 
 Build a stable, recoverable, local personal long-novel writing workbench with project-level isolation, safe local storage, Provider roles, Planning Library, draft revisions separated from confirmed chapters, optional scoring/revision workflows, and confirmed-only export.
 
+## Provider Call Boundary
+
+The product may call configured model providers when the user explicitly starts an action such as connection testing, draft generation, review, revision, or a future Memory Bank update. Those calls must use project-local provider settings, safe secret references, visible action labels, and audit metadata.
+
+Codex development/QA runs are different: during implementation, tests, packaging, and documentation updates, Codex must not spend API credits or hit real LLM/API providers unless the user explicitly authorizes that specific run. Documentation that says "no real Provider call" for an implementation slice records what happened during that slice; it is not a product requirement that the software can never call models.
+
 ## Initial Folder Map
 
 ```text
@@ -63,16 +69,16 @@ MVP-0 first storage slice is implemented:
 - Backend-only CLI smoke runner for the project -> mock draft -> optional commit loop.
 - Backend-only safety audit for config, logs, checkpoints, and public state.
 - Quality hardening for safe ASCII `chapter_id` values and half-commit audit detection.
-- Provider adapter registry with `mock` enabled and `openai_compatible` / `deepseek` reserved but disabled.
+- Provider adapter registry with `mock`, OpenAI-compatible HTTP providers, local OpenAI-compatible endpoints, DeepSeek, and Chutes.
 - Project secret resolver contract for `project_secret.<name>` references stored only in `data/secrets.local.json`.
 - Backend-only `provider-status` / `list-provider-adapters` CLI checks with no network calls.
 - Provider-aware audit checks for raw keys, disabled adapters, missing secret refs, and missing local secrets.
 - Safe Provider config preflight commands for writing disabled adapter configs and project-local secrets without printing plaintext keys.
-- No-network Provider dry-run command for disabled `deepseek` / `openai_compatible` adapters, returning safe request summaries only.
-- Chutes OpenAI-compatible adapter id `chutes_openai` reserved as disabled/no-network dry-run only.
+- No-network Provider dry-run command for HTTP providers, returning safe request summaries only.
+- Chutes OpenAI-compatible adapter id `chutes_openai` for explicit user-triggered connection tests and draft generation.
 - Explicit `provider-real-test` command for one approved Chutes connection test, separate from draft generation and without returning response text.
-- Controlled Chutes real draft generation gate: `chutes_openai` can generate a writer draft only after `enable-real-provider` sets `settings.real_generation_enabled=true`, the project secret exists, and audit leak checks pass.
-- One-command Chutes runbook `chutes-generate-once` that performs audit precheck, safe secret/config setup, explicit gate enable, real draft generation, gate disable, optional secret cleanup, and audit postcheck with metadata-only output.
+- Chutes real draft generation now depends on the selected writer Provider config, project secret or local endpoint config, and audit leak checks; there is no separate network enable gate.
+- One-command Chutes runbook `chutes-generate-once` that performs audit precheck, safe secret/config setup, real draft generation, optional secret cleanup, and audit postcheck with metadata-only output.
 - Minimal chapter workflow state at `data/chapters_workflow.json`, tracking planned/drafting/draft_ready/committed/blocked without prompt text, chapter content, or plaintext secrets.
 - Draft Review / Quality Check skeleton using mock scorer output to create metadata-only review artifacts at `data/reviews/*.json` plus `data/reviews_index.json`.
 - Chapter workflow can now move to `review_ready` with `latest_review_id`; review does not auto-commit, update Memory Bank/RAG/export, or store draft content/prompt/API keys.
@@ -90,7 +96,7 @@ MVP-0 first storage slice is implemented:
 - MVP-8.5 Formal Context Task Queue that turns formal context plans into metadata-only manual tasks without applying Memory Bank/RAG/export updates.
 - MVP-9 Memory Apply Preview that shows future Memory Bank candidate writes as metadata only, without changing `memory_bank.json`.
 - MVP-9.5 Memory Bank Apply Commit Gate that explicitly commits preview metadata into placeholder Memory Bank entries with a pre-write checkpoint.
-- MVP-10 Manual Memory Bank Text Fill/Edit that lets the operator explicitly fill placeholder text, creates a `pre_memory_text_update` checkpoint, rejects empty/oversized/secret-like text, and keeps default list/read/state output metadata-only.
+- MVP-10 Manual Memory Bank Text Fill/Edit that lets the operator explicitly fill placeholder text, creates a `pre_memory_text_update` checkpoint, rejects empty/secret-like text, stores a visible target token value as prompt guidance, and keeps default list/read/state output metadata-only.
 - MVP-10.5 Memory Bank Item Lifecycle Controls that allow explicit enable/disable with checkpointing and make Context Assembler dry-run skip disabled memory items.
 - MVP-11 Context Package Preview that assembles enabled manual Memory Bank text into a local preview, remains read-only, calls no Provider, and defaults to metadata-only output unless `include_text` is explicit.
 - MVP-11.5 Prompt Render Dry-Run that combines an operator prompt with the context package in a no-write envelope, defaulting to redacted prompt/context output unless explicit include flags are used.
@@ -110,12 +116,52 @@ MVP-0 first storage slice is implemented:
 - MVP-17 Manual Rewrite Workspace Skeleton that turns `needs_manual_rewrite` style suggestions into metadata-only human rewrite tasks, without editing drafts or generating candidates.
 - MVP-17.5 Manual Rewrite Draft Submission that lets a human rewrite task explicitly create a new draft candidate without overwriting old drafts or auto-committing.
 - MVP-18 Manual Rewrite Candidate Comparison / Selection Gate that compares source vs submitted manual draft candidates with metadata-only structural metrics and explicit `selected_for_review` / `rejected` / `needs_more_manual_work` decisions.
+- MVP-18.5 Review Handoff From Selected Manual Rewrite Candidate that creates a metadata-only pending-review handoff only after `selected_for_review`, without auto-review, Provider calls, auto-commit, or Memory Bank/RAG/export side effects.
+- MVP-19 Planning Library and final prompt assembly safety that stores manual planning references, tracks active ids, injects only active/enabled planning sections into context package and prompt render dry-runs, and keeps default list/read/state/package outputs metadata-only.
+- MVP-19.5 Review-Draft Guard for Manual Rewrite Candidates that requires `selected_for_review` comparison or `pending_review` handoff before a submitted manual rewrite draft can be reviewed.
+- MVP-20 Final Provider Assembly Gate that stores metadata-only prompt/context/provider hashes, requires explicit approval before any future real context-aware Provider path, and still keeps real context-aware generation disabled in this phase.
+- MVP-20.5 Review Handoff Consumption Metadata that marks a `pending_review` handoff as `review_created` after its selected draft is successfully reviewed, without changing draft bodies or triggering commit/context side effects.
+- MVP-21 Accepted Review Commit Gate that requires an `accepted` review for the same draft before confirmed-chapter promotion, while failed gate checks do not block the chapter or mutate workflow state.
+- MVP-22 Final Provider Runbook Plan that derives a metadata-only operator runbook from an approved final assembly gate, records provider/model/digest/token checklist metadata, and stops at `pending_operator_authorization` without calling a real LLM, writing drafts, or updating Memory Bank/RAG/export.
+- MVP-23 Final Provider Authorization Checkpoint that records a metadata-only authorization from a pending runbook, creates a no-secrets pre-authorization checkpoint summary, and still does not enable or call a real Provider.
+- MVP-24 Final Provider Execution Preflight Verifier that checks the gate/runbook/authorization/current-provider chain and records passed or blocked metadata without enabling/calling a real Provider or writing drafts.
+- MVP-25 Final Provider Execution Stub / Abort Gate that created a no-network execution rehearsal after a passed preflight and deliberately fail-closed with `aborted_real_llm_disabled`, without enabling/calling Providers or writing drafts.
+- MVP-26 Final Provider Real Execution Readiness that checks the aborted attempt against current Chutes writer config, project-secret presence, and manual authorization requirements, while still not reading secret values, enabling Providers, calling LLMs, or writing drafts.
+- MVP-27 Final Provider Real Execution Path that can, after gate digest match, call the writer Provider and write one new draft. Tests patch the Chutes client; no real network call was made during implementation.
+- MVP-27.1 Real Execution Hardening that strips shell newlines from `--prompt-stdin` before gate digest comparison and adds a read-only `postcheck-final-provider-real-execution` verifier for draft creation, no confirmed chapter, and metadata-only safety flags.
+- MVP-27.2 Reasoning Leak Review Guard that detects `<think>` reasoning markup during `review-draft`, skips scorer calls, creates a metadata-only local-guard review, and automatically marks the draft as `needs_revision`.
+- MVP-27.3 Provider Response Sanitizer that removes `<think>...</think>` reasoning blocks from Provider output before draft content is saved, while recording only sanitizer metadata.
+- MVP-27.4 Sample-Only Commit Blocker that rejects `accepted` reviews with `reason_code=smoke_test_only` at commit time, so live smoke-test drafts can be retained as evidence without becoming confirmed chapters.
+- MVP-28 Provider Live Smoke Test Harness that persists metadata-only Provider connectivity checks when the user starts them, never writes drafts or confirmed chapters, and classifies all smoke outputs as sample-only/non-committable.
+- MVP-29 Provider Smoke Test Audit Gate that makes `audit-project` and `prepublish-check` validate smoke-test metadata, safety flags, no prompt/response/secret text storage, and no draft/confirmed-chapter linkage.
+- MVP-30 Provider Config Snapshot / Drift Audit that records safe Provider config snapshots in new smoke-test artifacts and warns when the latest passed smoke-test config drifts from current role config.
+- MVP-31 Runtime Project Health Summary and Upload Ignore Guard that exposes metadata-only project health, wraps audit/prepublish upload readiness, and expands `.gitignore`/prepublish coverage for build and coverage artifacts.
+- MVP-32 Desktop Launcher and Windows EXE Packaging that adds a Tkinter desktop shell, Win11-compatible multi-size manuscript-paper-and-pen icon assets, and a PyInstaller build script for `NovelAgentWorkbench.exe`.
 - Unit tests.
 
 Verification command:
 
 ```powershell
 py -3.13 -m unittest discover -s tests
+```
+
+Latest recorded result:
+
+```text
+Ran 312 tests
+OK
+```
+
+Windows desktop launcher:
+
+```powershell
+I:\AI-NOVEL\novel_agent_workbench\dist\NovelAgentWorkbench\NovelAgentWorkbench.exe
+```
+
+Build command:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File I:\AI-NOVEL\novel_agent_workbench\scripts\build_windows_exe.ps1
 ```
 
 Backend-only CLI smoke example:
@@ -137,5 +183,5 @@ codex_docs\IMPORTANT_OPEN_ISSUES.md
 Current重点难题:
 
 ```text
-Memory Bank priority must be implemented by local Context Assembler logic before Provider calls; LLM APIs will not enforce it natively.
+The final-provider path now has gate -> runbook -> authorization -> preflight -> fail-closed execution stub -> real execution readiness -> explicit real execution -> read-only postcheck coverage. Live Chutes runs have proven the execution and sanitizer chain. Smoke-test drafts are retained as evidence only and must not be promoted to confirmed chapters. Upload readiness is guarded by `.gitignore`, `prepublish-check`, and `project-health`. The desktop launcher is intentionally local-first: it must not call models on startup or in hidden background flows, but it may expose clear user-triggered model actions.
 ```

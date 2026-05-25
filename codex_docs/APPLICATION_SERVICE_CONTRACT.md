@@ -70,9 +70,42 @@ checked_paths
 summary
 ```
 
-Blocking findings include missing required ignore patterns, publishable secret/env files, real-corpus sample artifacts, and high-risk audit leaks such as secrets, prompt text, content, or corpus sample blockers. Disabled Provider adapters or missing runtime Provider secrets are warnings unless they leak sensitive content.
+Blocking findings include missing required ignore patterns, publishable secret/env files, real-corpus sample artifacts, and high-risk audit leaks such as secrets, prompt text, content, corpus sample blockers, or invalid Provider smoke-test artifacts. Disabled Provider adapters or missing runtime Provider secrets remain visible in `audit-project`, but they are not prepublish findings unless they leak sensitive content or create a blocking audit condition.
 
 This method must not modify files, delete files, read external corpus text, call Providers, create drafts, create confirmed chapters, update Memory Bank/RAG/export, or print plaintext secrets/sample text.
+
+### project_health(project_id, repo_root=None)
+
+Returns a metadata-only runtime health summary for one project.
+
+Combines:
+
+```text
+public project state
+project audit summary
+Provider role summary
+latest Provider smoke-test metadata
+optional prepublish upload readiness
+```
+
+Returns:
+
+```text
+project_id
+generated_at
+status
+next_gate
+summary
+provider
+drafts
+smoke_tests
+audit
+upload_readiness
+```
+
+`status` is `blocked` when audit or prepublish has blockers, `warning` when only warnings remain, and `ok` when no blockers or warnings are present. `upload_readiness` is checked only when `repo_root` is provided.
+
+This method must not return prompt text, draft/chapter content, Provider response text, request bodies, raw Provider responses, plaintext secrets, secret values, or corpus sample text. It must not modify files, call Providers, create drafts, create confirmed chapters, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or auto-commit.
 
 ### profile_corpus(path, max_name_candidates=20)
 
@@ -492,8 +525,16 @@ style_suggestion_count
 formal_context_plan_count
 formal_context_task_count
 manual_rewrite_task_count
+manual_rewrite_comparison_count
+review_handoff_count
 memory_apply_preview_count
 memory_bank_item_count
+final_assembly_gate_count
+final_provider_runbook_count
+final_provider_authorization_count
+final_provider_execution_preflight_count
+planning_item_count
+active_planning_reference_count
 chapter_count
 committed_chapter_count
 latest_chapter
@@ -511,8 +552,14 @@ latest_style_suggestion
 latest_formal_context_plan
 latest_formal_context_task
 latest_manual_rewrite_task
+latest_manual_rewrite_comparison
+latest_review_handoff
 latest_memory_apply_preview
 latest_memory_bank_item
+latest_final_assembly_gate
+latest_final_provider_runbook
+latest_final_provider_authorization
+latest_final_provider_execution_preflight
 latest_committed_chapter
 provider_roles
 ```
@@ -598,41 +645,6 @@ masked
 
 Must not return plaintext secret values.
 
-### enable_real_provider(project_id, role, provider)
-
-Enables the controlled real-generation flag for one supported role/provider pair.
-
-Current supported pair:
-
-```text
-role=writer
-provider=chutes_openai
-```
-
-Writes only Provider role config:
-
-```text
-settings.real_generation_enabled=true
-```
-
-Must not send network requests, generate drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
-
-Must not return plaintext secrets.
-
-### disable_real_provider(project_id, role, provider="chutes_openai")
-
-Disables the controlled real-generation flag for one supported role/provider pair.
-
-Writes only Provider role config:
-
-```text
-settings.real_generation_enabled=false
-```
-
-Must not send network requests, generate drafts, create confirmed chapters, update Memory Bank, update RAG, or create exports.
-
-Must not return plaintext secrets.
-
 ### chutes_generate_once(...)
 
 Runs the safe operator runbook for one controlled Chutes writer draft.
@@ -651,7 +663,6 @@ secret_name
 secret_value
 temperature
 max_tokens
-allow_network
 clear_secret_after_run
 ```
 
@@ -660,15 +671,11 @@ Required order:
 ```text
 audit precheck
 secret/config setup
-enable real-generation gate
 generate draft
-disable real-generation gate
 optional secret cleanup
 audit postcheck
 metadata-only summary
 ```
-
-`allow_network=true` is required for any real HTTP request.
 
 Returns metadata only:
 
@@ -728,6 +735,17 @@ Must not auto-commit.
 
 When the writer role uses `chutes_openai`, real generation is allowed only after `enable_real_provider(...)`, local secret resolution, and audit leak-gate success. CLI/facade output remains metadata-only; generated content is visible through `read_draft(...)`.
 
+Before saving draft content, Provider output must pass through the response sanitizer. The sanitizer removes `<think>...</think>` reasoning blocks and standalone `<think>` tags from saved `content`, then records metadata only:
+
+```text
+request_summary.response_sanitizer.reasoning_markup_detected
+request_summary.response_sanitizer.reasoning_blocks_removed
+request_summary.response_sanitizer.reasoning_tags_removed
+request_summary.response_sanitizer.chars_removed
+```
+
+Sanitized reasoning text must not be stored in the draft artifact, draft index, commit log, review metadata, public state, Memory Bank, RAG, export files, or UI-facing output.
+
 On successful draft generation, chapter workflow state may update to `draft_ready` with `latest_draft_id`.
 
 On generation failure, chapter workflow state may update to `blocked` with metadata-only error summary.
@@ -745,6 +763,7 @@ system_prompt
 temperature
 max_tokens
 max_context_tokens
+final_assembly_gate_id
 metadata
 ```
 
@@ -755,6 +774,8 @@ writer provider must be mock
 ```
 
 This method builds a prompt render dry-run with local text inclusion internally, renders a combined in-memory prompt, and sends it to the local mock writer only.
+
+If the writer role is not `mock`, this method must require a matching approved final assembly gate before any Provider call, draft write, or chapter workflow mutation. Passing that gate does not enable real context-aware Provider generation in this phase; the method must still fail closed after the gate check.
 
 Returns draft metadata:
 
@@ -800,6 +821,14 @@ Must not return original prompt text or plaintext secrets.
 
 Explicitly promotes a draft to confirmed chapter.
 
+Current commit gate:
+
+```text
+The same draft must have a review whose manual decision is accepted.
+```
+
+Drafts without an accepted review, drafts with pending review decisions, drafts marked `needs_revision`, and drafts marked `blocked` must fail before confirmed files, checkpoints, commit logs, or draft status are written. This gate failure must not mark the chapter as `blocked`; the operator should still be able to review and accept the draft afterward.
+
 Returns:
 
 ```text
@@ -815,9 +844,11 @@ Must create a `pre_commit` checkpoint before confirmed files are written.
 
 Must not update Memory Bank, RAG, or exports.
 
+Confirmed chapter artifacts and commit logs may record metadata-only `commit_gate` fields such as `review_id`, `decision`, `reason_code`, and `decided_at`. They must not record review comments, draft content in commit logs, prompt text, or plaintext secrets.
+
 On successful explicit commit, chapter workflow state updates to `committed` with `confirmed_chapter_id`.
 
-On failed commit, chapter workflow records metadata-only error. If the chapter is already `committed`, it must not be downgraded to `blocked`.
+On failed commit after the gate passes, chapter workflow records metadata-only error. If the chapter is already `committed`, it must not be downgraded to `blocked`.
 
 ### review_draft(project_id, draft_id)
 
@@ -838,11 +869,31 @@ usage
 
 Current implementation uses the configured `scorer` role, normally `provider=mock`.
 
+Before scorer execution, the review path must run the reasoning leak guard. If draft content contains `<think` or `</think>`, the service must skip scorer Provider calls, write a metadata-only review with `provider=local_guard`, issue code `reasoning_leak_detected`, and automatic decision:
+
+```text
+status=needs_revision
+reason_code=reasoning_leak
+```
+
+This guard must not store the leaked reasoning text in review artifacts or indexes.
+
+If the draft is a submitted manual rewrite draft candidate, review is allowed only when one matching gate exists:
+
+```text
+selected_for_review manual rewrite comparison
+pending_review review handoff
+```
+
+Rejected or `needs_more_manual_work` comparisons are not valid gates. Missing gate must fail before any Provider call, review artifact write, or chapter workflow mutation.
+
 On success, chapter workflow state may update to `review_ready` with `latest_review_id`.
 
 Must not auto-commit, auto-revise, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or enable real Providers.
 
 Must not return draft content, original prompt text, raw Provider responses, request bodies, or plaintext secrets.
+
+For a successful manual rewrite candidate review, `request_summary.manual_rewrite_review_gate` may record metadata-only gate fields such as `required`, `allowed`, `matched_gate`, `comparison_id`, and `handoff_id`.
 
 ### list_reviews(project_id)
 
@@ -1291,7 +1342,7 @@ output_contains_prompt_text=false
 output_contains_chapter_text=false
 ```
 
-Candidate items may include source type, ids, category id, priority, memory weight, estimated tokens, character count, and reason. They must not include prompt text, chapter text, Memory Bank text, raw Provider responses, request bodies, or plaintext secrets.
+Candidate items may include source type, ids, category id, priority, memory weight, estimated tokens, character count, and reason. They must not include prompt text, chapter text, Planning Library text, Memory Bank text, raw Provider responses, request bodies, or plaintext secrets.
 
 Disabled Memory Bank items remain visible as metadata candidates but must be skipped with:
 
@@ -1299,11 +1350,18 @@ Disabled Memory Bank items remain visible as metadata candidates but must be ski
 skip_reason=memory_item_disabled
 ```
 
+Inactive or disabled Planning Library items remain visible as metadata candidates but must be skipped with:
+
+```text
+skip_reason=planning_item_inactive
+skip_reason=planning_item_disabled
+```
+
 This method is read-only. It must not write artifacts, mutate Memory Bank, update RAG/export, create drafts, create confirmed chapters, or call Providers.
 
 ### context_package_preview(project_id, max_context_tokens=None, include_text=False)
 
-Builds a read-only local context package preview from enabled manual Memory Bank items.
+Builds a read-only local context package preview from active/enabled Planning Library items and enabled manual Memory Bank items.
 
 Returns:
 
@@ -1324,14 +1382,16 @@ Default behavior:
 include_text=false
 ```
 
-With default behavior, section output may include ids, category id, priority, memory weight, estimated tokens, character count, lifecycle metadata, and selection status, but must not include the Memory Bank `text` field.
+With default behavior, section output may include ids, category id, priority, memory weight, estimated tokens, character count, lifecycle metadata, and selection status, but must not include Planning Library or Memory Bank `text` fields.
 
-With `include_text=true`, selected sections may include manual Memory Bank text for explicit human review. This is not a Provider prompt and must not be logged as one.
+With `include_text=true`, selected sections may include manual Planning Library and Memory Bank text for explicit human review. This is not a Provider prompt and must not be logged as one.
 
 Selection rules:
 
 ```text
 enabled=false -> skip_reason=memory_item_disabled
+planning active=false -> skip_reason=planning_item_inactive
+planning enabled=false -> skip_reason=planning_item_disabled
 status not ready or empty text -> skip_reason=manual_text_missing
 budget overflow -> skip_reason=token_budget_exceeded
 ```
@@ -1340,7 +1400,7 @@ Provider boundary:
 
 ```text
 provider_called=false
-final_prompt_rendering=not_implemented
+final_prompt_rendering=dry_run_only
 ```
 
 This method must not write artifacts, call Providers, read chapter content, write prompt logs, update world book, update RAG/export, create drafts, create confirmed chapters, or return plaintext secrets.
@@ -1370,7 +1430,7 @@ include_prompt_text=false
 include_context_text=false
 ```
 
-Default output must not include operator prompt text, system prompt text, or Memory Bank text. It may return character counts, selected/skipped context metadata, estimated tokens, and message roles.
+Default output must not include operator prompt text, system prompt text, Planning Library text, or Memory Bank text. It may return character counts, selected/skipped context metadata, estimated tokens, and message roles.
 
 Explicit text flags:
 
@@ -1757,7 +1817,6 @@ masked_key
 adapter_enabled
 network_allowed
 error_type
-real_generation_enabled
 ```
 
 Must not send network requests.
@@ -1783,7 +1842,6 @@ adapter_enabled
 network_allowed
 error_type
 request_summary
-real_generation_enabled
 ```
 
 `request_summary` may include only:
@@ -1879,10 +1937,10 @@ Future real Providers must:
 Current controlled real-generation Provider:
 
 ```text
-chutes_openai writer only, gated by settings.real_generation_enabled=true
+chutes_openai writer only, through explicit user-triggered generation or connection-test commands
 ```
 
-The Chutes gate keeps the adapter registry disabled, ignores the expected `provider_adapter_disabled` audit finding, and blocks only key/prompt/content leak findings plus secret resolution failures.
+The Chutes path requires safe Provider configuration, secret resolution for remote Providers, and key/prompt/content leak checks.
 
 Provider error types currently used:
 
@@ -1959,3 +2017,462 @@ needs_more_manual_work
 ```
 
 The `reason_code` is optional short ASCII metadata. This method does not call Providers, modify draft bodies, create revision requests, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
+## Review Handoff Facade
+
+### create_review_handoff_from_manual_comparison(project_id, comparison_id)
+
+Creates a metadata-only pending-review handoff from a manual rewrite comparison already decided as `selected_for_review`.
+
+Writes:
+
+```text
+data/review_handoffs/*.json
+data/review_handoffs_index.json
+```
+
+Returns metadata only:
+
+```text
+handoff_id
+comparison_id
+task_id
+chapter_id
+selected_draft_id
+status
+path
+created_at
+```
+
+This method rejects pending, rejected, or `needs_more_manual_work` comparisons. It does not call Providers, create a review, modify draft bodies, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
+### list_review_handoffs(project_id, status="")
+
+Returns review handoff index metadata only. It may be filtered by `pending_review` or `review_created`.
+
+### read_review_handoff(project_id, handoff_id)
+
+Returns one handoff artifact. The artifact contains ids, the selected draft reference, source decision metadata, pending-review status, and safety flags. It must not contain draft text, prompt text, Provider raw output, or plaintext secrets.
+
+When a `pending_review` handoff is used as the gate for a successful `review-draft`, the handoff may be consumed into:
+
+```text
+status=review_created
+review.created=true
+review.review_id=<created review id>
+```
+
+This update is metadata only. It must not edit draft bodies, create drafts, auto-commit, create confirmed chapters, update Memory Bank/RAG/export, create DOCX, add UI, or call an extra Provider beyond the explicit review operation.
+
+## Planning Library Facade
+
+### create_planning_item(project_id, planning_id, text, ...)
+
+Creates one manual Planning Library item in `data/planning_library.json`.
+
+Default fields include:
+
+```text
+title
+item_type
+active
+enabled
+priority
+adherence_level
+send_mode
+chapter_range
+```
+
+The method rejects empty text, oversized text, duplicate ids, unsafe ids, invalid choices, and secret-like values. It creates a checkpoint before writing. Returned data is metadata-only and must not include the planning text.
+
+### list_planning_items(project_id, include_text=False)
+
+Returns Planning Library metadata. Default output excludes `text`; `text_chars` is allowed.
+
+With `include_text=True`, the method may return manual planning text for explicit human review only.
+
+### read_planning_item(project_id, planning_id, include_text=False)
+
+Returns one Planning Library item. Default output excludes `text`; explicit `include_text=True` may expose the manual planning text.
+
+### set_planning_item_active(project_id, planning_id, active)
+
+Sets the active switch for one item and refreshes `active_reference_ids`. Inactive items must not enter Context Assembler selected sections.
+
+### set_planning_item_enabled(project_id, planning_id, enabled)
+
+Sets the lifecycle switch for one item and refreshes `active_reference_ids`. Disabled items remain on disk but must be skipped by Context Assembler.
+
+Planning Library operations must not call Providers, generate drafts, mutate draft bodies, auto-commit, create confirmed chapters, update Memory Bank, update RAG, create exports, create DOCX, or run UI workflows.
+
+## Final Assembly Gate Facade
+
+### create_final_assembly_gate(project_id, chapter_id, prompt, system_prompt="", max_context_tokens=None)
+
+Creates a metadata-only approval artifact for a future real context-aware Provider request.
+
+Writes:
+
+```text
+data/final_assembly_gates/*.json
+data/final_assembly_gates_index.json
+```
+
+The artifact may store:
+
+```text
+gate_id
+chapter_id
+writer provider/model metadata
+prompt_digest
+system_prompt_digest
+context_digest
+prompt/context character counts
+token estimates
+selected/skipped context section summaries
+approval metadata
+safety flags
+```
+
+It must not store prompt text, system prompt text, Planning Library text, Memory Bank text, draft content, Provider raw responses, request bodies, or plaintext secrets.
+
+### approve_final_assembly_gate(project_id, gate_id, reason_code="")
+
+Approves one pending final assembly gate.
+
+`reason_code` is optional short ASCII metadata. Duplicate approval must fail. This method must not call Providers, create drafts, mutate workflow state, update Memory Bank/RAG/export, create DOCX, or print prompt/context text.
+
+### list_final_assembly_gates(project_id, status="")
+
+Returns gate index metadata. Optional `status` can filter `pending_approval` or `approved`.
+
+Default output must remain metadata-only and must not return prompt/context text or plaintext secrets.
+
+### read_final_assembly_gate(project_id, gate_id)
+
+Returns one gate artifact. The artifact is metadata-only by design.
+
+Future real context-aware Provider paths must compare the approved gate against the current request and assembled context by digest before any Provider or workflow side effect. A mismatch in chapter id, prompt digest, system prompt digest, context digest, provider, or model must fail closed.
+
+## Final Provider Runbook Facade
+
+### create_final_provider_runbook(project_id, gate_id)
+
+Creates a metadata-only operator runbook from an approved final assembly gate.
+
+Writes:
+
+```text
+data/final_provider_runbooks/*.json
+data/final_provider_runbooks_index.json
+```
+
+The artifact may store:
+
+```text
+runbook_id
+gate_id
+chapter_id
+pending_operator_authorization status
+writer provider/model metadata
+prompt/system/context/gate digests
+prompt/context character counts
+token estimates
+selected context section counts/types
+operator checklist flags
+safety flags
+```
+
+It must not store prompt text, system prompt text, Planning Library text, Memory Bank text, draft content, Provider raw responses, request bodies, or plaintext secrets. It must not call real LLMs, create or overwrite drafts, mutate workflow state, update Memory Bank/RAG/export, create DOCX, add UI, auto-commit, or delete files.
+
+### list_final_provider_runbooks(project_id, status="")
+
+Returns runbook index metadata. Optional `status` can filter `pending_operator_authorization`.
+
+Default output must remain metadata-only and must not return prompt/context text or plaintext secrets.
+
+### read_final_provider_runbook(project_id, runbook_id)
+
+Returns one runbook artifact. The artifact is metadata-only and represents a stop point before future operator authorization.
+
+## Final Provider Authorization Facade
+
+### authorize_final_provider_runbook(project_id, runbook_id, reason_code="")
+
+Creates a metadata-only authorization record from a pending final Provider runbook and creates a no-secrets pre-authorization checkpoint.
+
+Writes:
+
+```text
+data/final_provider_authorizations/*.json
+data/final_provider_authorizations_index.json
+backups/checkpoints/*.zip
+```
+
+The artifact may store:
+
+```text
+authorization_id
+runbook_id
+gate_id
+chapter_id
+authorized_pending_execution status
+writer provider/model metadata
+prompt/system/context/gate/runbook/authorization digests
+prompt/context character counts
+token estimates
+selected context section counts/types
+checkpoint id/path/file count
+execution boundary flags
+safety flags
+```
+
+It must not store prompt text, system prompt text, Planning Library text, Memory Bank text, draft content, Provider raw responses, request bodies, plaintext secrets, or plaintext execution tokens. It must not call real LLMs, enable real Providers, create or overwrite drafts, mutate workflow state, update Memory Bank/RAG/export, create DOCX, add UI, auto-commit, or delete files.
+
+### list_final_provider_authorizations(project_id, status="")
+
+Returns authorization index metadata. Optional `status` can filter `authorized_pending_execution`.
+
+Default output must remain metadata-only and must not return prompt/context text, plaintext secrets, or plaintext execution tokens.
+
+### read_final_provider_authorization(project_id, authorization_id)
+
+Returns one authorization artifact. The artifact is metadata-only and still represents a stop point before any future execute command or real Provider call.
+
+## Final Provider Execution Preflight Facade
+
+### create_final_provider_execution_preflight(project_id, authorization_id)
+
+Creates a metadata-only verifier artifact for the final Provider gate/runbook/authorization/current-provider chain.
+
+Writes:
+
+```text
+data/final_provider_execution_preflights/*.json
+data/final_provider_execution_preflights_index.json
+```
+
+The artifact may store:
+
+```text
+preflight_id
+authorization_id
+runbook_id
+gate_id
+chapter_id
+passed_pending_execute_authorization or blocked status
+writer provider/model metadata
+authorization/runbook/gate digests
+prompt/context character counts
+token estimates
+check result ids and boolean pass/fail values
+issue codes
+execution boundary flags
+safety flags
+```
+
+It must not store prompt text, system prompt text, Planning Library text, Memory Bank text, draft content, Provider raw responses, request bodies, plaintext secrets, or plaintext execution tokens. It must not call real LLMs, enable real Providers, create or overwrite drafts, mutate workflow state, update Memory Bank/RAG/export, create DOCX, add UI, auto-commit, or delete files.
+
+### list_final_provider_execution_preflights(project_id, status="")
+
+Returns execution preflight index metadata. Optional `status` can filter `passed_pending_execute_authorization` or `blocked`.
+
+Default output must remain metadata-only and must not return prompt/context text, plaintext secrets, or plaintext execution tokens.
+
+### read_final_provider_execution_preflight(project_id, preflight_id)
+
+Returns one execution preflight artifact. The artifact is metadata-only and still does not execute any Provider call.
+
+## Final Provider Execution Attempt Facade
+
+### attempt_final_provider_execution(project_id, preflight_id)
+
+Creates a fail-closed execution attempt artifact from a passed zero-issue final Provider execution preflight.
+
+Writes:
+
+```text
+data/final_provider_execution_attempts/*.json
+data/final_provider_execution_attempts_index.json
+```
+
+The artifact may store:
+
+```text
+attempt_id
+preflight_id
+authorization_id
+runbook_id
+gate_id
+chapter_id
+aborted_real_llm_disabled status
+real_llm_disabled_by_policy abort reason
+writer provider/model metadata
+authorization/runbook/gate digests
+prompt/context character counts
+token estimates
+execution boundary flags
+safety flags
+```
+
+It requires a preflight with `status=passed_pending_execute_authorization` and `issue_count=0`. Duplicate attempts for the same preflight must fail.
+
+It must not store prompt text, system prompt text, Planning Library text, Memory Bank text, draft content, Provider raw responses, request bodies, plaintext secrets, or plaintext execution tokens. This stub attempt method must not call real LLMs, enable real Providers, create or overwrite drafts, mutate workflow state, update Memory Bank/RAG/export, create DOCX, add UI, auto-commit, delete files, or start execution. Real Provider calls belong to the separate explicit real execution service.
+
+### list_final_provider_execution_attempts(project_id, status="")
+
+Returns execution attempt index metadata. Optional `status` can filter `aborted_real_llm_disabled`.
+
+Default output must remain metadata-only and must not return prompt/context text, plaintext secrets, or plaintext execution tokens.
+
+### read_final_provider_execution_attempt(project_id, attempt_id)
+
+Returns one execution attempt artifact. The artifact is metadata-only and records a forced abort for the no-network stub attempt path.
+
+## Final Provider Real Execution Readiness Facade
+
+### create_final_provider_real_execution_readiness(project_id, attempt_id)
+
+Creates a no-network readiness report from a fail-closed final Provider execution attempt.
+
+Writes:
+
+```text
+data/final_provider_real_execution_readiness/*.json
+data/final_provider_real_execution_readiness_index.json
+```
+
+The artifact may store:
+
+```text
+readiness_id
+attempt_id
+preflight_id
+authorization_id
+runbook_id
+gate_id
+chapter_id
+ready_for_manual_real_llm_authorization or blocked status
+writer provider/model metadata
+current writer provider/model/base_url_host/api_key_ref/secret-name metadata
+project-secret presence boolean
+authorization/runbook/gate digests
+prompt/context character counts
+token estimates
+manual required action ids
+execution boundary flags
+safety flags
+```
+
+It must not store prompt text, system prompt text, Planning Library text, Memory Bank text, draft content, Provider raw responses, request bodies, plaintext secrets, secret values, plaintext execution tokens, or generated text. It must not call real LLMs, enable real Providers, read secret values for use, create or overwrite drafts, mutate workflow state, update Memory Bank/RAG/export, create DOCX, add UI, auto-commit, delete files, or start execution.
+
+### list_final_provider_real_execution_readiness(project_id, status="")
+
+Returns real execution readiness index metadata. Optional `status` can filter `ready_for_manual_real_llm_authorization` or `blocked`.
+
+Default output must remain metadata-only and must not return prompt/context text, plaintext secrets, or plaintext execution tokens.
+
+### read_final_provider_real_execution_readiness(project_id, readiness_id)
+
+Returns one real execution readiness artifact. The artifact is metadata-only and represents the last no-network stop before an operator supplies/authorizes Chutes execution.
+
+## Final Provider Real Execution Facade
+
+### execute_final_provider_real(project_id, readiness_id, prompt, system_prompt="", title="", max_context_tokens=None, temperature=None, max_tokens=None, reason_code="")
+
+Executes the real Chutes-backed final Provider path after a ready report and digest match.
+
+Writes:
+
+```text
+data/drafts/*.json
+data/drafts_index.json
+data/provider_call_log.json
+data/final_provider_real_executions/*.json
+data/final_provider_real_executions_index.json
+```
+
+Required:
+
+```text
+readiness status ready_for_manual_real_llm_authorization
+readiness issue_count=0
+current writer provider chutes_openai
+approved gate digest matches provided prompt/system/context
+project secret exists
+```
+
+The command calls the Chutes writer Provider and writes exactly one new draft artifact on success.
+
+Execution artifacts must not store prompt text, system prompt text, Planning Library text, Memory Bank text, generated draft text, Provider raw responses, request bodies, plaintext secrets, secret values, or plaintext execution tokens. This method must not auto-commit, create confirmed chapters, update Memory Bank/RAG/export, create DOCX, add UI, or delete files.
+
+### list_final_provider_real_executions(project_id, status="")
+
+Returns real execution index metadata. Optional `status` can filter `draft_created`.
+
+### read_final_provider_real_execution(project_id, execution_id)
+
+Returns one real execution artifact. The artifact is metadata-only and links to the new draft id without returning generated text.
+
+### postcheck_final_provider_real_execution(project_id, execution_id)
+
+Runs a read-only postcheck after a real execution artifact exists.
+
+Reads:
+
+```text
+data/final_provider_real_executions/*.json
+data/drafts/*.json
+data/drafts_index.json
+data/confirmed_chapters.json
+config.json
+```
+
+Returns:
+
+```text
+ok
+status passed or failed
+issue_count
+issues
+checks
+execution_id
+draft_id
+chapter_id
+```
+
+The postcheck verifies that the execution status is `draft_created`, the linked draft is readable and still in `draft` status, the draft provider is `chutes_openai`, the execution boundary records no auto-commit, the chapter is not confirmed, and execution metadata does not contain forbidden text-bearing keys. It does not call Providers, read secret values, return draft content, mutate drafts, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or auto-commit.
+
+## Provider Smoke Test Facade
+
+### run_provider_smoke_test(project_id, role="writer", prompt="Return exactly OK.", system_prompt="", temperature=0, max_tokens=16, reason_code="")
+
+Creates a metadata-only Provider connectivity smoke-test artifact.
+
+Writes:
+
+```text
+data/provider_smoke_tests/*.json
+data/provider_smoke_tests_index.json
+```
+
+Behavior:
+
+```text
+calls provider_real_test(...)
+status passed or failed
+```
+
+The artifact must store Provider/model/host, status code, finish reason, safe usage, response character count, request length metadata, user-trigger metadata, safety flags, and a safe `config_snapshot` only. The snapshot may include role, provider, model, base URL host, `api_key_ref`, secret name, and api-key-reference presence; it must not include secret values. The artifact must classify the result as `sample_only` and `non_committable`.
+
+It must not store prompt text, system prompt text, response text, raw Provider responses, request bodies, plaintext secrets, secret values, generated draft text, or execution tokens. It must not write drafts, create confirmed chapters, auto-commit, update Memory Bank/RAG/export, create DOCX, add UI, or delete files.
+
+`audit-project` must validate Provider smoke-test artifacts for metadata-only storage, valid status, passed/network-attempted consistency, `sample_only/non_committable` classification, and no draft or confirmed-chapter linkage. It must compare the latest passed smoke test with a config snapshot against the current role config and emit a drift finding if provider/model/host/api-key reference changed. `prepublish-check` must treat invalid Provider smoke-test artifacts as blockers and config drift as a warning.
+
+### list_provider_smoke_tests(project_id, status="")
+
+Returns provider smoke-test index metadata. Optional `status` can filter `passed` or `failed`.
+
+### read_provider_smoke_test(project_id, smoke_test_id)
+
+Returns one provider smoke-test artifact. The artifact is metadata-only and must not return prompt text, response text, raw request bodies, or plaintext secrets.

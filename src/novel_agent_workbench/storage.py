@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from .config import DATA_FILE_DEFAULTS, CURRENT_CONFIG_SCHEMA_VERSION, default_d
 TRASH_SUFFIX = ".trash"
 REGISTRY_FILENAME = "registry.json"
 DEFAULT_PROJECTS_DIRNAME = "workspace_projects"
+LEGACY_PROJECT_LOCK_STALE_SECONDS = 120
+WINDOWS_STILL_ACTIVE_EXIT_CODE = 259
 
 
 class StorageError(RuntimeError):
@@ -347,13 +350,10 @@ class ProjectStore:
         self.initialize()
         lock_path = self.locks_dir / "project.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            handle = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError as exc:
-            raise ProjectLockError(f"Project is already locked: {self.project_id}") from exc
+        handle = open_project_lock(lock_path, project_id=self.project_id)
         try:
             with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as file:
-                file.write(json.dumps({"project_id": self.project_id, "locked_at": utc_stamp()}, ensure_ascii=False))
+                file.write(json.dumps(project_lock_metadata(self.project_id), ensure_ascii=False))
                 file.write("\n")
                 file.flush()
                 os.fsync(file.fileno())
@@ -532,3 +532,94 @@ def atomic_write_json_file(path: Path, data: Any) -> None:
         if temp_path.exists():
             retire_path(temp_path)
         raise
+
+
+def open_project_lock(lock_path: Path, *, project_id: str) -> int:
+    try:
+        return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        if recover_stale_project_lock(lock_path):
+            try:
+                return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError as exc:
+                raise ProjectLockError(f"Project is already locked: {project_id}") from exc
+        raise ProjectLockError(f"Project is already locked: {project_id}")
+
+
+def project_lock_metadata(project_id: str) -> dict[str, Any]:
+    return {
+        "project_id": project_id,
+        "locked_at": utc_stamp(),
+        "pid": os.getpid(),
+    }
+
+
+def recover_stale_project_lock(lock_path: Path) -> bool:
+    if not lock_path.exists():
+        return False
+    metadata = read_project_lock_metadata(lock_path)
+    pid = safe_lock_pid(metadata.get("pid"))
+    if pid is not None and not process_is_running(pid):
+        retire_path(lock_path)
+        return True
+    if pid is None and project_lock_age_seconds(lock_path) >= LEGACY_PROJECT_LOCK_STALE_SECONDS:
+        retire_path(lock_path)
+        return True
+    return False
+
+
+def read_project_lock_metadata(lock_path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(lock_path.read_text(encoding="utf-8").strip() or "{}")
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def safe_lock_pid(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return None
+
+
+def project_lock_age_seconds(lock_path: Path) -> float:
+    try:
+        return max(time.time() - lock_path.stat().st_mtime, 0.0)
+    except OSError:
+        return 0.0
+
+
+def process_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        return windows_process_is_running(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def windows_process_is_running(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    process_query_limited_information = 0x1000
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(process_query_limited_information, False, int(pid))
+    if not handle:
+        return False
+    try:
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return True
+        return int(exit_code.value) == WINDOWS_STILL_ACTIVE_EXIT_CODE
+    finally:
+        kernel32.CloseHandle(handle)

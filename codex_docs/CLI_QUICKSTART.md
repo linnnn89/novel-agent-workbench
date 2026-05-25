@@ -4,13 +4,15 @@ Date: 2026-05-17, Asia/Shanghai.
 
 ## Scope
 
-This is a backend-only local workflow. It does not start a UI, does not call a real model, does not use the network, and does not cost API credits.
+Most examples in this quickstart are backend-only local workflows that do not start a UI, call a real model, use the network, or cost API credits.
 
 Current Provider mode:
 
 ```text
-mock only
+mock by default; explicit user-triggered Provider commands may call configured real/local model services
 ```
+
+Codex development and automated QA must not run those real Provider commands unless the user authorizes that specific run. Product/CLI capability is separate: the software may support real model calls behind explicit commands, configured providers, safe secret references, and audit metadata.
 
 ## PowerShell Setup
 
@@ -241,9 +243,7 @@ Output returns metadata only, not generated text.
 Controlled Chutes real draft generation:
 
 ```powershell
-py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test enable-real-provider demo_project writer --provider chutes_openai
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test generate-draft demo_project --chapter-id chapter_001 --title "Opening" --prompt "Write a short test draft." --temperature 0.2 --max-tokens 128
-py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test disable-real-provider demo_project writer
 ```
 
 Use this only after explicit user approval. It sends a real non-streaming Chutes request and writes the generated text as a draft artifact only.
@@ -256,7 +256,7 @@ Preferred one-command Chutes runbook:
 
 ```powershell
 $env:PYTHONPATH="I:\AI-NOVEL\novel_agent_workbench\src"
-py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test chutes-generate-once demo_project --chapter-id chapter_001 --prompt "Write a short test draft." --secret-value-stdin --allow-network --clear-secret-after-run --temperature 0.2 --max-tokens 96
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test chutes-generate-once demo_project --chapter-id chapter_001 --prompt "Write a short test draft." --secret-value-stdin --clear-secret-after-run --temperature 0.2 --max-tokens 96
 ```
 
 Paste the Chutes key through stdin when prompted by PowerShell pipeline or terminal input. Do not put real keys directly in reusable command history.
@@ -266,9 +266,7 @@ This command runs:
 ```text
 audit precheck
 secret/config setup
-enable gate
 generate draft
-disable gate
 clear secret by default
 audit postcheck
 ```
@@ -319,6 +317,14 @@ py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test 
 
 Only one decision may be recorded for a review in this phase. `accepted` still does not create a confirmed chapter; use `commit-draft` explicitly when the draft should enter confirmed storage.
 
+Current commit gate:
+
+```text
+commit-draft requires an accepted review for the same draft.
+```
+
+Trying to commit an unreviewed draft, a draft whose review is still pending, or a draft marked `needs_revision` / `blocked` fails without creating confirmed files and without blocking the chapter.
+
 Create a revision request after `needs_revision`:
 
 ```powershell
@@ -350,6 +356,14 @@ These commands are read-only. They return ids, provider/model/usage, character/w
 Explicitly commit a draft:
 
 ```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test commit-draft demo_project <draft_id>
+```
+
+The normal safe sequence is:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test review-draft demo_project <draft_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test decide-review demo_project <review_id> --decision accepted --reason-code manual_pass
 py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test commit-draft demo_project <draft_id>
 ```
 
@@ -468,6 +482,89 @@ writer provider must be mock
 
 The command creates a normal draft artifact and marks chapter workflow as `draft_ready`. It does not call real Providers, does not auto-commit, does not print operator prompt text or Memory Bank text, and does not update Memory Bank/world book/RAG/export.
 
+Create and approve a metadata-only final assembly gate for a future real context-aware Provider request:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-final-assembly-gate demo_project --chapter-id chapter_002 --prompt "Draft the next scene." --max-context-tokens 4096
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test approve-final-assembly-gate demo_project <gate_id> --reason-code operator_ok
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-final-assembly-gates demo_project --status approved
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-final-assembly-gate demo_project <gate_id>
+```
+
+Gate output stores prompt/context/provider hashes and section metadata only. It does not print prompt text, Planning Library text, Memory Bank text, draft content, or secrets. In the current phase, even an approved matching gate does not enable real context-aware Provider generation; it only proves the explicit approval boundary.
+
+Create a metadata-only final Provider runbook from the approved gate:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-final-provider-runbook demo_project <gate_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-final-provider-runbooks demo_project --status pending_operator_authorization
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-final-provider-runbook demo_project <runbook_id>
+```
+
+Runbook output stores provider/model snapshots, digests, token estimates, and checklist metadata only. It stops at `pending_operator_authorization`; it does not call a real LLM, write a draft, update Memory Bank/RAG/export, create DOCX, add UI, or auto-commit.
+
+Record a metadata-only final Provider authorization checkpoint from the runbook:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test authorize-final-provider-runbook demo_project <runbook_id> --reason-code operator_ok
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-final-provider-authorizations demo_project --status authorized_pending_execution
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-final-provider-authorization demo_project <authorization_id>
+```
+
+Authorization output stores metadata, digests, execution-boundary flags, and a no-secrets checkpoint summary only. It does not create a plaintext execution token, enable a real Provider, call a real LLM, write a draft, update Memory Bank/RAG/export, create DOCX, add UI, or auto-commit.
+
+Create a metadata-only final Provider execution preflight:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-final-provider-execution-preflight demo_project <authorization_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-final-provider-execution-preflights demo_project --status passed_pending_execute_authorization
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-final-provider-execution-preflight demo_project <preflight_id>
+```
+
+Preflight output stores check ids, pass/fail booleans, issue codes, metadata, and digests only. It may return `blocked` if the authorization/runbook/gate/provider chain drifted. It does not enable a real Provider, call a real LLM, write a draft, update Memory Bank/RAG/export, create DOCX, add UI, or auto-commit.
+
+Attempt final Provider execution under the current fail-closed policy:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test attempt-final-provider-execution demo_project <preflight_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-final-provider-execution-attempts demo_project --status aborted_real_llm_disabled
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-final-provider-execution-attempt demo_project <attempt_id>
+```
+
+Attempt output stores only abort metadata and safety flags. It requires a passed zero-issue preflight, then always returns `aborted_real_llm_disabled` in the current phase. It does not enable a real Provider, call a real LLM, write a draft, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or auto-commit.
+
+Create a no-network real execution readiness report:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test create-final-provider-real-execution-readiness demo_project <attempt_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-final-provider-real-execution-readiness demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-final-provider-real-execution-readiness demo_project <readiness_id>
+```
+
+Readiness output checks whether the aborted attempt still matches current writer config, whether the writer is configured for Chutes, whether `api_key_ref` exists, and whether the referenced project secret is present. It stores only key presence and masked metadata, not the key value. It still does not enable a real Provider, call a real LLM, write a draft, update Memory Bank/RAG/export, create DOCX, add UI, delete files, or auto-commit.
+
+Execute the final Provider real path only after explicit approval:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test execute-final-provider-real demo_project <readiness_id> --prompt-stdin --reason-code operator_ok --max-context-tokens 4096 --temperature 0.7 --max-tokens 1024
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-final-provider-real-executions demo_project --status draft_created
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-final-provider-real-execution demo_project <execution_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test postcheck-final-provider-real-execution demo_project <execution_id>
+```
+
+This command can send a real Chutes request and can write one new draft artifact. It re-checks the approved gate digest against the provided prompt/system/context before calling Chutes. `--prompt-stdin` strips shell newline characters before exact gate matching. The postcheck is read-only and verifies draft creation, no confirmed chapter, and metadata-only safety flags. This path still does not auto-commit, update Memory Bank/RAG/export, create DOCX, add UI, or delete files. Prefer `--prompt-stdin` so prompt text is not stored in shell history.
+
+Run a Provider connectivity smoke test without creating story drafts:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test run-provider-smoke-test demo_project writer
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test run-provider-smoke-test demo_project writer --reason-code operator_ok
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test list-provider-smoke-tests demo_project
+py -3.13 -m novel_agent_workbench.cli --projects-root $env:TEMP\naw_manual_test read-provider-smoke-test demo_project <smoke_test_id>
+```
+
+The smoke-test harness is infrastructure-only. When the user starts it, it sends the fixed small Provider test request. It still stores no prompt text, response text, raw request body, or plaintext secrets, and it never writes drafts, commits chapters, updates Memory Bank/RAG/export, creates DOCX, or adds UI.
+
 Create manual formal context tasks:
 
 ```powershell
@@ -542,7 +639,7 @@ ok: true
 findings: []
 ```
 
-For context-aware drafts, audit validates `context_generation` metadata and drafts index consistency. It does not reject normal draft body text, because draft artifacts are allowed to contain generated content for human review.
+For context-aware drafts, audit validates `context_generation` metadata and drafts index consistency. For Provider smoke tests, audit validates metadata-only storage, `sample_only/non_committable` classification, no draft/confirmed-chapter linkage, no prompt/response/secret text, and drift between the latest passed smoke-test config snapshot and current role config. It does not reject normal draft body text, because draft artifacts are allowed to contain generated content for human review.
 
 Run a repository prepublish check before any GitHub publication:
 
@@ -550,7 +647,36 @@ Run a repository prepublish check before any GitHub publication:
 py -3.13 -m novel_agent_workbench.cli --projects-root I:\AI-NOVEL\novel_agent_workbench\workspace_projects prepublish-check --repo-root I:\AI-NOVEL\novel_agent_workbench
 ```
 
-This is read-only. It checks required `.gitignore` patterns, publishable source files, runtime project audit findings, and test-only corpus samples. Real corpus samples are blockers until removed or retired from runtime state. Disabled real Provider adapters or missing local Provider secrets may appear as warnings when they do not leak secrets, prompts, or content.
+This is read-only. It checks required `.gitignore` patterns, publishable source files, runtime project audit findings, and test-only corpus samples. Real corpus samples are blockers until removed or retired from runtime state. Disabled real Provider adapters or missing local Provider secrets remain visible in `audit-project`, but they are not upload-readiness warnings unless they leak secrets, prompts, or content. Provider smoke-test config drift may appear as a warning.
+
+Run one concise project health check before upload/review:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root I:\AI-NOVEL\novel_agent_workbench\workspace_projects project-health chutes_live_20260519_2 --repo-root I:\AI-NOVEL\novel_agent_workbench
+```
+
+This is read-only and metadata-only. It joins public project state, Provider status, latest smoke-test metadata, `audit-project`, and optional `prepublish-check` upload readiness. It must not print prompt text, draft content, Provider response text, request bodies, plaintext secrets, or secret values.
+
+Upload ignore guard:
+
+```text
+workspace_projects/
+secrets.local.json
+*.local.json
+.env
+.env.*
+exports/
+backups/
+run_logs/
+usage_logs/
+*.log
+build/
+dist/
+*.egg-info/
+*.spec
+.coverage
+htmlcov/
+```
 
 Create a self-style baseline from confirmed chapters:
 
@@ -777,3 +903,56 @@ py -3.13 -m novel_agent_workbench.cli --projects-root <root> decide-manual-rewri
 ```
 
 These commands write only metadata under `data/manual_rewrite_comparisons/`. They do not call LLMs, expose prompt/body text in command output, commit drafts, create confirmed chapters, or update Memory Bank/RAG/export.
+
+Create a pending-review handoff only after `selected_for_review`:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> create-review-handoff-from-manual-comparison <project_id> <comparison_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> list-review-handoffs <project_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> read-review-handoff <project_id> <handoff_id>
+```
+
+The handoff is metadata only. It does not run `review-draft`, call Providers, auto-commit, create confirmed chapters, or update Memory Bank/RAG/export.
+
+For a submitted manual rewrite draft candidate, `review-draft` now requires either a `selected_for_review` comparison or a `pending_review` handoff. Ordinary draft review still works as before.
+
+After a successful guarded review that used a `pending_review` handoff, the handoff is marked `review_created` and records the created review id:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> list-review-handoffs <project_id> --status review_created
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> read-review-handoff <project_id> <handoff_id>
+```
+
+This is queue metadata only. It does not edit drafts, commit chapters, or update Memory Bank/RAG/export.
+
+## Planning Library
+
+Create a manual planning reference:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> create-planning-item <project_id> arc_main --title "Main arc" --item-type outline --text "Manual outline text" --active
+```
+
+List/read metadata without exposing text:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> list-planning-items <project_id>
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> read-planning-item <project_id> arc_main
+```
+
+Explicitly inspect text locally:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> read-planning-item <project_id> arc_main --include-text
+```
+
+Control whether it enters context assembly:
+
+```powershell
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> activate-planning-item <project_id> arc_main
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> deactivate-planning-item <project_id> arc_main
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> disable-planning-item <project_id> arc_main
+py -3.13 -m novel_agent_workbench.cli --projects-root <root> enable-planning-item <project_id> arc_main
+```
+
+Active/enabled Planning Library items are included in `context-package-preview` and `prompt-render-dry-run`. Default output stays metadata-only; use `--include-text` or `--include-context-text` only for local human inspection.
