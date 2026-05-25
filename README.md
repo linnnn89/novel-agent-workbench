@@ -160,6 +160,22 @@ codex_docs\PROVIDER_ADAPTER_CONTRACT.md
 codex_docs\IMPORTANT_OPEN_ISSUES.md
 ```
 
+## Fresh Machine Environment Setup
+
+The repository does not upload `.venv/`, runtime projects, local secrets, or build output. On a new Windows machine, run:
+
+```cmd
+SETUP_ENV.bat
+```
+
+The script creates `.venv` with Python 3.13, installs this project in editable mode, and installs desktop build tools (`pyinstaller`, `pillow`). It does not create API keys and does not copy any runtime writing projects.
+
+For non-interactive verification:
+
+```cmd
+SETUP_ENV.bat --no-pause
+```
+
 Current重点难题:
 
 ```text
