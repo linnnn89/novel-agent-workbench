@@ -188,6 +188,11 @@ def default_global_settings() -> dict[str, Any]:
     return {
         "schema_version": GLOBAL_SETTINGS_SCHEMA_VERSION,
         "generation_settings": default_generation_settings(),
+        "model_roles": {
+            "writer": default_model_role("writer"),
+            "scorer": default_model_role("scorer"),
+            "reviser": default_model_role("reviser"),
+        },
     }
 
 

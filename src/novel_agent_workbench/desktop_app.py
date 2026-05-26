@@ -65,14 +65,16 @@ TOP_NAV_SECTIONS = (
             ("generation_params", "全局采样参数"),
             ("choose_data_root", "项目库位置"),
             ("refresh_all", "刷新"),
+            ("clear_trash", "清空回收站"),
         ),
     },
     {
         "label": "定稿",
         "items": (
             ("confirmed_chapters", "已确认章节"),
+            ("export_txt", "导出TXT文稿"),
             ("final_checklist", "出稿清单（开发中）"),
-            ("export_settings", "导出设置（开发中）"),
+            ("export_settings", "导出设置"),
         ),
     },
     {
@@ -514,10 +516,12 @@ class WorkbenchDesktopApp(tk.Tk):
             "generation_params": self.show_generation_params,
             "model_call_records": self.show_model_call_records,
             "final_checklist": self.show_final_checklist,
+            "export_txt": self.export_txt_dialog,
             "export_settings": self.show_export_settings,
             "project_self_check": self.run_prepublish_check,
             "choose_data_root": self.choose_data_root,
             "refresh_all": self.refresh_all,
+            "clear_trash": self.clear_trash_dialog,
             "user_guide": self.show_user_guide,
             "run_log": self.show_run_log_window,
             "about": self.show_about,
@@ -718,6 +722,8 @@ class WorkbenchDesktopApp(tk.Tk):
             menu.add_command(label="要求重写（重新随机）当前稿", command=self.rewrite_current_draft)
             menu.add_command(label="根据审稿精修当前稿", command=self.refine_current_draft_from_ai_review)
             menu.add_separator()
+            menu.add_command(label="删除本章草稿", command=lambda: self.delete_chapter_drafts_dialog(project_id, item_id))
+            menu.add_separator()
             menu.add_command(label="记忆库", command=self.show_memory_bank)
             menu.add_command(label="大纲与章节", command=self.show_planning_library)
             menu.add_command(label="查看生成时会带的上下文", command=self.summarize_project_context)
@@ -748,6 +754,8 @@ class WorkbenchDesktopApp(tk.Tk):
                 ("打开作品文件夹", self.open_selected_project_folder),
             ):
                 menu.add_command(label=label, command=command)
+            menu.add_separator()
+            menu.add_command(label="删除作品", command=lambda: self.delete_project_dialog(project_id))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -775,6 +783,96 @@ class WorkbenchDesktopApp(tk.Tk):
             return
         self.write_log(f"新建作品: {project_id.strip()}")
         self.refresh_projects()
+
+    def delete_project_dialog(self, project_id: str) -> None:
+        project = next((item for item in self.projects if item.get("project_id") == project_id), {})
+        title = str(project.get("title") or project_id)
+        warning = (
+            f"将删除整个作品：{title}\n\n"
+            f"作品 ID：{project_id}\n\n"
+            "这会把作品目录移入本项目库的 .trash 回收文件夹名，并从项目列表移除。\n"
+            "作品内草稿、定稿、设置、API Key、本地资料都会一起移走。\n\n"
+            "继续前请确认你不再需要从软件里直接打开它。"
+        )
+        if not messagebox.askyesno(APP_TITLE, warning):
+            return
+        typed = simpledialog.askstring(APP_TITLE, "如需删除整个作品，请输入：确认删除")
+        if typed != "确认删除":
+            self.write_log(f"取消删除作品: project={project_id}")
+            messagebox.showinfo(APP_TITLE, "未输入“确认删除”，已取消。")
+            return
+        try:
+            result = self.app.delete_project(project_id)
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, f"删除作品失败:\n{exc}")
+            self.write_log(f"删除作品失败: project={project_id} error={exc}")
+            return
+        self.selected_project_id = ""
+        self.current_draft_project_id = ""
+        self.current_draft_ids = []
+        self.current_draft_index = -1
+        self.draft_meta_var.set("稿件浏览与确认")
+        self.draft_body.delete("1.0", tk.END)
+        self.refresh_projects()
+        self.write_log(
+            f"删除作品: project={project_id} trashed_path={result.get('trashed_path')}"
+        )
+        messagebox.showinfo(APP_TITLE, "作品已移入回收站。可在“创作设置 > 清空回收站”彻底删除 .trash。")
+
+    def delete_chapter_drafts_dialog(self, project_id: str, chapter_id: str) -> None:
+        message = (
+            f"将删除章节 {chapter_id} 的草稿、AI审稿记录和精修请求。\n\n"
+            "已确认章节会保留；为了保持定稿一致性，已确认章节对应的提交源稿也会保留。\n"
+            "删除前会自动创建 checkpoint，删除的文件会先移入 .trash。"
+        )
+        if not messagebox.askyesno(APP_TITLE, message):
+            return
+        try:
+            result = self.app.delete_chapter_drafts(project_id, chapter_id)
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, f"删除章节草稿失败:\n{exc}")
+            self.write_log(f"删除章节草稿失败: project={project_id} chapter={chapter_id} error={exc}")
+            return
+        deleted_count = len(result.get("deleted_draft_ids") or [])
+        review_count = len(result.get("removed_reviews") or [])
+        revision_count = len(result.get("removed_revision_requests") or [])
+        self.write_log(
+            f"删除章节草稿: project={project_id} chapter={chapter_id} "
+            f"drafts={deleted_count} reviews={review_count} revisions={revision_count}"
+        )
+        self.load_project_work_nodes(project_id)
+        self.run_project_health(silent=True)
+        if self.current_draft_project_id == project_id:
+            self.current_draft_project_id = ""
+            self.current_draft_ids = []
+            self.current_draft_index = -1
+            self.draft_meta_var.set("稿件浏览与确认")
+            self.draft_body.delete("1.0", tk.END)
+        messagebox.showinfo(
+            APP_TITLE,
+            f"已删除本章草稿 {deleted_count} 个，审稿记录 {review_count} 个，精修请求 {revision_count} 个。\n"
+            f"已确认章节保留：{'是' if result.get('confirmed_chapter_retained') else '否'}",
+        )
+
+    def clear_trash_dialog(self) -> None:
+        message = (
+            "将彻底删除当前项目库下所有 .trash 回收文件和目录。\n\n"
+            "这包括被删除的作品、草稿、审稿记录、旧备份退役文件等。\n"
+            "清空后不能从软件内恢复。确定继续？"
+        )
+        if not messagebox.askyesno(APP_TITLE, message):
+            return
+        try:
+            result = self.app.clear_trash()
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, f"清空回收站失败:\n{exc}")
+            self.write_log(f"清空回收站失败: {exc}")
+            return
+        removed_count = int(result.get("removed_count") or 0)
+        removed_bytes = int(result.get("removed_bytes") or 0)
+        self.write_log(f"清空回收站: removed={removed_count} bytes={removed_bytes}")
+        self.refresh_projects()
+        messagebox.showinfo(APP_TITLE, f"回收站已清空：删除 {removed_count} 项，约 {format_bytes(removed_bytes)}。")
 
     def run_project_health(self, *, silent: bool = False) -> None:
         project_id = self.require_project()
@@ -1727,8 +1825,55 @@ class WorkbenchDesktopApp(tk.Tk):
         self.show_text_window(
             "确认章节",
             self.format_confirmed_chapters(project_id),
+            actions=(("导出TXT文稿", lambda: self.export_txt_dialog(project_id)),),
             refresh=lambda: self.format_confirmed_chapters(project_id),
         )
+
+    def export_txt_dialog(self, project_id: str | None = None) -> None:
+        project_id = project_id or self.require_project()
+        if not project_id:
+            return
+        chapters = self.app.list_confirmed_chapters(project_id)
+        if not chapters:
+            messagebox.showinfo(APP_TITLE, "当前作品还没有已确认章节，不能导出 TXT。")
+            return
+        default_name = self.default_txt_export_filename(project_id)
+        output_path = filedialog.asksaveasfilename(
+            title="导出TXT文稿",
+            defaultextension=".txt",
+            initialfile=default_name,
+            filetypes=(("TXT 文稿", "*.txt"), ("所有文件", "*.*")),
+        )
+        if not output_path:
+            return
+        try:
+            result = self.app.export_confirmed_chapters_txt(project_id, output_path)
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, f"导出 TXT 失败：\n{exc}")
+            return
+        self.write_log(
+            f"导出TXT文稿: project={project_id} chapters={result.get('chapter_count')} path={result.get('path')}"
+        )
+        messagebox.showinfo(
+            APP_TITLE,
+            "\n".join(
+                [
+                    "TXT 文稿已导出。",
+                    f"章节数：{result.get('chapter_count')}",
+                    f"编码：{result.get('encoding')}",
+                    f"文件：{result.get('path')}",
+                ]
+            ),
+        )
+
+    def default_txt_export_filename(self, project_id: str) -> str:
+        title = project_id
+        for project in self.app.list_projects():
+            if str(project.get("project_id") or "") == project_id:
+                title = str(project.get("title") or project_id)
+                break
+        safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", title).strip(" ._")
+        return f"{safe or project_id}.txt"
 
     def show_planning_library(self) -> None:
         project_id = self.require_project()
@@ -2049,9 +2194,11 @@ class WorkbenchDesktopApp(tk.Tk):
         token_target_var = tk.StringVar(value=str(DEFAULT_MEMORY_TARGET_TOKENS))
         token_estimate_var = tk.StringVar(value="")
         include_context_var = tk.BooleanVar(value=True)
+        api_status_var = tk.StringVar(value="")
         current_memory_item: dict[str, Any] = {}
         confirmed_chapters: list[dict[str, Any]] = []
         checked_chapter_ids: set[str] = set()
+        api_generating = {"active": False}
 
         ttk.Label(editor, text="本次勾选").grid(row=0, column=0, sticky="e", padx=(0, 10), pady=(0, 8))
         ttk.Entry(editor, textvariable=selected_var, state="readonly").grid(row=0, column=1, sticky="ew", pady=(0, 8))
@@ -2077,6 +2224,9 @@ class WorkbenchDesktopApp(tk.Tk):
         ttk.Label(editor, text="记忆银行正文").grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 4))
         text_box = tk.Text(editor, wrap="word", height=22)
         text_box.grid(row=7, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
+        ttk.Label(editor, textvariable=api_status_var, foreground="#6b7280", wraplength=680).grid(
+            row=8, column=0, columnspan=2, sticky="ew"
+        )
 
         def chapter_label(chapter: dict[str, Any]) -> str:
             chapter_id = str(chapter.get("chapter_id") or "")
@@ -2288,6 +2438,96 @@ class WorkbenchDesktopApp(tk.Tk):
                 ),
             )
 
+        def set_api_generating(active: bool) -> None:
+            api_generating["active"] = active
+            state = "disabled" if active else "normal"
+            for button in (api_generate_button, api_preview_button, update_prompt_button, compression_prompt_button):
+                button.configure(state=state)
+            if active:
+                api_status_var.set("正在调用当前 writer 模型服务生成记忆正文；返回前请不要重复点击。")
+
+        def show_memory_api_request_preview() -> None:
+            try:
+                preview = self.app.preview_memory_generation_request(
+                    project_id,
+                    current_memory=text_box.get("1.0", tk.END).strip(),
+                    chapters=selected_confirmed_chapters(),
+                    target_token_budget=current_target_tokens(normalize_entry=True),
+                )
+            except Exception as exc:
+                messagebox.showerror(APP_TITLE, f"生成 API 发送结构失败:\n{exc}", parent=window)
+                return
+            self.show_text_window(
+                "记忆银行 API 发送结构",
+                format_memory_generation_request_preview(preview),
+                parent=window,
+                refresh=lambda: format_memory_generation_request_preview(
+                    self.app.preview_memory_generation_request(
+                        project_id,
+                        current_memory=text_box.get("1.0", tk.END).strip(),
+                        chapters=selected_confirmed_chapters(),
+                        target_token_budget=current_target_tokens(normalize_entry=True),
+                    )
+                ),
+            )
+
+        def generate_memory_via_api() -> None:
+            if api_generating["active"]:
+                return
+            try:
+                chapters = selected_confirmed_chapters()
+                target_tokens = current_target_tokens(normalize_entry=True)
+            except Exception as exc:
+                messagebox.showinfo(APP_TITLE, str(exc), parent=window)
+                return
+            if not messagebox.askyesno(
+                APP_TITLE,
+                "将调用当前 writer 模型服务，把旧记忆和勾选章节发送给 API 生成记忆正文，可能消耗额度。\n\n继续？",
+                parent=window,
+            ):
+                return
+            current_memory = text_box.get("1.0", tk.END).strip()
+            set_api_generating(True)
+            self.write_log(f"记忆银行 API 生成请求已发送: project={project_id} chapters={len(chapters)}")
+
+            def worker() -> None:
+                try:
+                    result = self.app.generate_memory_bank_text(
+                        project_id,
+                        current_memory=current_memory,
+                        chapters=chapters,
+                        target_token_budget=target_tokens,
+                    )
+                except Exception as exc:
+                    self.after(0, lambda exc=exc: finish(error=exc))
+                    return
+                self.after(0, lambda result=result: finish(result=result))
+
+            def finish(*, result: dict[str, Any] | None = None, error: BaseException | None = None) -> None:
+                set_api_generating(False)
+                if error is not None:
+                    api_status_var.set("AI 生成记忆失败。")
+                    messagebox.showerror(APP_TITLE, f"AI 生成记忆失败:\n{error}", parent=window)
+                    self.write_log(f"记忆银行 API 生成失败: {error}")
+                    return
+                result = result or {}
+                generated_text = str(result.get("text") or "").strip()
+                text_box.delete("1.0", tk.END)
+                text_box.insert("1.0", generated_text)
+                summary = result.get("request_summary") if isinstance(result.get("request_summary"), dict) else {}
+                api_status_var.set(
+                    "AI 已生成记忆正文，已填入右侧文本框；请检查后点击“保存记忆正文”。"
+                    f" provider={result.get('provider') or '-'} model={result.get('model') or '-'}"
+                    f" chars={len(generated_text)} prompt_chars={summary.get('prompt_chars') or '-'}"
+                )
+                self.write_log(
+                    f"记忆银行 API 生成成功: project={project_id} provider={result.get('provider')} "
+                    f"model={result.get('model')} chars={len(generated_text)}"
+                )
+                update_status()
+
+            threading.Thread(target=worker, name="NovelMemoryBankGeneration", daemon=True).start()
+
         def show_memory_compression_prompt() -> None:
             current_memory = text_box.get("1.0", tk.END).strip()
             if not current_memory:
@@ -2337,8 +2577,14 @@ class WorkbenchDesktopApp(tk.Tk):
 
         button_row = ttk.Frame(window)
         button_row.grid(row=4, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 14))
-        ttk.Button(button_row, text="生成更新记忆提示词", command=show_memory_update_prompt).pack(side="left", padx=(0, 8))
-        ttk.Button(button_row, text="生成缩写提示词", command=show_memory_compression_prompt).pack(side="left", padx=(0, 8))
+        update_prompt_button = ttk.Button(button_row, text="生成更新记忆提示词", command=show_memory_update_prompt)
+        update_prompt_button.pack(side="left", padx=(0, 8))
+        api_preview_button = ttk.Button(button_row, text="查看API发送结构", command=show_memory_api_request_preview)
+        api_preview_button.pack(side="left", padx=(0, 8))
+        api_generate_button = ttk.Button(button_row, text="发送给AI生成记忆", command=generate_memory_via_api)
+        api_generate_button.pack(side="left", padx=(0, 8))
+        compression_prompt_button = ttk.Button(button_row, text="生成缩写提示词", command=show_memory_compression_prompt)
+        compression_prompt_button.pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="查看生成时会带的上下文", command=show_context_preview).pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="刷新窗口", command=refresh).pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="保存加入上下文设置", command=save_lifecycle).pack(side="left", padx=(0, 8))
@@ -2778,8 +3024,9 @@ class WorkbenchDesktopApp(tk.Tk):
         if not project_id:
             return
         self.show_text_window(
-            "导出设置（开发中）",
+            "导出设置",
             self.format_export_settings(project_id),
+            actions=(("导出TXT文稿", lambda: self.export_txt_dialog(project_id)),),
             refresh=lambda: self.format_export_settings(project_id),
         )
 
@@ -2794,10 +3041,10 @@ class WorkbenchDesktopApp(tk.Tk):
             [
                 "导出设置",
                 "--------",
-                "状态: 开发中",
-                "当前界面只读取设置，不生成 export/DOCX 文件。",
+                "TXT: 可用。导出范围为当前作品的已确认章节，不包含草稿、审稿记录、API Key 或本地私密设置。",
+                "DOCX/ZIP: 开发中。",
                 "",
-                f"TXT: {settings.get('txt_enabled', '-')}",
+                f"TXT设置: {settings.get('txt_enabled', '默认启用')}",
                 f"ZIP: {settings.get('zip_enabled', '-')}",
                 f"DOCX: {settings.get('docx_enabled', '-')}",
                 f"范围: {settings.get('export_scope', '-')}",
@@ -2822,7 +3069,7 @@ class WorkbenchDesktopApp(tk.Tk):
                     "--------",
                     "保存设置不会联网。",
                     "测试连接、真实生成和导出动作都需要用户主动触发。",
-                    "API Key 只保存在本作品本地密钥文件，不写入运行记录。",
+            "API Key 只保存在软件级本地密钥文件，不写入作品配置或运行记录。",
                 ]
             ),
         )
@@ -3197,9 +3444,6 @@ class WorkbenchDesktopApp(tk.Tk):
         messagebox.showinfo(APP_TITLE, "我的风格基线已建立。")
 
     def configure_model_connection(self) -> None:
-        project_id = self.require_project()
-        if not project_id:
-            return
         dialog = tk.Toplevel(self)
         dialog.title("模型服务")
         dialog.transient(self)
@@ -3209,7 +3453,7 @@ class WorkbenchDesktopApp(tk.Tk):
         role_labels = [label for _, label in MODEL_ROLE_OPTIONS]
         preset_labels = [str(item["label"]) for item in MODEL_PROVIDER_PRESETS]
         current_role = "writer"
-        current_state = model_connection_form_state(self.safe_model_role_config(project_id, current_role))
+        current_state = model_connection_form_state(self.safe_model_role_config(current_role))
         role_var = tk.StringVar(value=role_labels[0])
         preset_var = tk.StringVar(value=str(current_state["preset"]["label"]))
         model_var = tk.StringVar(value=str(current_state["model"]))
@@ -3282,7 +3526,7 @@ class WorkbenchDesktopApp(tk.Tk):
             note_var.set(str(state.get("note") or model_connection_note(preset)))
 
         def load_role(role: str) -> None:
-            apply_form_state(model_connection_form_state(self.safe_model_role_config(project_id, role)))
+            apply_form_state(model_connection_form_state(self.safe_model_role_config(role)))
 
         def on_preset_changed(event: object | None = None) -> None:
             preset = model_provider_preset(preset_var.get())
@@ -3309,12 +3553,15 @@ class WorkbenchDesktopApp(tk.Tk):
                 messagebox.showerror(APP_TITLE, "云端 API 或本地端口需要填写 API 地址。")
                 return
             try:
-                current = self.app.model_role_config(project_id, role)
+                global_current = self.app.global_model_role_config(role)
             except Exception:
-                current = {}
+                global_current = {}
+            current = self.safe_model_role_config(role)
             existing_api_key_ref = str(current.get("api_key_ref") or "")
+            global_api_key_ref = str(global_current.get("api_key_ref") or "")
             current_provider = str(current.get("provider") or "")
-            reusable_api_key_ref = existing_api_key_ref if current_provider == provider else ""
+            global_provider = str(global_current.get("provider") or "")
+            reusable_api_key_ref = global_api_key_ref if global_provider == provider else ""
             if bool(preset["secret_required"]) and not api_key and not reusable_api_key_ref:
                 messagebox.showerror(APP_TITLE, "这个接入方式需要填写 API Key。")
                 return
@@ -3322,16 +3569,23 @@ class WorkbenchDesktopApp(tk.Tk):
             if provider == "mock":
                 api_key_ref = ""
             elif key_is_existing_mask:
-                api_key_ref = reusable_api_key_ref
+                api_key_ref = reusable_api_key_ref or f"project_secret.{secret_name}"
             elif api_key:
                 api_key_ref = f"project_secret.{secret_name}"
             else:
                 api_key_ref = reusable_api_key_ref
             try:
                 if api_key and not key_is_existing_mask:
-                    self.app.set_project_secret(project_id, secret_name, api_key)
-                self.app.configure_provider_role(
-                    project_id,
+                    self.app.set_global_secret(secret_name, api_key)
+                elif (
+                    key_is_existing_mask
+                    and not reusable_api_key_ref
+                    and self.selected_project_id
+                    and existing_api_key_ref
+                    and current_provider == provider
+                ):
+                    self.app.copy_project_secret_to_global(self.selected_project_id, existing_api_key_ref, secret_name)
+                self.app.configure_global_provider_role(
                     role,
                     provider=provider,
                     model=model,
@@ -3356,7 +3610,10 @@ class WorkbenchDesktopApp(tk.Tk):
                 f"model={model} endpoint={safe_endpoint_label(base_url)} key={key_state}"
             )
             dialog.destroy()
-            self.run_project_health(silent=True)
+            if self.selected_project_id:
+                self.run_project_health(silent=True)
+            else:
+                self.set_provider_summary("模型服务已保存。创建或打开作品后，生成、审稿、精修会使用这套软件级设置。")
 
         preset_box.bind("<<ComboboxSelected>>", on_preset_changed)
         role_box.bind("<<ComboboxSelected>>", on_role_changed)
@@ -3365,11 +3622,19 @@ class WorkbenchDesktopApp(tk.Tk):
         dialog.grab_set()
         dialog.wait_window()
 
-    def safe_model_role_config(self, project_id: str, role: str) -> dict[str, Any]:
+    def safe_model_role_config(self, role: str) -> dict[str, Any]:
         try:
-            return self.app.model_role_config(project_id, role)
+            current = self.app.global_model_role_config(role)
         except Exception:
-            return {}
+            current = {}
+        if str(current.get("provider") or "").strip() and str(current.get("model") or "").strip():
+            return current
+        if self.selected_project_id:
+            try:
+                return self.app.model_role_config(self.selected_project_id, role)
+            except Exception:
+                return current
+        return current
 
     def require_project(self) -> str:
         if not self.selected_project_id:
@@ -3947,6 +4212,56 @@ def format_prompt_preview(render: dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
+def format_memory_generation_request_preview(preview: dict[str, Any]) -> str:
+    messages = preview.get("messages") if isinstance(preview.get("messages"), list) else []
+    sampling = preview.get("sampling") if isinstance(preview.get("sampling"), dict) else {}
+    metadata = preview.get("metadata") if isinstance(preview.get("metadata"), dict) else {}
+    summary = preview.get("summary") if isinstance(preview.get("summary"), dict) else {}
+    system = next((item for item in messages if isinstance(item, dict) and item.get("role") == "system"), {})
+    user = next((item for item in messages if isinstance(item, dict) and item.get("role") == "user"), {})
+    metadata_lines = [
+        f"- {key}: {metadata[key]}"
+        for key in sorted(metadata)
+        if key != "source_chapter_ids"
+    ]
+    if "source_chapter_ids" in metadata:
+        metadata_lines.append(f"- source_chapter_ids: {', '.join(str(item) for item in metadata['source_chapter_ids'])}")
+    return "\n".join(
+        [
+            "请求角色",
+            "--------",
+            f"Provider role: {preview.get('provider_request_role') or 'writer'}",
+            f"Logical role: {preview.get('logical_role') or 'writer'}",
+            "",
+            "采样参数",
+            "--------",
+            f"temperature: {sampling.get('temperature')}",
+            f"top_p: {sampling.get('top_p')}",
+            f"max_tokens: {sampling.get('max_tokens')}",
+            f"stream: {sampling.get('stream')}",
+            "",
+            "结构摘要",
+            "--------",
+            f"system_prompt_chars: {summary.get('system_prompt_chars')}",
+            f"prompt_chars: {summary.get('prompt_chars')}",
+            f"target_token_budget: {summary.get('target_token_budget')}",
+            f"source_chapter_count: {summary.get('source_chapter_count')}",
+            "",
+            "metadata（不进入 HTTP payload，只进入本地请求摘要）",
+            "---------------------------------------------",
+            "\n".join(metadata_lines) if metadata_lines else "（无）",
+            "",
+            "System message",
+            "--------------",
+            str(system.get("content") or "").strip() or "（空）",
+            "",
+            "User message",
+            "------------",
+            str(user.get("content") or "").strip() or "（空）",
+        ]
+    ).strip()
+
+
 def ordered_section_labels(sections: list[object]) -> list[str]:
     groups: dict[str, int] = {}
     for item in sections:
@@ -4157,7 +4472,7 @@ def model_connection_form_state(current: dict[str, Any]) -> dict[str, Any]:
         "api_key_display": SAVED_SECRET_MASK if api_key_ref else "",
         "timeout_seconds": model_timeout_display(settings.get("timeout_seconds")),
         "deepseek_thinking_enabled": deepseek_thinking_enabled(settings.get("thinking")),
-        "note": model_connection_note(preset) + (" 当前项目已保存 API Key。" if api_key_ref else ""),
+        "note": model_connection_note(preset) + (" 软件已保存 API Key。" if api_key_ref else ""),
     }
 
 
@@ -4224,7 +4539,7 @@ def model_connection_note(preset: dict[str, Any]) -> str:
     if provider == "openrouter":
         return "OpenRouter 使用 OpenAI Chat Completions 兼容接口；填写 OpenRouter API Key 和模型 ID，保存设置不会发起连接。"
     if bool(preset["secret_required"]):
-        return "云端 API 需要 API Key；软件会自动把它保存到本项目本地密钥文件，不写入配置或日志。"
+        return "云端 API 需要 API Key；软件会自动把它保存到软件级本地密钥文件，不写入作品配置或日志。"
     return "保存设置不会发起连接；测试连接和生成草稿由用户主动点击后执行。"
 
 
@@ -4253,6 +4568,18 @@ def safe_endpoint_label(base_url: str) -> str:
         return "-"
     parsed = urlparse(base_url if "://" in base_url else f"https://{base_url}")
     return parsed.netloc.split("@")[-1] or "-"
+
+
+def format_bytes(value: int) -> str:
+    size = float(max(0, int(value)))
+    units = ("B", "KB", "MB", "GB")
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{int(size)} B"
 
 
 def format_project_summary(health: dict[str, Any]) -> str:

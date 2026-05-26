@@ -40,6 +40,7 @@ from .final_provider_real_execution_readiness import FinalProviderRealExecutionR
 from .final_provider_runbooks import FinalProviderRunbookService
 from .formal_context import FormalContextPlanService
 from .formal_context_tasks import FormalContextTaskQueueService
+from .exports import TxtManuscriptExportService
 from .manual_rewrite import ManualRewriteTaskService
 from .manual_rewrite_comparison import ManualRewriteComparisonService
 from .memory_apply_preview import MemoryApplyPreviewService
@@ -50,7 +51,10 @@ from .project_health import project_health
 from .provider_smoke_tests import ProviderSmokeTestService
 from .publication import prepublish_check
 from .providers import (
+    ModelRoleConfig,
     ProviderRequest,
+    SECRET_REF_PREFIX,
+    get_provider_adapter,
     configure_provider_role,
     generate_with_provider,
     get_model_role_config,
@@ -61,6 +65,8 @@ from .providers import (
     provider_status,
     set_model_role_config,
     set_project_secret,
+    validate_model_role_config,
+    validate_secret_name,
 )
 from .review_handoffs import ReviewHandoffService
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
@@ -72,8 +78,33 @@ from .storage import ProjectRegistry, ProjectStore, atomic_write_json_file
 
 
 GLOBAL_SETTINGS_FILENAME = "global_settings.json"
+GLOBAL_SECRETS_FILENAME = "global_secrets.local.json"
+
+
+class RuntimeModelSettingsStore:
+    """Project store view that reads software-level model settings at runtime."""
+
+    def __init__(self, store: ProjectStore, *, model_roles: dict[str, Any], secrets: dict[str, Any]):
+        self._store = store
+        self._model_roles = model_roles
+        self._secrets = secrets
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+    def read_config(self) -> dict[str, Any]:
+        config = dict(self._store.read_config())
+        if self._model_roles:
+            config["model_roles"] = self._model_roles
+        return config
+
+    def read_secrets(self) -> dict[str, Any]:
+        return dict(self._secrets)
 AI_REFINEMENT_SYSTEM_PROMPT = (
-    "你是一名专业小说改稿编辑。你根据审稿意见精修当前草稿，只输出修订后的小说正文，不输出说明或 <think>。"
+    "你是一名专业小说改稿编辑。当前任务不是续写新章节，而是根据 AI 审稿意见精修当前草稿。"
+    "AI 审稿意见是本次改稿的主要约束；必须逐条落实其中明确指出的问题。"
+    "若审稿意见与已给定上下文、前文事实或草稿事实冲突，以保持连续性为最高规则，"
+    "但不得无视审稿意见。只输出修订后的小说正文，不输出说明、分析或 <think>。"
 )
 
 
@@ -103,12 +134,18 @@ class WorkbenchApplicationService:
     def list_projects(self) -> list[dict[str, Any]]:
         return self.registry.list_projects()
 
+    def delete_project(self, project_id: str) -> dict[str, Any]:
+        return self.registry.delete_project(project_id)
+
+    def clear_trash(self) -> dict[str, Any]:
+        return self.registry.clear_trash()
+
     def prepublish_check(self, *, repo_root: str | Path | None = None) -> dict[str, Any]:
         root = Path(repo_root).resolve() if repo_root is not None else Path(__file__).resolve().parents[2]
         return prepublish_check(root, projects_root=self.registry.projects_root)
 
     def project_health(self, project_id: str, *, repo_root: str | Path | None = None) -> dict[str, Any]:
-        return project_health(self._open_store(project_id), repo_root=repo_root).to_dict()
+        return project_health(self._runtime_store(project_id), repo_root=repo_root).to_dict()
 
     def profile_corpus(self, path: str | Path, *, max_name_candidates: int = 20) -> dict[str, Any]:
         return profile_corpus(path, max_name_candidates=max_name_candidates).to_dict()
@@ -284,19 +321,25 @@ class WorkbenchApplicationService:
         return ReviewHandoffService(self._open_store(project_id)).read_handoff(handoff_id)
 
     def project_state(self, project_id: str) -> dict[str, Any]:
-        return public_project_state(self._open_store(project_id))
+        return public_project_state(self._runtime_store(project_id))
 
     def global_generation_settings(self) -> dict[str, Any]:
         return effective_generation_settings(self._read_global_settings())
 
     def update_global_generation_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         updated = deep_merge(self.global_generation_settings(), settings)
-        self._write_global_settings({"schema_version": 1, "generation_settings": updated})
+        global_settings = self._read_global_settings()
+        global_settings["schema_version"] = 1
+        global_settings["generation_settings"] = updated
+        self._write_global_settings(global_settings)
         return updated
 
     def reset_global_generation_settings(self) -> dict[str, Any]:
         defaults = default_generation_settings()
-        self._write_global_settings(default_global_settings())
+        global_settings = self._read_global_settings()
+        global_settings["schema_version"] = 1
+        global_settings["generation_settings"] = defaults
+        self._write_global_settings(global_settings)
         return defaults
 
     def generation_settings(self, project_id: str) -> dict[str, Any]:
@@ -476,7 +519,65 @@ class WorkbenchApplicationService:
         return role_config.to_dict()
 
     def model_role_config(self, project_id: str, role: str) -> dict[str, Any]:
-        return get_model_role_config(self._sync_project_generation_settings_for_runtime(project_id), role).to_dict()
+        return get_model_role_config(self._runtime_store(project_id), role).to_dict()
+
+    def global_model_role_config(self, role: str) -> dict[str, Any]:
+        return ModelRoleConfig.from_mapping(role, self._global_model_roles().get(role)).to_dict()
+
+    def configure_global_provider_role(
+        self,
+        role: str,
+        *,
+        provider: str,
+        model: str,
+        api_key_ref: str = "",
+        base_url: str = "",
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        provider = str(provider or "").strip()
+        model = str(model or "").strip()
+        if not provider:
+            raise ValueError("provider is required.")
+        if not model:
+            raise ValueError("model is required.")
+        adapter = get_provider_adapter(provider)
+        if adapter is None:
+            raise ValueError(f"Provider adapter is not registered: {provider!r}")
+        updates: dict[str, Any] = {"provider": provider, "model": model, "base_url": str(base_url or "").strip()}
+        if api_key_ref:
+            updates["api_key_ref"] = str(api_key_ref).strip()
+        if settings:
+            updates["settings"] = dict(settings)
+        role_config = ModelRoleConfig.from_mapping(role, updates)
+        if adapter.requires_secret and not role_config.api_key_ref:
+            raise ValueError(f"Provider {provider!r} requires api_key_ref.")
+        validate_model_role_config(role_config, self._read_global_secrets(), require_secret_value=False)
+        global_settings = self._read_global_settings()
+        roles = global_settings.get("model_roles") if isinstance(global_settings.get("model_roles"), dict) else {}
+        global_settings["schema_version"] = 1
+        global_settings["model_roles"] = {**roles, role: role_config.to_dict()}
+        self._write_global_settings(global_settings)
+        return role_config.to_dict()
+
+    def set_global_secret(self, name: str, value: str) -> dict[str, Any]:
+        secret_name = validate_secret_name(name)
+        if not isinstance(value, str) or not value:
+            raise ValueError("secret value cannot be empty.")
+        secrets = self._read_global_secrets()
+        secrets[secret_name] = value
+        self._write_global_secrets(secrets)
+        return {"name": secret_name, "has_value": True}
+
+    def copy_project_secret_to_global(self, project_id: str, api_key_ref: str, target_name: str) -> dict[str, Any]:
+        if not api_key_ref.startswith(SECRET_REF_PREFIX):
+            raise ValueError("api_key_ref must use project_secret.<name>.")
+        source_name = validate_secret_name(api_key_ref[len(SECRET_REF_PREFIX) :])
+        target_secret_name = validate_secret_name(target_name)
+        secrets = self._open_store(project_id).read_secrets()
+        value = str(secrets.get(source_name) or "")
+        if not value:
+            raise ValueError(f"Project secret is missing or empty: {source_name}")
+        return self.set_global_secret(target_secret_name, value)
 
     def set_project_secret(self, project_id: str, name: str, value: str) -> dict[str, Any]:
         return set_project_secret(self._open_store(project_id), name, value)
@@ -502,7 +603,7 @@ class WorkbenchApplicationService:
         reasoning_callback: Callable[[str], None] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        store = self._open_store(project_id)
+        store = self._runtime_store(project_id)
         service = DraftGenerationService(store)
         result = service.generate_draft(
             DraftGenerationRequest(
@@ -549,7 +650,7 @@ class WorkbenchApplicationService:
         reasoning_callback: Callable[[str], None] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        store = self._sync_project_generation_settings_for_runtime(project_id)
+        store = self._runtime_store(project_id)
         service = DraftGenerationService(store)
         result = service.generate_context_draft(
             DraftGenerationRequest(
@@ -587,6 +688,9 @@ class WorkbenchApplicationService:
     def remove_missing_draft_index_entries(self, project_id: str, draft_ids: list[str]) -> dict[str, Any]:
         return DraftGenerationService(self._open_store(project_id)).remove_missing_draft_index_entries(draft_ids)
 
+    def delete_chapter_drafts(self, project_id: str, chapter_id: str) -> dict[str, Any]:
+        return DraftGenerationService(self._open_store(project_id)).delete_chapter_drafts(chapter_id)
+
     def update_draft_content(self, project_id: str, draft_id: str, *, text: str) -> dict[str, Any]:
         return DraftGenerationService(self._open_store(project_id)).update_draft_content(draft_id, text=text)
 
@@ -598,7 +702,7 @@ class WorkbenchApplicationService:
         return result.to_dict()
 
     def review_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
-        result = DraftReviewService(self._sync_project_generation_settings_for_runtime(project_id)).review_draft(draft_id)
+        result = DraftReviewService(self._runtime_store(project_id)).review_draft(draft_id)
         return result.to_dict()
 
     def ai_review_draft(
@@ -612,7 +716,7 @@ class WorkbenchApplicationService:
         reasoning_callback: Callable[[str], None] | None = None,
         extra_instruction: str = "",
     ) -> dict[str, Any]:
-        result = DraftReviewService(self._sync_project_generation_settings_for_runtime(project_id)).ai_review_draft(
+        result = DraftReviewService(self._runtime_store(project_id)).ai_review_draft(
             draft_id,
             max_context_tokens=max_context_tokens,
             stream=stream,
@@ -666,7 +770,7 @@ class WorkbenchApplicationService:
         return RevisionRequestService(self._open_store(project_id)).read_revision_request(revision_request_id)
 
     def generate_revision_draft(self, project_id: str, revision_request_id: str) -> dict[str, Any]:
-        result = RevisionRequestService(self._open_store(project_id)).generate_revision_draft(revision_request_id)
+        result = RevisionRequestService(self._runtime_store(project_id)).generate_revision_draft(revision_request_id)
         return result.to_dict()
 
     def refine_draft_from_ai_review(
@@ -689,7 +793,7 @@ class WorkbenchApplicationService:
         stream_callback: Callable[[str], None] | None = None,
         reasoning_callback: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
-        store = self._sync_project_generation_settings_for_runtime(project_id)
+        store = self._runtime_store(project_id)
         draft_service = DraftGenerationService(store)
         review_service = DraftReviewService(store)
         draft = draft_service.read_draft(draft_id)
@@ -702,7 +806,7 @@ class WorkbenchApplicationService:
         title = str(draft.get("title") or "")
         settings, _ = self._effective_project_generation_settings(store)
         prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
-        system_prompt = str(prompting.get("system_prompt") or "") or AI_REFINEMENT_SYSTEM_PROMPT
+        system_prompt = ai_refinement_system_prompt(str(prompting.get("system_prompt") or ""))
         task_prompt = ai_refinement_task_prompt(
             chapter_id=chapter_id,
             title=title,
@@ -1077,17 +1181,48 @@ class WorkbenchApplicationService:
             target_token_budget=target_token_budget,
         ).to_dict()
 
+    def preview_memory_generation_request(
+        self,
+        project_id: str,
+        *,
+        current_memory: str,
+        chapters: list[dict[str, Any]],
+        target_token_budget: int | None = None,
+    ) -> dict[str, Any]:
+        return MemoryBankService(self._runtime_store(project_id)).preview_memory_generation_request(
+            current_memory=current_memory,
+            chapters=chapters,
+            target_token_budget=target_token_budget,
+        )
+
+    def generate_memory_bank_text(
+        self,
+        project_id: str,
+        *,
+        current_memory: str,
+        chapters: list[dict[str, Any]],
+        target_token_budget: int | None = None,
+    ) -> dict[str, Any]:
+        return MemoryBankService(self._runtime_store(project_id)).generate_memory_text(
+            current_memory=current_memory,
+            chapters=chapters,
+            target_token_budget=target_token_budget,
+        ).to_dict()
+
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()
 
     def read_confirmed_chapter(self, project_id: str, chapter_id: str) -> dict[str, Any]:
         return DraftGenerationService(self._open_store(project_id)).read_confirmed_chapter(chapter_id)
 
+    def export_confirmed_chapters_txt(self, project_id: str, output_path: str | Path) -> dict[str, Any]:
+        return TxtManuscriptExportService(self._open_store(project_id)).export_confirmed_chapters(output_path).to_dict()
+
     def audit_project(self, project_id: str) -> dict[str, Any]:
-        return audit_project(self._open_store(project_id))
+        return audit_project(self._runtime_store(project_id))
 
     def provider_status(self, project_id: str, role: str) -> dict[str, Any]:
-        return provider_status(self._open_store(project_id), role).to_dict()
+        return provider_status(self._runtime_store(project_id), role).to_dict()
 
     def provider_dry_run(
         self,
@@ -1101,7 +1236,7 @@ class WorkbenchApplicationService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return provider_dry_run(
-            self._open_store(project_id),
+            self._runtime_store(project_id),
             ProviderRequest(
                 role=role,
                 prompt=prompt,
@@ -1124,7 +1259,7 @@ class WorkbenchApplicationService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return provider_real_test(
-            self._open_store(project_id),
+            self._runtime_store(project_id),
             ProviderRequest(
                 role=role,
                 prompt=prompt,
@@ -1146,7 +1281,7 @@ class WorkbenchApplicationService:
         max_tokens: int | None = 16,
         reason_code: str = "",
     ) -> dict[str, Any]:
-        return ProviderSmokeTestService(self._open_store(project_id)).run_smoke_test(
+        return ProviderSmokeTestService(self._runtime_store(project_id)).run_smoke_test(
             role=role,
             prompt=prompt,
             system_prompt=system_prompt,
@@ -1200,6 +1335,9 @@ class WorkbenchApplicationService:
     def _global_settings_path(self) -> Path:
         return self.registry.projects_root / GLOBAL_SETTINGS_FILENAME
 
+    def _global_secrets_path(self) -> Path:
+        return self.registry.projects_root / GLOBAL_SECRETS_FILENAME
+
     def _read_global_settings(self) -> dict[str, Any]:
         self.registry.initialize()
         path = self._global_settings_path()
@@ -1209,11 +1347,47 @@ class WorkbenchApplicationService:
         if not text:
             return default_global_settings()
         value = json.loads(text)
-        return value if isinstance(value, dict) else default_global_settings()
+        if not isinstance(value, dict):
+            return default_global_settings()
+        return deep_merge(default_global_settings(), value)
 
     def _write_global_settings(self, settings: dict[str, Any]) -> None:
         self.registry.initialize()
         atomic_write_json_file(self._global_settings_path(), settings)
+
+    def _read_global_secrets(self) -> dict[str, Any]:
+        self.registry.initialize()
+        path = self._global_secrets_path()
+        if not path.exists():
+            return {}
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            return {}
+        value = json.loads(text)
+        return value if isinstance(value, dict) else {}
+
+    def _write_global_secrets(self, secrets: dict[str, Any]) -> None:
+        self.registry.initialize()
+        atomic_write_json_file(self._global_secrets_path(), secrets)
+
+    def _global_model_roles(self) -> dict[str, Any]:
+        settings = self._read_global_settings()
+        roles = settings.get("model_roles") if isinstance(settings.get("model_roles"), dict) else {}
+        return roles
+
+    def _runtime_store(self, project_id: str) -> RuntimeModelSettingsStore | ProjectStore:
+        store = self._sync_project_generation_settings_for_runtime(project_id)
+        global_roles = self._global_model_roles()
+        config = store.read_config()
+        settings, _ = self._effective_project_generation_settings(store, config=config)
+        if model_roles_have_config(global_roles):
+            runtime_roles = merged_writer_sampling_settings(global_roles, settings)
+            runtime_secrets = self._read_global_secrets()
+        else:
+            legacy_roles = config.get("model_roles") if isinstance(config.get("model_roles"), dict) else {}
+            runtime_roles = merged_writer_sampling_settings(legacy_roles, settings)
+            runtime_secrets = store.read_secrets()
+        return RuntimeModelSettingsStore(store, model_roles=runtime_roles, secrets=runtime_secrets)
 
     def _effective_project_generation_settings(
         self,
@@ -1264,6 +1438,21 @@ class WorkbenchApplicationService:
         return self.registry.open_project(project_id)
 
 
+def ai_refinement_system_prompt(project_system_prompt: str = "") -> str:
+    project_prompt = str(project_system_prompt or "").strip()
+    base_prompt = AI_REFINEMENT_SYSTEM_PROMPT.strip()
+    if not project_prompt or project_prompt == base_prompt:
+        return base_prompt
+    return "\n\n".join(
+        [
+            base_prompt,
+            "【项目通用写作规则】",
+            project_prompt,
+            "以上通用规则不得覆盖本次 AI 审稿意见；若存在冲突，优先保持既有事实连续性并落实审稿指出的问题。",
+        ]
+    )
+
+
 def ai_refinement_task_prompt(*, chapter_id: str, title: str = "", instruction: str = "") -> str:
     heading = f"{chapter_id}"
     if title:
@@ -1271,7 +1460,8 @@ def ai_refinement_task_prompt(*, chapter_id: str, title: str = "", instruction: 
     user_instruction = str(instruction or "").strip()
     lines = [
         f"请根据 AI 审稿意见精修当前章节：{heading}。",
-        "保持主线、人物动机和已有设定一致；优先解决审稿指出的问题。",
+        "必须优先解决审稿指出的问题；不要只做泛泛润色，也不要另起炉灶重写成新章节。",
+        "保持主线、人物动机、已有设定、前文事实和关键场景连续。",
         "输出必须是修订后的小说正文，不要写分析过程、修改说明、免责声明或 <think>。",
     ]
     if user_instruction:
@@ -1295,6 +1485,7 @@ def render_ai_refinement_prompt(
     lines = [
         "【精修任务】",
         "你将根据 AI 审稿意见，把当前草稿改成一个新的修订版。",
+        "AI 审稿意见是本次精修的主要执行清单；必须优先落实，不要只做普通续写或表层润色。",
         "只输出小说正文，不要输出修改说明。",
         "",
         "【目标章节】",
@@ -1305,8 +1496,13 @@ def render_ai_refinement_prompt(
         "【上下文与资料】",
         context_text or "无额外上下文。",
         "",
-        "【AI 审稿意见】",
+        "【必须落实的 AI 审稿意见】",
         review_text or "（无审稿意见）",
+        "",
+        "【落实规则】",
+        "1. 优先修复上方审稿意见明确指出的问题。",
+        "2. 保留未被审稿意见否定的主线、人物关系、信息量和关键场景。",
+        "3. 如果某条审稿意见与上下文或草稿事实冲突，用正文方式化解冲突，不要在输出中解释。",
         "",
         "【当前草稿正文】",
         draft_text or "（空草稿）",
@@ -1318,6 +1514,7 @@ def render_ai_refinement_prompt(
             "",
             "【输出要求】",
             "直接输出精修后的完整章节正文。",
+            "正文应体现 AI 审稿意见已被落实，但不要列出修改清单。",
             "不要输出审稿、分析、提纲、说明、免责声明或 <think>。",
         ]
     )
@@ -1354,3 +1551,14 @@ def merged_writer_sampling_settings(model_roles: object, generation_settings: di
             },
         },
     }
+
+
+def model_roles_have_config(model_roles: object) -> bool:
+    roles = model_roles if isinstance(model_roles, dict) else {}
+    for role in ("writer", "scorer", "reviser"):
+        config = roles.get(role)
+        if not isinstance(config, dict):
+            continue
+        if str(config.get("provider") or "").strip() and str(config.get("model") or "").strip():
+            return True
+    return False

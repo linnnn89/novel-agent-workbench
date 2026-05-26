@@ -85,7 +85,16 @@ from .memory_apply_preview import (
     MemoryApplyPreviewResult,
     MemoryApplyPreviewService,
 )
-from .memory_bank import MemoryBankError, MemoryBankLifecycleResult, MemoryBankService, MemoryBankUpdateResult
+from .memory_bank import (
+    MemoryBankError,
+    MemoryBankGenerationResult,
+    MemoryBankLifecycleResult,
+    MemoryBankService,
+    MemoryBankUpdateResult,
+    build_memory_generation_provider_request,
+    format_memory_update_prompt,
+    memory_generation_system_prompt,
+)
 from .planning_library import PlanningLibraryError, PlanningLibraryItemResult, PlanningLibraryService
 from .providers import (
     CHUTES_PROVIDER_ID,
@@ -258,9 +267,13 @@ __all__ = [
     "MemoryApplyCommitResult",
     "MemoryApplyPreviewService",
     "MemoryBankError",
+    "MemoryBankGenerationResult",
     "MemoryBankLifecycleResult",
     "MemoryBankService",
     "MemoryBankUpdateResult",
+    "build_memory_generation_provider_request",
+    "format_memory_update_prompt",
+    "memory_generation_system_prompt",
     "ReviewDecisionResult",
     "RevisionCandidateComparison",
     "RevisionCandidateError",

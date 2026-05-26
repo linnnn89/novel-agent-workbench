@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import socket
+import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -38,6 +39,7 @@ REAL_NETWORK_PROVIDER_IDS = {
 DEFAULT_PROVIDER_TIMEOUT_SECONDS = 300.0
 MIN_PROVIDER_TIMEOUT_SECONDS = 1.0
 MAX_PROVIDER_TIMEOUT_SECONDS = 900.0
+TRANSIENT_PROVIDER_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 REAL_GENERATION_BLOCKING_AUDIT_CODES = {
     "possible_secret_in_config",
     "raw_provider_api_key_in_config",
@@ -323,17 +325,24 @@ class OpenAICompatibleProviderClient(ProviderClient):
             raise ProviderError("Provider requires a model id.", error_type="missing_model")
         if not self.role_config.base_url:
             raise ProviderError("Provider requires base_url.", error_type="missing_base_url")
-        try:
-            status_code, data = send_openai_compatible_chat_completion(
-                role_config=self.role_config,
-                request=request,
-                api_key=self.api_key,
-                timeout_seconds=self.timeout_seconds,
-            )
-        except urllib.error.HTTPError as exc:
-            raise ProviderError(f"HTTP error {int(exc.code)} from provider.", error_type="http_error") from exc
-        except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
-            raise ProviderError(network_error_message("provider generation", exc), error_type="network_error") from exc
+        retry_delays = TRANSIENT_PROVIDER_RETRY_DELAYS_SECONDS
+        for attempt_index in range(len(retry_delays) + 1):
+            try:
+                status_code, data = send_openai_compatible_chat_completion(
+                    role_config=self.role_config,
+                    request=request,
+                    api_key=self.api_key,
+                    timeout_seconds=self.timeout_seconds,
+                )
+                break
+            except urllib.error.HTTPError as exc:
+                raise ProviderError(f"HTTP error {int(exc.code)} from provider.", error_type="http_error") from exc
+            except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
+                if attempt_index >= len(retry_delays):
+                    attempts = attempt_index + 1
+                    message = f"{network_error_message('provider generation', exc)} Attempts: {attempts}."
+                    raise ProviderError(message, error_type="network_error") from exc
+                time.sleep(retry_delays[attempt_index])
         if not 200 <= status_code < 300:
             raise ProviderError(f"HTTP error {status_code} from provider.", error_type="http_error")
         first_choice = first_response_choice(data)

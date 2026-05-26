@@ -94,6 +94,56 @@ class ProjectRegistry:
             raise StorageError(f"Project does not exist: {project_id}")
         return store
 
+    def delete_project(self, project_id: str) -> dict[str, Any]:
+        validate_project_id(project_id)
+        self.initialize()
+        store = self.open_project(project_id)
+        project_root = store.root.resolve()
+        store._assert_path_inside_root(project_root)
+        if project_root == self.projects_root.resolve():
+            raise StorageError("Refusing to delete projects root.")
+        with store.lock():
+            pass
+        trashed_path = retire_path(project_root)
+        entries = [item for item in self._read_registry() if item.get("project_id") != project_id]
+        self._atomic_write_registry(entries)
+        return {
+            "project_id": project_id,
+            "deleted": True,
+            "trashed_path": str(trashed_path),
+            "remaining_count": len(entries),
+        }
+
+    def clear_trash(self) -> dict[str, Any]:
+        self.initialize()
+        root = self.projects_root.resolve()
+        removed: list[str] = []
+        removed_bytes = 0
+        trash_paths = sorted(
+            (path for path in root.rglob("*") if path.name.endswith(TRASH_SUFFIX)),
+            key=lambda path: len(path.parts),
+            reverse=True,
+        )
+        for path in trash_paths:
+            target = path.resolve()
+            try:
+                target.relative_to(root)
+            except ValueError as exc:
+                raise StorageError(f"Trash path escapes projects root: {target}") from exc
+            if not target.exists():
+                continue
+            removed_bytes += path_size(target)
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+            removed.append(str(target))
+        return {
+            "removed_count": len(removed),
+            "removed_bytes": removed_bytes,
+            "removed_paths": removed,
+        }
+
     def list_projects(self) -> list[dict[str, Any]]:
         self.initialize()
         entries = self._read_registry()
@@ -485,6 +535,18 @@ def trash_path_for(path: str | Path) -> Path:
     source = Path(path)
     stamp = utc_stamp()
     return source.with_name(f"{source.name}.{stamp}{TRASH_SUFFIX}")
+
+
+def path_size(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    if not path.is_dir():
+        return 0
+    total = 0
+    for child in path.rglob("*"):
+        if child.is_file():
+            total += child.stat().st_size
+    return total
 
 
 def utc_stamp() -> str:

@@ -66,6 +66,24 @@ class ChapterWorkflowService:
                 return item
         raise ChapterWorkflowError(f"Chapter not found: {chapter_id}")
 
+    def remove_chapter(self, chapter_id: str) -> dict[str, Any]:
+        validate_chapter_id(chapter_id)
+        index = self._read_index()
+        kept: list[dict[str, Any]] = []
+        removed: dict[str, Any] | None = None
+        for item in index["chapters"]:
+            if item.get("chapter_id") == chapter_id:
+                removed = item
+                continue
+            kept.append(item)
+        if removed is not None:
+            self.store.write_json(self.path, {"schema_version": 1, "chapters": kept})
+        return {
+            "chapter_id": chapter_id,
+            "removed": removed is not None,
+            "remaining_count": len(kept),
+        }
+
     def mark_planned(self, chapter_id: str, *, title: str = "") -> dict[str, Any]:
         return self._upsert(chapter_id, title=title, status="planned")
 
