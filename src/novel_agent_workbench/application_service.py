@@ -44,7 +44,7 @@ from .exports import TxtManuscriptExportService
 from .manual_rewrite import ManualRewriteTaskService
 from .manual_rewrite_comparison import ManualRewriteComparisonService
 from .memory_apply_preview import MemoryApplyPreviewService
-from .memory_bank import MemoryBankService
+from .memory_bank import DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL, MemoryBankService
 from .planning_library import PlanningLibraryService
 from .project_state import public_project_state
 from .project_health import project_health
@@ -1195,6 +1195,19 @@ class WorkbenchApplicationService:
             target_token_budget=target_token_budget,
         )
 
+    def memory_auto_summary_candidate(
+        self,
+        project_id: str,
+        *,
+        batch_size: int = DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL,
+    ) -> dict[str, Any]:
+        store = self._open_store(project_id)
+        confirmed_chapters = DraftGenerationService(store).list_confirmed_chapters()
+        return MemoryBankService(store).auto_summary_candidate(
+            confirmed_chapters=confirmed_chapters,
+            batch_size=batch_size,
+        )
+
     def generate_memory_bank_text(
         self,
         project_id: str,
@@ -1202,11 +1215,15 @@ class WorkbenchApplicationService:
         current_memory: str,
         chapters: list[dict[str, Any]],
         target_token_budget: int | None = None,
+        stream_callback: Callable[[str], None] | None = None,
+        reasoning_callback: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         return MemoryBankService(self._runtime_store(project_id)).generate_memory_text(
             current_memory=current_memory,
             chapters=chapters,
             target_token_budget=target_token_budget,
+            stream_callback=stream_callback,
+            reasoning_callback=reasoning_callback,
         ).to_dict()
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:

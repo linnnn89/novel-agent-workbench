@@ -16,7 +16,11 @@ from urllib.parse import urlparse
 from .application_service import WorkbenchApplicationService
 from .config import default_generation_settings
 from .context_assembler import DEFAULT_CHARS_PER_TOKEN
-from .memory_bank import DEFAULT_MEMORY_TARGET_TOKENS, normalize_memory_target_tokens
+from .memory_bank import (
+    DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL,
+    DEFAULT_MEMORY_TARGET_TOKENS,
+    normalize_memory_target_tokens,
+)
 from .providers import DEFAULT_PROVIDER_TIMEOUT_SECONDS
 from .storage import DEFAULT_PROJECTS_DIRNAME
 
@@ -239,6 +243,7 @@ class WorkbenchDesktopApp(tk.Tk):
         self.thinking_closed_generation_key: tuple[str, str] | None = None
         self.hidden_stale_draft_ids: set[tuple[str, str]] = set()
         self.prompted_stale_draft_ids: set[tuple[str, str]] = set()
+        self.active_auto_memory_projects: set[str] = set()
 
         self.title(APP_TITLE)
         self.minsize(*WINDOW_MIN_SIZE)
@@ -1633,6 +1638,297 @@ class WorkbenchDesktopApp(tk.Tk):
         self.write_log(f"确认稿件: project={project_id} chapter={chapter_id} draft_id={draft_id}")
         self.run_project_health(silent=True)
         self.show_draft_workspace(project_id, draft_id)
+        self.maybe_run_auto_memory_summary(project_id)
+
+    def maybe_run_auto_memory_summary(self, project_id: str) -> None:
+        if not project_id or project_id in self.active_auto_memory_projects:
+            return
+        try:
+            candidate = self.app.memory_auto_summary_candidate(
+                project_id,
+                batch_size=DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL,
+            )
+        except Exception as exc:
+            self.write_log(f"自动记忆总结检查失败: project={project_id} error={exc}")
+            return
+        if candidate.get("ready") is not True:
+            reason = str(candidate.get("reason") or "")
+            if reason == "manual_progress_missing":
+                self.write_log("自动记忆总结跳过: 记忆银行已有正文但没有章节进度，需要手动保存一次带章节来源的记忆。")
+            return
+        chapter_ids = [str(item or "") for item in candidate.get("source_chapter_ids") or [] if str(item or "")]
+        if not chapter_ids:
+            return
+        try:
+            memory_item = self.app.ensure_main_memory_item(project_id)
+            chapters = [self.app.read_confirmed_chapter(project_id, chapter_id) for chapter_id in chapter_ids]
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, f"准备自动记忆总结失败:\n{exc}", parent=self)
+            self.write_log(f"自动记忆总结准备失败: project={project_id} error={exc}")
+            return
+        self.start_auto_memory_summary(project_id, memory_item=memory_item, chapters=chapters, candidate=candidate)
+
+    def start_auto_memory_summary(
+        self,
+        project_id: str,
+        *,
+        memory_item: dict[str, Any],
+        chapters: list[dict[str, Any]],
+        candidate: dict[str, Any],
+    ) -> None:
+        chapter_ids = [str(chapter.get("chapter_id") or "") for chapter in chapters if chapter.get("chapter_id")]
+        if not chapter_ids:
+            return
+        self.active_auto_memory_projects.add(project_id)
+        target_tokens = normalize_memory_target_tokens(memory_item.get("target_token_budget"))
+        current_memory = str(memory_item.get("text") or "")
+        range_label = memory_auto_summary_range_label(chapter_ids)
+        progress = tk.Toplevel(self)
+        progress.title("记忆银行自动总结")
+        progress.transient(self)
+        progress.geometry("860x620")
+        progress.columnconfigure(0, weight=1)
+        progress.rowconfigure(3, weight=1)
+        is_generating = {"active": True}
+        ttk.Label(
+            progress,
+            text=f"已累计 {len(chapter_ids)} 章未汇总，正在自动总结 {range_label}。流式返回会显示在下方。",
+            wraplength=820,
+        ).grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 8))
+        status_var = tk.StringVar(value="正在调用当前 writer 模型服务生成记忆正文...")
+        ttk.Label(progress, textvariable=status_var, foreground="#6b7280", wraplength=820).grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=18,
+            pady=(0, 12),
+        )
+        progress_bar = ttk.Progressbar(progress, mode="indeterminate")
+        progress_bar.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
+        progress_bar.start(12)
+        text_frame = ttk.Frame(progress)
+        text_frame.grid(row=3, column=0, sticky="nsew", padx=18, pady=(0, 12))
+        text_frame.rowconfigure(0, weight=1)
+        text_frame.columnconfigure(0, weight=1)
+        text_box = tk.Text(text_frame, wrap="word", undo=True)
+        text_box.grid(row=0, column=0, sticky="nsew")
+        text_box.configure(state="disabled")
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_box.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        text_box.configure(yscrollcommand=scrollbar.set)
+        button_row = ttk.Frame(progress)
+        button_row.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 18))
+        self.write_log(f"自动记忆总结已触发: project={project_id} chapters={','.join(chapter_ids)}")
+
+        def text_box_content() -> str:
+            return text_box.get("1.0", tk.END).strip()
+
+        def append_stream_chunk(chunk: str) -> None:
+            if not chunk:
+                return
+            text_box.configure(state="normal")
+            text_box.insert(tk.END, chunk)
+            text_box.see(tk.END)
+            text_box.configure(state="disabled")
+
+        def set_generated_text(text: str, *, editable: bool) -> None:
+            text_box.configure(state="normal")
+            text_box.delete("1.0", tk.END)
+            text_box.insert("1.0", text)
+            text_box.see(tk.END)
+            text_box.configure(state="normal" if editable else "disabled")
+
+        def close_without_save() -> None:
+            if is_generating["active"]:
+                messagebox.showinfo(APP_TITLE, "自动总结正在进行，请等待完成。", parent=progress)
+                return
+            if messagebox.askyesno(APP_TITLE, "关闭后这次自动总结结果不会保存。\n\n继续？", parent=progress):
+                progress.destroy()
+
+        def save_generated_memory() -> None:
+            text = text_box_content()
+            if not text:
+                messagebox.showinfo(APP_TITLE, "记忆银行正文不能为空。", parent=progress)
+                return
+            memory_id = str(memory_item.get("memory_id") or "main_memory_bank")
+            try:
+                self.app.set_memory_text(
+                    project_id,
+                    memory_id,
+                    text,
+                    source_chapter_ids=chapter_ids,
+                    target_token_budget=target_tokens,
+                )
+                self.app.set_memory_item_enabled(
+                    project_id,
+                    memory_id,
+                    enabled=memory_item.get("enabled") is not False,
+                    reason_code="auto_5_chapter_summary",
+                    target_token_budget=target_tokens,
+                )
+            except Exception as exc:
+                messagebox.showerror(APP_TITLE, f"保存自动记忆总结失败:\n{exc}", parent=progress)
+                self.write_log(f"保存自动记忆总结失败: project={project_id} error={exc}")
+                return
+            self.write_log(
+                f"自动记忆总结已保存: project={project_id} chapters={','.join(chapter_ids)} "
+                f"remaining_after_batch={candidate.get('remaining_after_batch')}"
+            )
+            messagebox.showinfo(APP_TITLE, "自动记忆总结已保存。", parent=progress)
+            progress.destroy()
+            self.run_project_health(silent=True)
+
+        close_button = ttk.Button(button_row, text="暂不保存", command=close_without_save, state="disabled")
+        close_button.pack(side="right")
+        save_button = ttk.Button(button_row, text="保存到记忆银行", command=save_generated_memory, state="disabled")
+        save_button.pack(side="right", padx=(0, 8))
+        progress.protocol("WM_DELETE_WINDOW", close_without_save)
+
+        def stream_callback(chunk: str) -> None:
+            self.after(0, lambda chunk=chunk: append_stream_chunk(chunk))
+
+        def worker() -> None:
+            try:
+                result = self.app.generate_memory_bank_text(
+                    project_id,
+                    current_memory=current_memory,
+                    chapters=chapters,
+                    target_token_budget=target_tokens,
+                    stream_callback=stream_callback,
+                )
+            except Exception as exc:
+                self.after(0, lambda exc=exc: finish(error=exc))
+                return
+            self.after(0, lambda result=result: finish(result=result))
+
+        def finish(*, result: dict[str, Any] | None = None, error: BaseException | None = None) -> None:
+            self.active_auto_memory_projects.discard(project_id)
+            is_generating["active"] = False
+            try:
+                progress_bar.stop()
+            except tk.TclError:
+                pass
+            if error is not None:
+                status_var.set("自动记忆总结失败。")
+                close_button.configure(state="normal")
+                progress.title("记忆银行自动总结失败")
+                messagebox.showerror(APP_TITLE, f"自动记忆总结失败:\n{error}", parent=progress)
+                self.write_log(f"自动记忆总结失败: project={project_id} error={error}")
+                return
+            result = result or {}
+            generated_text = str(result.get("text") or "").strip()
+            if generated_text and text_box_content() != generated_text:
+                set_generated_text(generated_text, editable=True)
+            else:
+                text_box.configure(state="normal")
+            summary = result.get("request_summary") if isinstance(result.get("request_summary"), dict) else {}
+            status_var.set(
+                "AI 已生成记忆正文；请审阅后保存。"
+                f" provider={result.get('provider') or '-'} model={result.get('model') or '-'}"
+                f" chars={len(generated_text)} prompt_chars={summary.get('prompt_chars') or '-'}"
+                f" target_tokens={target_tokens}"
+            )
+            progress.title("记忆银行自动总结结果")
+            save_button.configure(state="normal")
+            close_button.configure(state="normal")
+            self.write_log(
+                f"自动记忆总结完成: project={project_id} chapters={','.join(chapter_ids)} "
+                f"provider={result.get('provider')} model={result.get('model')}"
+            )
+
+        threading.Thread(target=worker, name="NovelAutoMemorySummary", daemon=True).start()
+
+    def show_auto_memory_summary_result(
+        self,
+        project_id: str,
+        *,
+        memory_item: dict[str, Any],
+        chapters: list[dict[str, Any]],
+        candidate: dict[str, Any],
+        result: dict[str, Any],
+    ) -> None:
+        chapter_ids = [str(chapter.get("chapter_id") or "") for chapter in chapters if chapter.get("chapter_id")]
+        generated_text = str(result.get("text") or "").strip()
+        target_tokens = normalize_memory_target_tokens(memory_item.get("target_token_budget"))
+        window = tk.Toplevel(self)
+        window.title("记忆银行自动总结结果")
+        window.transient(self)
+        window.geometry("860x620")
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(2, weight=1)
+        range_label = memory_auto_summary_range_label(chapter_ids)
+        summary = result.get("request_summary") if isinstance(result.get("request_summary"), dict) else {}
+        ttk.Label(
+            window,
+            text=(
+                f"已为 {range_label} 生成记忆银行正文草稿。请审阅后保存；保存后记忆进度会记录到 "
+                f"{readable_chapter_label(chapter_ids[-1])}。"
+            ),
+            wraplength=820,
+        ).grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
+        ttk.Label(
+            window,
+            text=(
+                f"provider={result.get('provider') or '-'} model={result.get('model') or '-'} "
+                f"chars={len(generated_text)} prompt_chars={summary.get('prompt_chars') or '-'} "
+                f"target_tokens={target_tokens}"
+            ),
+            foreground="#6b7280",
+            wraplength=820,
+        ).grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 8))
+        text_frame = ttk.Frame(window)
+        text_frame.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 12))
+        text_frame.rowconfigure(0, weight=1)
+        text_frame.columnconfigure(0, weight=1)
+        text_box = tk.Text(text_frame, wrap="word", undo=True)
+        text_box.grid(row=0, column=0, sticky="nsew")
+        text_box.insert("1.0", generated_text)
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_box.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        text_box.configure(yscrollcommand=scrollbar.set)
+        button_row = ttk.Frame(window)
+        button_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 16))
+
+        def close_without_save() -> None:
+            if messagebox.askyesno(APP_TITLE, "关闭后这次自动总结结果不会保存。\n\n继续？", parent=window):
+                window.destroy()
+
+        def save_generated_memory() -> None:
+            text = text_box.get("1.0", tk.END).strip()
+            if not text:
+                messagebox.showinfo(APP_TITLE, "记忆银行正文不能为空。", parent=window)
+                return
+            memory_id = str(memory_item.get("memory_id") or "main_memory_bank")
+            try:
+                self.app.set_memory_text(
+                    project_id,
+                    memory_id,
+                    text,
+                    source_chapter_ids=chapter_ids,
+                    target_token_budget=target_tokens,
+                )
+                self.app.set_memory_item_enabled(
+                    project_id,
+                    memory_id,
+                    enabled=memory_item.get("enabled") is not False,
+                    reason_code="auto_5_chapter_summary",
+                    target_token_budget=target_tokens,
+                )
+            except Exception as exc:
+                messagebox.showerror(APP_TITLE, f"保存自动记忆总结失败:\n{exc}", parent=window)
+                self.write_log(f"保存自动记忆总结失败: project={project_id} error={exc}")
+                return
+            self.write_log(
+                f"自动记忆总结已保存: project={project_id} chapters={','.join(chapter_ids)} "
+                f"remaining_after_batch={candidate.get('remaining_after_batch')}"
+            )
+            messagebox.showinfo(APP_TITLE, "自动记忆总结已保存。", parent=window)
+            window.destroy()
+            self.run_project_health(silent=True)
+
+        ttk.Button(button_row, text="暂不保存", command=close_without_save).pack(side="right")
+        ttk.Button(button_row, text="保存到记忆银行", command=save_generated_memory).pack(side="right", padx=(0, 8))
+        window.protocol("WM_DELETE_WINDOW", close_without_save)
 
     def rewrite_current_draft(self) -> None:
         if not self.current_draft_project_id or self.current_draft_index < 0:
@@ -2181,8 +2477,15 @@ class WorkbenchDesktopApp(tk.Tk):
         ttk.Label(list_frame, text="勾选要发送去更新记忆的章节").grid(row=0, column=0, sticky="w", pady=(0, 6))
         select_buttons = ttk.Frame(list_frame)
         select_buttons.grid(row=1, column=0, sticky="ew", pady=(0, 6))
-        chapter_tree = ttk.Treeview(list_frame, show="tree", selectmode="none", height=20)
-        chapter_tree.grid(row=2, column=0, sticky="nsew")
+        chapter_tree_frame = ttk.Frame(list_frame)
+        chapter_tree_frame.grid(row=2, column=0, sticky="nsew")
+        chapter_tree_frame.rowconfigure(0, weight=1)
+        chapter_tree_frame.columnconfigure(0, weight=1)
+        chapter_tree = ttk.Treeview(chapter_tree_frame, show="tree", selectmode="none", height=20)
+        chapter_tree.grid(row=0, column=0, sticky="nsew")
+        chapter_scrollbar = ttk.Scrollbar(chapter_tree_frame, orient="vertical", command=chapter_tree.yview)
+        chapter_scrollbar.grid(row=0, column=1, sticky="ns")
+        chapter_tree.configure(yscrollcommand=chapter_scrollbar.set)
 
         editor = ttk.Frame(window)
         editor.grid(row=3, column=1, sticky="nsew", padx=(8, 14), pady=8)
@@ -2222,11 +2525,24 @@ class WorkbenchDesktopApp(tk.Tk):
             command=lambda: update_status(),
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 8))
         ttk.Label(editor, text="记忆银行正文").grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 4))
-        text_box = tk.Text(editor, wrap="word", height=22)
-        text_box.grid(row=7, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
+        text_frame = ttk.Frame(editor)
+        text_frame.grid(row=7, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
+        text_frame.rowconfigure(0, weight=1)
+        text_frame.columnconfigure(0, weight=1)
+        text_box = tk.Text(text_frame, wrap="word", height=22, undo=True)
+        text_box.grid(row=0, column=0, sticky="nsew")
+        text_scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_box.yview)
+        text_scrollbar.grid(row=0, column=1, sticky="ns")
+        text_box.configure(yscrollcommand=text_scrollbar.set)
         ttk.Label(editor, textvariable=api_status_var, foreground="#6b7280", wraplength=680).grid(
             row=8, column=0, columnspan=2, sticky="ew"
         )
+        saved_snapshot: dict[str, Any] = {}
+        suppress_dirty_tracking = {"active": False}
+
+        def update_window_title() -> None:
+            marker = "*" if has_unsaved_changes() else ""
+            window.title(f"记忆银行{marker}")
 
         def chapter_label(chapter: dict[str, Any]) -> str:
             chapter_id = str(chapter.get("chapter_id") or "")
@@ -2262,6 +2578,26 @@ class WorkbenchDesktopApp(tk.Tk):
                 token_target_var.set(str(target_tokens))
             return target_tokens
 
+        def editor_snapshot() -> dict[str, Any]:
+            return {
+                "text": text_box.get("1.0", tk.END).strip(),
+                "include_context": include_context_var.get(),
+                "target_tokens": current_target_tokens(),
+                "checked_chapter_ids": checked_ids_in_order(),
+            }
+
+        def has_unsaved_changes() -> bool:
+            return bool(saved_snapshot) and editor_snapshot() != saved_snapshot
+
+        def remember_saved_snapshot() -> None:
+            saved_snapshot.clear()
+            saved_snapshot.update(editor_snapshot())
+            update_window_title()
+
+        def refresh_dirty_state() -> None:
+            if not suppress_dirty_tracking["active"]:
+                update_window_title()
+
         def recommended_chapter_ids() -> list[str]:
             return recommended_memory_chapter_ids(current_memory_item, confirmed_chapters)
 
@@ -2284,6 +2620,7 @@ class WorkbenchDesktopApp(tk.Tk):
                 f"{text_state}；{len(text)} 字；约 {estimated_tokens} tokens；本次勾选 {selected_count} 章；目标约 {target_tokens} tokens；{context_state}"
             )
             selected_var.set(checked_label())
+            refresh_dirty_state()
 
         def refresh_chapter_rows() -> None:
             for chapter in confirmed_chapters:
@@ -2328,18 +2665,25 @@ class WorkbenchDesktopApp(tk.Tk):
             update_status()
 
         def refresh(select_chapter_id: str = "") -> None:
+            suppress_dirty_tracking["active"] = True
             try:
                 item = self.app.ensure_main_memory_item(project_id)
             except Exception as exc:
+                suppress_dirty_tracking["active"] = False
                 messagebox.showerror(APP_TITLE, f"读取记忆银行失败:\n{exc}", parent=window)
                 return
-            current_memory_item.clear()
-            current_memory_item.update(item)
-            include_context_var.set(item.get("enabled") is not False)
-            token_target_var.set(str(normalize_memory_target_tokens(item.get("target_token_budget"))))
-            text_box.delete("1.0", tk.END)
-            text_box.insert("1.0", str(item.get("text") or ""))
-            refresh_chapters(select_chapter_id)
+            try:
+                current_memory_item.clear()
+                current_memory_item.update(item)
+                include_context_var.set(item.get("enabled") is not False)
+                token_target_var.set(str(normalize_memory_target_tokens(item.get("target_token_budget"))))
+                text_box.delete("1.0", tk.END)
+                text_box.insert("1.0", str(item.get("text") or ""))
+                refresh_chapters(select_chapter_id)
+                remember_saved_snapshot()
+            finally:
+                suppress_dirty_tracking["active"] = False
+                update_window_title()
 
         def on_chapter_click(event: tk.Event) -> str | None:
             row_id = chapter_tree.identify_row(event.y)
@@ -2367,6 +2711,23 @@ class WorkbenchDesktopApp(tk.Tk):
             if not chapter_ids:
                 raise RuntimeError("请先在左侧勾选本次要发送去更新记忆的已确认章节。")
             return [self.app.read_confirmed_chapter(project_id, chapter_id) for chapter_id in chapter_ids]
+
+        def current_memory_generation_preview() -> dict[str, Any]:
+            return self.app.preview_memory_generation_request(
+                project_id,
+                current_memory=text_box.get("1.0", tk.END).strip(),
+                chapters=selected_confirmed_chapters(),
+                target_token_budget=current_target_tokens(normalize_entry=True),
+            )
+
+        def confirm_discard_unsaved(action: str) -> bool:
+            if not has_unsaved_changes():
+                return True
+            return messagebox.askyesno(
+                APP_TITLE,
+                f"记忆银行有未保存修改，{action}会丢失当前窗口里的改动。\n\n继续？",
+                parent=window,
+            )
 
         def save_text() -> None:
             memory_id = current_memory_id()
@@ -2418,24 +2779,15 @@ class WorkbenchDesktopApp(tk.Tk):
 
         def show_memory_update_prompt() -> None:
             try:
-                chapters = selected_confirmed_chapters()
+                preview = current_memory_generation_preview()
             except Exception as exc:
                 messagebox.showinfo(APP_TITLE, str(exc), parent=window)
                 return
-            prompt = format_memory_update_prompt(
-                current_memory=text_box.get("1.0", tk.END).strip(),
-                chapters=chapters,
-                target_tokens=current_target_tokens(normalize_entry=True),
-            )
             self.show_text_window(
                 "记忆银行更新提示词预览",
-                prompt,
+                format_memory_generation_manual_prompt(preview),
                 parent=window,
-                refresh=lambda: format_memory_update_prompt(
-                    current_memory=text_box.get("1.0", tk.END).strip(),
-                    chapters=selected_confirmed_chapters(),
-                    target_tokens=current_target_tokens(normalize_entry=True),
-                ),
+                refresh=lambda: format_memory_generation_manual_prompt(current_memory_generation_preview()),
             )
 
         def set_api_generating(active: bool) -> None:
@@ -2448,12 +2800,7 @@ class WorkbenchDesktopApp(tk.Tk):
 
         def show_memory_api_request_preview() -> None:
             try:
-                preview = self.app.preview_memory_generation_request(
-                    project_id,
-                    current_memory=text_box.get("1.0", tk.END).strip(),
-                    chapters=selected_confirmed_chapters(),
-                    target_token_budget=current_target_tokens(normalize_entry=True),
-                )
+                preview = current_memory_generation_preview()
             except Exception as exc:
                 messagebox.showerror(APP_TITLE, f"生成 API 发送结构失败:\n{exc}", parent=window)
                 return
@@ -2461,14 +2808,7 @@ class WorkbenchDesktopApp(tk.Tk):
                 "记忆银行 API 发送结构",
                 format_memory_generation_request_preview(preview),
                 parent=window,
-                refresh=lambda: format_memory_generation_request_preview(
-                    self.app.preview_memory_generation_request(
-                        project_id,
-                        current_memory=text_box.get("1.0", tk.END).strip(),
-                        chapters=selected_confirmed_chapters(),
-                        target_token_budget=current_target_tokens(normalize_entry=True),
-                    )
-                ),
+                refresh=lambda: format_memory_generation_request_preview(current_memory_generation_preview()),
             )
 
         def generate_memory_via_api() -> None:
@@ -2568,6 +2908,8 @@ class WorkbenchDesktopApp(tk.Tk):
         chapter_tree.bind("<Button-1>", on_chapter_click)
         text_box.bind("<KeyRelease>", lambda _event: update_status())
         token_entry.bind("<KeyRelease>", lambda _event: update_status())
+        window.bind("<Control-s>", lambda _event: (save_text(), "break")[1])
+        window.bind("<Control-S>", lambda _event: (save_text(), "break")[1])
 
         ttk.Button(select_buttons, text="勾选建议章节", command=check_recommended_chapters).pack(
             side="left", padx=(0, 6)
@@ -2586,10 +2928,19 @@ class WorkbenchDesktopApp(tk.Tk):
         compression_prompt_button = ttk.Button(button_row, text="生成缩写提示词", command=show_memory_compression_prompt)
         compression_prompt_button.pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="查看生成时会带的上下文", command=show_context_preview).pack(side="left", padx=(0, 8))
-        ttk.Button(button_row, text="刷新窗口", command=refresh).pack(side="left", padx=(0, 8))
+        ttk.Button(
+            button_row,
+            text="刷新窗口",
+            command=lambda: refresh() if confirm_discard_unsaved("刷新窗口") else None,
+        ).pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="保存加入上下文设置", command=save_lifecycle).pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="保存记忆正文", command=save_text).pack(side="right", padx=(8, 0))
-        ttk.Button(button_row, text="关闭", command=window.destroy).pack(side="right")
+        ttk.Button(
+            button_row,
+            text="关闭",
+            command=lambda: window.destroy() if confirm_discard_unsaved("关闭窗口") else None,
+        ).pack(side="right")
+        window.protocol("WM_DELETE_WINDOW", lambda: window.destroy() if confirm_discard_unsaved("关闭窗口") else None)
 
         refresh()
 
@@ -3867,6 +4218,15 @@ def memory_token_advice(estimated_tokens: int, target_tokens: int = DEFAULT_MEMO
     return f"当前约 {estimate} tokens / 目标 {target} tokens，明显过长，建议先缩写。"
 
 
+def memory_auto_summary_range_label(chapter_ids: list[str]) -> str:
+    ids = [str(chapter_id or "").strip() for chapter_id in chapter_ids if str(chapter_id or "").strip()]
+    if not ids:
+        return "本批章节"
+    if len(ids) == 1:
+        return readable_chapter_label(ids[0])
+    return f"{readable_chapter_label(ids[0])} - {readable_chapter_label(ids[-1])}"
+
+
 def format_memory_update_prompt(
     *,
     current_memory: str,
@@ -4250,6 +4610,25 @@ def format_memory_generation_request_preview(preview: dict[str, Any]) -> str:
             "metadata（不进入 HTTP payload，只进入本地请求摘要）",
             "---------------------------------------------",
             "\n".join(metadata_lines) if metadata_lines else "（无）",
+            "",
+            "System message",
+            "--------------",
+            str(system.get("content") or "").strip() or "（空）",
+            "",
+            "User message",
+            "------------",
+            str(user.get("content") or "").strip() or "（空）",
+        ]
+    ).strip()
+
+
+def format_memory_generation_manual_prompt(preview: dict[str, Any]) -> str:
+    messages = preview.get("messages") if isinstance(preview.get("messages"), list) else []
+    system = next((item for item in messages if isinstance(item, dict) and item.get("role") == "system"), {})
+    user = next((item for item in messages if isinstance(item, dict) and item.get("role") == "user"), {})
+    return "\n".join(
+        [
+            "这是实际 API 请求会使用的提示词内容。手动复制给其他模型时，请同时复制 System message 和 User message。",
             "",
             "System message",
             "--------------",
