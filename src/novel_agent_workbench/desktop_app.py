@@ -1659,6 +1659,15 @@ class WorkbenchDesktopApp(tk.Tk):
         chapter_ids = [str(item or "") for item in candidate.get("source_chapter_ids") or [] if str(item or "")]
         if not chapter_ids:
             return
+        if not messagebox.askyesno(
+            APP_TITLE,
+            format_auto_memory_summary_confirmation(chapter_ids),
+            parent=self,
+        ):
+            self.write_log(
+                f"自动记忆总结已取消: project={project_id} chapters={','.join(chapter_ids)}"
+            )
+            return
         try:
             memory_item = self.app.ensure_main_memory_item(project_id)
             chapters = [self.app.read_confirmed_chapter(project_id, chapter_id) for chapter_id in chapter_ids]
@@ -1837,98 +1846,6 @@ class WorkbenchDesktopApp(tk.Tk):
             )
 
         threading.Thread(target=worker, name="NovelAutoMemorySummary", daemon=True).start()
-
-    def show_auto_memory_summary_result(
-        self,
-        project_id: str,
-        *,
-        memory_item: dict[str, Any],
-        chapters: list[dict[str, Any]],
-        candidate: dict[str, Any],
-        result: dict[str, Any],
-    ) -> None:
-        chapter_ids = [str(chapter.get("chapter_id") or "") for chapter in chapters if chapter.get("chapter_id")]
-        generated_text = str(result.get("text") or "").strip()
-        target_tokens = normalize_memory_target_tokens(memory_item.get("target_token_budget"))
-        window = tk.Toplevel(self)
-        window.title("记忆银行自动总结结果")
-        window.transient(self)
-        window.geometry("860x620")
-        window.columnconfigure(0, weight=1)
-        window.rowconfigure(2, weight=1)
-        range_label = memory_auto_summary_range_label(chapter_ids)
-        summary = result.get("request_summary") if isinstance(result.get("request_summary"), dict) else {}
-        ttk.Label(
-            window,
-            text=(
-                f"已为 {range_label} 生成记忆银行正文草稿。请审阅后保存；保存后记忆进度会记录到 "
-                f"{readable_chapter_label(chapter_ids[-1])}。"
-            ),
-            wraplength=820,
-        ).grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
-        ttk.Label(
-            window,
-            text=(
-                f"provider={result.get('provider') or '-'} model={result.get('model') or '-'} "
-                f"chars={len(generated_text)} prompt_chars={summary.get('prompt_chars') or '-'} "
-                f"target_tokens={target_tokens}"
-            ),
-            foreground="#6b7280",
-            wraplength=820,
-        ).grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 8))
-        text_frame = ttk.Frame(window)
-        text_frame.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 12))
-        text_frame.rowconfigure(0, weight=1)
-        text_frame.columnconfigure(0, weight=1)
-        text_box = tk.Text(text_frame, wrap="word", undo=True)
-        text_box.grid(row=0, column=0, sticky="nsew")
-        text_box.insert("1.0", generated_text)
-        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_box.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        text_box.configure(yscrollcommand=scrollbar.set)
-        button_row = ttk.Frame(window)
-        button_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 16))
-
-        def close_without_save() -> None:
-            if messagebox.askyesno(APP_TITLE, "关闭后这次自动总结结果不会保存。\n\n继续？", parent=window):
-                window.destroy()
-
-        def save_generated_memory() -> None:
-            text = text_box.get("1.0", tk.END).strip()
-            if not text:
-                messagebox.showinfo(APP_TITLE, "记忆银行正文不能为空。", parent=window)
-                return
-            memory_id = str(memory_item.get("memory_id") or "main_memory_bank")
-            try:
-                self.app.set_memory_text(
-                    project_id,
-                    memory_id,
-                    text,
-                    source_chapter_ids=chapter_ids,
-                    target_token_budget=target_tokens,
-                )
-                self.app.set_memory_item_enabled(
-                    project_id,
-                    memory_id,
-                    enabled=memory_item.get("enabled") is not False,
-                    reason_code="auto_5_chapter_summary",
-                    target_token_budget=target_tokens,
-                )
-            except Exception as exc:
-                messagebox.showerror(APP_TITLE, f"保存自动记忆总结失败:\n{exc}", parent=window)
-                self.write_log(f"保存自动记忆总结失败: project={project_id} error={exc}")
-                return
-            self.write_log(
-                f"自动记忆总结已保存: project={project_id} chapters={','.join(chapter_ids)} "
-                f"remaining_after_batch={candidate.get('remaining_after_batch')}"
-            )
-            messagebox.showinfo(APP_TITLE, "自动记忆总结已保存。", parent=window)
-            window.destroy()
-            self.run_project_health(silent=True)
-
-        ttk.Button(button_row, text="暂不保存", command=close_without_save).pack(side="right")
-        ttk.Button(button_row, text="保存到记忆银行", command=save_generated_memory).pack(side="right", padx=(0, 8))
-        window.protocol("WM_DELETE_WINDOW", close_without_save)
 
     def rewrite_current_draft(self) -> None:
         if not self.current_draft_project_id or self.current_draft_index < 0:
@@ -4227,6 +4144,17 @@ def memory_auto_summary_range_label(chapter_ids: list[str]) -> str:
     return f"{readable_chapter_label(ids[0])} - {readable_chapter_label(ids[-1])}"
 
 
+def format_auto_memory_summary_confirmation(chapter_ids: list[str]) -> str:
+    ids = [str(chapter_id or "").strip() for chapter_id in chapter_ids if str(chapter_id or "").strip()]
+    range_label = memory_auto_summary_range_label(ids)
+    return (
+        f"已累计 {len(ids)} 章未汇总到记忆银行，范围：{range_label}。\n\n"
+        "继续后会调用当前 writer 模型服务，发送当前记忆银行正文和本批已确认章节正文，用于生成记忆银行草稿。"
+        "\n\n生成结果只会先显示在审阅窗口；写入记忆银行仍需再次点击“保存到记忆银行”。\n\n"
+        "现在开始生成？"
+    )
+
+
 def format_memory_update_prompt(
     *,
     current_memory: str,
@@ -5020,8 +4948,8 @@ def format_provider_summary(health: dict[str, Any]) -> str:
     lines.extend(
         [
             f"连接检查: {smoke.get('latest_status') or '-'} / {network_state}",
-            "联网生成: 点击生成草稿时调用；AI审稿和AI精修也只在用户点击对应按钮后调用。",
-            "说明: 保存模型服务不会联网；测试连接、生成草稿、AI审稿、AI精修由用户点击后执行。",
+            "联网生成: 生成草稿、AI审稿、AI精修由用户点击后调用；记忆银行自动总结达到批次时也会先弹窗确认。",
+            "说明: 保存模型服务不会联网；测试连接、生成草稿、AI审稿、AI精修和记忆银行总结都需要用户明确触发或确认。",
         ]
     )
     return "\n".join(lines).strip()

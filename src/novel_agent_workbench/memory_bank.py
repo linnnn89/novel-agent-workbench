@@ -260,7 +260,7 @@ class MemoryBankService:
 
     def auto_summary_candidate(self, *, confirmed_chapters: list[dict[str, Any]], batch_size: int = DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL) -> dict[str, Any]:
         return memory_auto_summary_candidate(
-            self.ensure_main_memory_item(),
+            self._read_main_memory_item_or_default(),
             confirmed_chapters,
             batch_size=batch_size,
         )
@@ -329,6 +329,20 @@ class MemoryBankService:
             **value,
             "schema_version": int(value.get("schema_version") or 1),
             "items": [item for item in items if isinstance(item, dict)],
+        }
+
+    def _read_main_memory_item_or_default(self) -> dict[str, Any]:
+        for item in self._read_memory_bank()["items"]:
+            if str(item.get("memory_id") or item.get("id") or "") == self.MAIN_MEMORY_ID:
+                return public_memory_item(item, include_text=True)
+        return {
+            "memory_id": self.MAIN_MEMORY_ID,
+            "text": "",
+            "text_chars": 0,
+            "source_chapter_ids": [],
+            "last_updated_chapter_id": "",
+            "last_updated_chapter_number": 0,
+            "target_token_budget": DEFAULT_MEMORY_TARGET_TOKENS,
         }
 
 

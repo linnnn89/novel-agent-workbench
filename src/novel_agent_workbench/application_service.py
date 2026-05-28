@@ -1218,12 +1218,13 @@ class WorkbenchApplicationService:
         stream_callback: Callable[[str], None] | None = None,
         reasoning_callback: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
+        safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
         return MemoryBankService(self._runtime_store(project_id)).generate_memory_text(
             current_memory=current_memory,
             chapters=chapters,
             target_token_budget=target_token_budget,
-            stream_callback=stream_callback,
-            reasoning_callback=reasoning_callback,
+            stream_callback=safe_stream_callback,
+            reasoning_callback=reasoning_callback if stream_callback is None else None,
         ).to_dict()
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:

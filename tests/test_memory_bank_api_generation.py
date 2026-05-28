@@ -5,14 +5,19 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from novel_agent_workbench.application_service import WorkbenchApplicationService
-from novel_agent_workbench.desktop_app import format_memory_generation_manual_prompt
+from novel_agent_workbench.desktop_app import (
+    format_auto_memory_summary_confirmation,
+    format_memory_generation_manual_prompt,
+)
 from novel_agent_workbench.memory_bank import memory_auto_summary_candidate
+from novel_agent_workbench.providers import ProviderResponse
 
 
 class MemoryBankApiGenerationTests(unittest.TestCase):
@@ -42,6 +47,7 @@ class MemoryBankApiGenerationTests(unittest.TestCase):
             app = WorkbenchApplicationService.open(projects_root)
             app.create_project("novel_a", title="Novel A")
             confirmed_path = projects_root / "novel_a" / "data" / "confirmed_chapters.json"
+            memory_bank_path = projects_root / "novel_a" / "data" / "memory_bank.json"
             confirmed_path.write_text(
                 json.dumps(
                     {
@@ -56,9 +62,23 @@ class MemoryBankApiGenerationTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            memory_before = json.loads(memory_bank_path.read_text(encoding="utf-8"))
+            self.assertEqual(memory_before.get("items"), [])
             candidate = app.memory_auto_summary_candidate("novel_a")
             self.assertTrue(candidate["ready"])
             self.assertEqual(candidate["source_chapter_ids"], [f"chapter_{number:03d}" for number in range(1, 6)])
+            memory_after = json.loads(memory_bank_path.read_text(encoding="utf-8"))
+            self.assertEqual(memory_after.get("items"), [])
+
+    def test_auto_summary_confirmation_discloses_provider_call_and_save_gate(self) -> None:
+        message = format_auto_memory_summary_confirmation(
+            [f"chapter_{number:03d}" for number in range(1, 6)]
+        )
+
+        self.assertIn("调用当前 writer 模型服务", message)
+        self.assertIn("已确认章节正文", message)
+        self.assertIn("保存到记忆银行", message)
+        self.assertIn("第 001 章 - 第 005 章", message)
 
     def test_preview_and_mock_generation_are_structured_and_not_auto_saved(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -126,6 +146,51 @@ class MemoryBankApiGenerationTests(unittest.TestCase):
             self.assertIn("memory_bank_generation", log_text)
             self.assertNotIn("旧钥匙", log_text)
             self.assertNotIn("林澈", log_text)
+
+    def test_memory_bank_streaming_hides_inline_thinking_before_ui_callback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = WorkbenchApplicationService.open(Path(temp_dir) / "projects")
+            app.create_project("novel_a", title="Novel A")
+            app.configure_mock_writer("novel_a", model="mock-writer")
+            chapters = [
+                {
+                    "chapter_id": "chapter_001",
+                    "title": "开端",
+                    "content": "林澈在雨夜发现旧钥匙。",
+                }
+            ]
+            streamed_chunks: list[str] = []
+            reasoning_chunks: list[str] = []
+
+            def fake_generate(_store: object, request: object) -> ProviderResponse:
+                stream_callback = getattr(request, "stream_callback", None)
+                if stream_callback is not None:
+                    stream_callback("<thi")
+                    stream_callback("nk>hidden chain")
+                    stream_callback("</think>记忆正文")
+                return ProviderResponse(
+                    text="<think>hidden chain</think>记忆正文",
+                    usage={},
+                    model="fake",
+                    provider="fake",
+                    finish_reason="stop",
+                )
+
+            with patch("novel_agent_workbench.memory_bank.generate_with_provider", fake_generate):
+                result = app.generate_memory_bank_text(
+                    "novel_a",
+                    current_memory="",
+                    chapters=chapters,
+                    target_token_budget=800,
+                    stream_callback=streamed_chunks.append,
+                    reasoning_callback=reasoning_chunks.append,
+                )
+
+            streamed_text = "".join(streamed_chunks)
+            self.assertEqual(streamed_text, "记忆正文")
+            self.assertEqual(result["text"], "记忆正文")
+            self.assertNotIn("hidden chain", streamed_text)
+            self.assertIn("hidden chain", "".join(reasoning_chunks))
 
 
 if __name__ == "__main__":
