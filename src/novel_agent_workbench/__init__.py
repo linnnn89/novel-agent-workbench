@@ -86,6 +86,7 @@ from .memory_apply_preview import (
     MemoryApplyPreviewService,
 )
 from .memory_bank import (
+    DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL,
     MemoryBankError,
     MemoryBankGenerationResult,
     MemoryBankLifecycleResult,
@@ -93,6 +94,7 @@ from .memory_bank import (
     MemoryBankUpdateResult,
     build_memory_generation_provider_request,
     format_memory_update_prompt,
+    memory_auto_summary_candidate,
     memory_generation_system_prompt,
 )
 from .planning_library import PlanningLibraryError, PlanningLibraryItemResult, PlanningLibraryService
@@ -266,6 +268,7 @@ __all__ = [
     "MemoryApplyPreviewResult",
     "MemoryApplyCommitResult",
     "MemoryApplyPreviewService",
+    "DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL",
     "MemoryBankError",
     "MemoryBankGenerationResult",
     "MemoryBankLifecycleResult",
@@ -273,6 +276,7 @@ __all__ = [
     "MemoryBankUpdateResult",
     "build_memory_generation_provider_request",
     "format_memory_update_prompt",
+    "memory_auto_summary_candidate",
     "memory_generation_system_prompt",
     "ReviewDecisionResult",
     "RevisionCandidateComparison",
