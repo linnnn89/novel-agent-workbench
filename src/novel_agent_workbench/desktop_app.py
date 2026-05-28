@@ -1862,7 +1862,7 @@ class WorkbenchDesktopApp(tk.Tk):
         except Exception as exc:
             messagebox.showerror(APP_TITLE, f"读取当前稿件失败:\n{exc}")
             return
-        instruction = simpledialog.askstring(APP_TITLE, "重写要求（可留空）:")
+        instruction = simpledialog.askstring(APP_TITLE, "重新生成要求（可留空）:")
         if instruction is None:
             return
         settings = self.app.generation_settings(project_id)
@@ -1870,14 +1870,11 @@ class WorkbenchDesktopApp(tk.Tk):
         sampling = settings.get("sampling") if isinstance(settings.get("sampling"), dict) else {}
         context_settings = settings.get("context") if isinstance(settings.get("context"), dict) else {}
         chapter_id = str(draft.get("chapter_id") or "")
-        source_text = self.draft_body.get("1.0", tk.END).strip()
-        prompt = "\n\n".join(
-            [
-                "请重写当前章节，生成一个新的版本；不要覆盖上一版。",
-                f"重写要求：{instruction.strip() or '保持剧情含义，优化节奏、细节和表达。'}",
-                "【上一版稿件】",
-                source_text,
-            ]
+        prompt = format_draft_regeneration_prompt(
+            chapter_id=chapter_id,
+            title=str(draft.get("title") or ""),
+            instruction=instruction,
+            default_prompt=str(prompting.get("default_user_prompt") or ""),
         )
         request = {
             "chapter_id": chapter_id,
@@ -1894,10 +1891,14 @@ class WorkbenchDesktopApp(tk.Tk):
             "repetition_penalty": optional_float(sampling.get("repetition_penalty")),
             "stream": True,
             "max_context_tokens": optional_int(context_settings.get("max_context_tokens")),
-            "metadata": {"ui_action": "desktop_rewrite_draft", "source_draft_id": draft_id},
+            "metadata": {
+                "ui_action": "desktop_regenerate_chapter",
+                "source_draft_id": draft_id,
+                "previous_draft_body_excluded": True,
+            },
         }
         self.start_live_draft_generation(project_id, chapter_id, request["title"] or chapter_id)
-        self.write_log(f"重写请求已发送: project={project_id} source={draft_id} chapter={chapter_id}")
+        self.write_log(f"重新生成请求已发送: project={project_id} source={draft_id} chapter={chapter_id}")
 
         def stream_callback(chunk: str) -> None:
             self.after(0, lambda chunk=chunk: self.append_live_draft_chunk(project_id, chapter_id, chunk))
@@ -1921,13 +1922,13 @@ class WorkbenchDesktopApp(tk.Tk):
         def finish(*, result: dict[str, Any] | None = None, error: BaseException | None = None) -> None:
             if error is not None:
                 self.finish_live_draft_generation(project_id, chapter_id, error=error)
-                messagebox.showerror(APP_TITLE, f"重写失败:\n{error}")
-                self.write_log(f"重写失败: {error}")
+                messagebox.showerror(APP_TITLE, f"重新生成失败:\n{error}")
+                self.write_log(f"重新生成失败: {error}")
                 return
             result = result or {}
             new_draft_id = str(result.get("draft_id") or "")
             self.finish_live_draft_generation(project_id, chapter_id)
-            self.write_log(f"重写生成新版本: project={project_id} source={draft_id} new={new_draft_id}")
+            self.write_log(f"重新生成新版本: project={project_id} source={draft_id} new={new_draft_id}")
             self.run_project_health(silent=True)
             self.load_project_work_nodes(project_id)
             self.show_draft_workspace(project_id, new_draft_id)
@@ -4754,6 +4755,37 @@ def format_prompt_preview(render: dict[str, Any]) -> str:
             f"上下文段数: {summary.get('context_section_count')}",
             f"前文章数: {summary.get('recent_confirmed_chapter_count')}",
             f"跳过段数: {len(skipped)}",
+        ]
+    )
+    return "\n".join(lines).strip()
+
+
+def format_draft_regeneration_prompt(
+    *,
+    chapter_id: str,
+    title: str = "",
+    instruction: str = "",
+    default_prompt: str = "",
+) -> str:
+    chapter_label = str(chapter_id or "").strip() or "当前章节"
+    title_text = str(title or "").strip()
+    base_prompt = str(default_prompt or "").strip()
+    extra_instruction = str(instruction or "").strip()
+    lines = [
+        "请把目标章节当作尚未写过，从当前项目资料、章节规划、世界观/人物设定、记忆银行和前文章节中重新生成一个全新草稿。",
+        f"目标章节：{chapter_label}" + (f" / {title_text}" if title_text else ""),
+        "不要参考上一版正文。",
+        "不要读取、模仿、贴补、续改或复用上一版草稿的句子、段落、节奏和描写套路。",
+        "如果上下文里出现同一章节的旧稿或旧版本痕迹，请按无效旧稿忽略；只保持项目连续性和章节目标。",
+        "输出一版完整章节正文，不要输出修改说明、差异说明或对上一版的评价。",
+    ]
+    if base_prompt:
+        lines.extend(["", "【基础写作要求】", base_prompt])
+    lines.extend(
+        [
+            "",
+            "【本次重新生成要求】",
+            extra_instruction or "重新生成同一章节，保持前文连续和资料设定一致，但不要参考上一版正文。",
         ]
     )
     return "\n".join(lines).strip()

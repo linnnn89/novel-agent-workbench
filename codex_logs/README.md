@@ -13,6 +13,7 @@ Each folder should contain a `README.md` with operation, files changed, verifica
 Recent log:
 
 ```text
+2026-05-28_chapter_regeneration_prompt
 2026-05-28_world_materials_editor_delete
 2026-05-28_memory_bank_manual_streaming_fix
 2026-05-27_memory_bank_usability_pass
