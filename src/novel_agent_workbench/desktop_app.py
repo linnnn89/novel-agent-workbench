@@ -731,6 +731,7 @@ class WorkbenchDesktopApp(tk.Tk):
             menu.add_separator()
             menu.add_command(label="记忆库", command=self.show_memory_bank)
             menu.add_command(label="大纲与章节", command=self.show_planning_library)
+            menu.add_command(label="世界观与人物", command=self.show_world_materials)
             menu.add_command(label="查看生成时会带的上下文", command=self.summarize_project_context)
         elif kind == "draft" and item_id:
             menu.add_command(label="打开草稿", command=lambda: self.show_draft_workspace(project_id, item_id))
@@ -742,6 +743,7 @@ class WorkbenchDesktopApp(tk.Tk):
             menu.add_separator()
             menu.add_command(label="记忆库", command=self.show_memory_bank)
             menu.add_command(label="大纲与章节", command=self.show_planning_library)
+            menu.add_command(label="世界观与人物", command=self.show_world_materials)
             menu.add_command(label="查看生成时会带的上下文", command=self.summarize_project_context)
         else:
             for label, command in (
@@ -755,6 +757,7 @@ class WorkbenchDesktopApp(tk.Tk):
                 ("记忆库", self.show_memory_bank),
                 ("项目专属设置", self.show_project_generation_settings_dialog),
                 ("大纲与章节", self.show_planning_library),
+                ("世界观与人物", self.show_world_materials),
                 ("模型服务", self.configure_model_connection),
                 ("打开作品文件夹", self.open_selected_project_folder),
             ):
@@ -2323,40 +2326,195 @@ class WorkbenchDesktopApp(tk.Tk):
         item_types: set[str],
         actions: tuple[tuple[str, str], ...],
     ) -> None:
-        def render() -> str:
-            return format_planning_records(
-                section_title,
-                planning_display_rows(
-                    self.app.list_planning_items(project_id, include_text=True),
-                    item_types=item_types,
+        window = tk.Toplevel(self)
+        window.title(title)
+        window.transient(self)
+        window.geometry("980x620")
+        window.columnconfigure(1, weight=1)
+        window.rowconfigure(1, weight=1)
+
+        ttk.Label(
+            window,
+            text=f"{section_title}。左侧选中一条资料后，可以逐条编辑或删除；保存资料本身不会调用模型。",
+            foreground="#6b7280",
+            wraplength=920,
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(14, 8))
+
+        list_frame = ttk.Frame(window)
+        list_frame.grid(row=1, column=0, sticky="nsew", padx=(14, 8), pady=8)
+        list_frame.rowconfigure(1, weight=1)
+        list_frame.columnconfigure(0, weight=1)
+        ttk.Label(list_frame, text="资料条目").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        record_tree = ttk.Treeview(
+            list_frame,
+            columns=("type", "context", "updated"),
+            show="tree headings",
+            selectmode="browse",
+            height=18,
+        )
+        record_tree.heading("#0", text="标题/编号")
+        record_tree.heading("type", text="类型")
+        record_tree.heading("context", text="上下文")
+        record_tree.heading("updated", text="更新时间")
+        record_tree.column("#0", width=220, stretch=True)
+        record_tree.column("type", width=92, stretch=False)
+        record_tree.column("context", width=64, stretch=False, anchor="center")
+        record_tree.column("updated", width=142, stretch=False)
+        record_tree.grid(row=1, column=0, sticky="nsew")
+        tree_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=record_tree.yview)
+        tree_scrollbar.grid(row=1, column=1, sticky="ns")
+        record_tree.configure(yscrollcommand=tree_scrollbar.set)
+
+        detail_frame = ttk.Frame(window)
+        detail_frame.grid(row=1, column=1, sticky="nsew", padx=(8, 14), pady=8)
+        detail_frame.rowconfigure(1, weight=1)
+        detail_frame.columnconfigure(0, weight=1)
+        ttk.Label(detail_frame, text="选中资料内容").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        detail_box = tk.Text(detail_frame, wrap="word", font=("Consolas", 10), borderwidth=0)
+        detail_scrollbar = ttk.Scrollbar(detail_frame, orient="vertical", command=detail_box.yview)
+        detail_box.configure(yscrollcommand=detail_scrollbar.set)
+        detail_box.grid(row=1, column=0, sticky="nsew")
+        detail_scrollbar.grid(row=1, column=1, sticky="ns")
+        detail_box.configure(state="disabled")
+
+        type_order = {value: index for index, (value, _) in enumerate(PLANNING_TYPE_OPTIONS)}
+
+        def readable_items() -> list[dict[str, Any]]:
+            rows = planning_display_rows(
+                self.app.list_planning_items(project_id, include_text=True),
+                item_types=item_types,
+            )
+            return sorted(
+                rows,
+                key=lambda item: (
+                    type_order.get(str(item.get("item_type") or ""), 999),
+                    str(item.get("title") or item.get("planning_id") or ""),
+                    str(item.get("planning_id") or ""),
                 ),
             )
 
-        refs: dict[str, Any] = {}
+        def selected_planning_id() -> str:
+            selection = record_tree.selection()
+            if not selection:
+                return ""
+            return str(selection[0]).removeprefix("plan:")
 
-        def refresh() -> None:
-            body = refs.get("body")
-            if isinstance(body, tk.Text):
-                self.replace_text_window_content(body, render())
-            self.refresh_projects()
-            self.run_project_health(silent=True)
+        def replace_detail(text: str) -> None:
+            self.replace_text_window_content(detail_box, text)
 
-        def open_editor(item_type: str) -> Callable[[], None]:
+        def render_item(item: dict[str, Any] | None) -> str:
+            if not item:
+                return format_planning_records(section_title, [])
+            return format_planning_records(section_title, [item])
+
+        def current_item(items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+            planning_id = selected_planning_id()
+            if not planning_id:
+                return {}
+            rows = items if items is not None else readable_items()
+            return next((item for item in rows if str(item.get("planning_id") or "") == planning_id), {})
+
+        def refresh(select_id: str = "", *, update_project_state: bool = False) -> None:
+            previous_selection = select_id or selected_planning_id()
+            for child in record_tree.get_children(""):
+                record_tree.delete(child)
+            items = readable_items()
+            for item in items:
+                planning_id = str(item.get("planning_id") or "")
+                if not planning_id:
+                    continue
+                title_text = str(item.get("title") or planning_id)
+                record_tree.insert(
+                    "",
+                    "end",
+                    iid=f"plan:{planning_id}",
+                    text=title_text,
+                    values=(
+                        item.get("type_label") or "-",
+                        item.get("used_in_context") or "-",
+                        item.get("updated_at") or "-",
+                    ),
+                )
+            target_id = f"plan:{previous_selection}" if previous_selection else ""
+            if target_id and record_tree.exists(target_id):
+                record_tree.selection_set(target_id)
+                record_tree.focus(target_id)
+                replace_detail(render_item(current_item(items)))
+            elif items:
+                first_id = str(items[0].get("planning_id") or "")
+                if first_id and record_tree.exists(f"plan:{first_id}"):
+                    record_tree.selection_set(f"plan:{first_id}")
+                    record_tree.focus(f"plan:{first_id}")
+                    replace_detail(render_item(items[0]))
+            else:
+                replace_detail(format_planning_records(section_title, []))
+            if update_project_state:
+                self.refresh_projects()
+                self.run_project_health(silent=True)
+
+        def on_select(event: object | None = None) -> None:
+            replace_detail(render_item(current_item()))
+
+        def open_editor_for_type(item_type: str) -> Callable[[], None]:
             return lambda: self.create_planning_item_dialog(
                 project_id,
                 default_type=item_type,
-                parent=refs.get("window") if isinstance(refs.get("window"), tk.Toplevel) else self,
-                on_saved=refresh,
+                parent=window,
+                on_saved=lambda: refresh(update_project_state=True),
             )
 
-        window, body = self.show_text_window(
-            title,
-            render(),
-            actions=tuple((label, open_editor(item_type)) for label, item_type in actions),
-            refresh=render,
-        )
-        refs["window"] = window
-        refs["body"] = body
+        def edit_selected() -> None:
+            planning_id = selected_planning_id()
+            if not planning_id:
+                messagebox.showinfo(APP_TITLE, "请先在左侧选择一条资料。", parent=window)
+                return
+            try:
+                item = self.app.read_planning_item(project_id, planning_id, include_text=True)
+            except Exception as exc:
+                messagebox.showerror(APP_TITLE, f"读取资料失败:\n{exc}", parent=window)
+                return
+            self.create_planning_item_dialog(
+                project_id,
+                default_type=str(item.get("item_type") or "other"),
+                existing_item=item,
+                parent=window,
+                on_saved=lambda planning_id=planning_id: refresh(planning_id, update_project_state=True),
+            )
+
+        def delete_selected() -> None:
+            item = current_item()
+            planning_id = str(item.get("planning_id") or "")
+            if not planning_id:
+                messagebox.showinfo(APP_TITLE, "请先在左侧选择一条资料。", parent=window)
+                return
+            title_text = str(item.get("title") or planning_id)
+            if not messagebox.askyesno(
+                APP_TITLE,
+                f"确定删除这条资料吗？\n\n{title_text}\n\n删除后不会调用模型，但会从后续生成上下文中移除。",
+                parent=window,
+            ):
+                return
+            try:
+                result = self.app.delete_planning_item(project_id, planning_id)
+            except Exception as exc:
+                messagebox.showerror(APP_TITLE, f"删除资料失败:\n{exc}", parent=window)
+                return
+            self.write_log(f"资料库删除条目: project={project_id} planning_id={result.get('planning_id')}")
+            refresh(update_project_state=True)
+
+        button_row = ttk.Frame(window)
+        button_row.grid(row=2, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 14))
+        for label, item_type in actions:
+            ttk.Button(button_row, text=label, command=open_editor_for_type(item_type)).pack(side="left", padx=(0, 8))
+        ttk.Button(button_row, text="编辑选中", command=edit_selected).pack(side="left", padx=(0, 8))
+        ttk.Button(button_row, text="删除选中", command=delete_selected).pack(side="left", padx=(0, 8))
+        ttk.Button(button_row, text="刷新", command=lambda: refresh()).pack(side="left", padx=(0, 8))
+        ttk.Button(button_row, text="关闭", command=window.destroy).pack(side="right")
+
+        record_tree.bind("<<TreeviewSelect>>", on_select)
+        record_tree.bind("<Double-1>", lambda event: edit_selected())
+        record_tree.bind("<Delete>", lambda event: delete_selected())
+        refresh()
 
     def show_memory_bank(self) -> None:
         project_id = self.require_project()
@@ -3655,10 +3813,19 @@ class WorkbenchDesktopApp(tk.Tk):
         project_id: str,
         *,
         default_type: str = "outline",
+        existing_item: dict[str, Any] | None = None,
         parent: tk.Misc | None = None,
         on_saved: Callable[[], None] | None = None,
     ) -> None:
-        existing_item = self.latest_planning_item_of_type(project_id, default_type) if default_type in SINGLETON_PLANNING_TYPES else {}
+        existing_item = (
+            dict(existing_item)
+            if isinstance(existing_item, dict) and existing_item
+            else (
+                self.latest_planning_item_of_type(project_id, default_type)
+                if default_type in SINGLETON_PLANNING_TYPES
+                else {}
+            )
+        )
         editing = bool(existing_item)
         owner = parent or self
         dialog = tk.Toplevel(owner)

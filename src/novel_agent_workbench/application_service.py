@@ -481,6 +481,9 @@ class WorkbenchApplicationService:
             enabled=enabled,
         ).to_dict()
 
+    def delete_planning_item(self, project_id: str, planning_id: str) -> dict[str, Any]:
+        return PlanningLibraryService(self._open_store(project_id)).delete_planning_item(planning_id).to_dict()
+
     def mark_chapter_planned(self, project_id: str, chapter_id: str, *, title: str = "") -> dict[str, Any]:
         return ChapterWorkflowService(self._open_store(project_id)).mark_planned(chapter_id, title=title)
 
