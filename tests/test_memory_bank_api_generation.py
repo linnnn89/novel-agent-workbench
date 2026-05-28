@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from novel_agent_workbench.application_service import WorkbenchApplicationService
 from novel_agent_workbench.desktop_app import (
+    WorkbenchDesktopApp,
     format_auto_memory_summary_confirmation,
     format_memory_generation_manual_prompt,
 )
@@ -79,6 +81,15 @@ class MemoryBankApiGenerationTests(unittest.TestCase):
         self.assertIn("已确认章节正文", message)
         self.assertIn("保存到记忆银行", message)
         self.assertIn("第 001 章 - 第 005 章", message)
+
+    def test_manual_memory_generation_path_has_progress_popup_and_streaming_callback(self) -> None:
+        source = inspect.getsource(WorkbenchDesktopApp.show_memory_bank_window)
+
+        self.assertIn("记忆银行生成进度", source)
+        self.assertIn("ttk.Progressbar(progress, mode=\"indeterminate\")", source)
+        self.assertIn("def stream_callback(chunk: str)", source)
+        self.assertIn("stream_callback=stream_callback", source)
+        self.assertIn("已同步填入记忆银行窗口", source)
 
     def test_preview_and_mock_generation_are_structured_and_not_auto_saved(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
