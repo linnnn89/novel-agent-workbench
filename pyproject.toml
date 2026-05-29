@@ -1,7 +1,7 @@
 [project]
 name = "novel-agent-workbench"
 version = "0.1.0"
-description = "Local recoverable long-form novel writing workbench."
+description = "Local AI novel writing workbench / 本地 AI 小说创作工作台。"
 requires-python = ">=3.13"
 dependencies = []
 

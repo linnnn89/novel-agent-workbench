@@ -1,10 +1,18 @@
-# Novel Agent Workbench
+# Novel Agent Workbench / 小说创作工作台
 
-This is the active implementation folder for the new local long-form novel writing workbench.
+Novel Agent Workbench（小说创作工作台）是一个本地运行、可恢复、面向长篇小说和网文创作的 AI 辅助写作桌面工具。它支持项目隔离、角色设定、世界观设定、章节规划、记忆库、AI 审稿、重新生成章节、审稿精修、模型服务配置和确认稿导出。
+
+Novel Agent Workbench is a local, recoverable AI-assisted writing workbench for long-form novels and serial fiction. It provides project isolation, character and world-building notes, chapter planning, a Memory Bank, AI review, chapter regeneration, review-based refinement, provider configuration, and confirmed-draft export.
+
+## 中文搜索关键词 / Chinese Search Keywords
+
+小说创作工作台，AI 小说写作，AI 网文写作，长篇小说创作工具，本地小说写作软件，角色设定，世界观设定，章节规划，记忆库，AI 审稿，章节重写，重新生成章节，审稿精修，小说草稿管理，网文创作助手。
 
 ## Purpose
 
-Build a stable, recoverable, local personal long-novel writing workbench with project-level isolation, safe local storage, Provider roles, Planning Library, draft revisions separated from confirmed chapters, optional scoring/revision workflows, and confirmed-only export.
+构建一个稳定、可恢复、以本地数据为核心的个人长篇小说创作工作台；通过项目级隔离、安全本地存储、模型角色配置、资料库、记忆库、草稿版本、确认稿边界、AI 审稿/精修流程和确认稿导出，让长篇创作可以持续推进而不混乱。
+
+Build a stable, recoverable, local personal long-novel writing workbench with project-level isolation, safe local storage, Provider roles, Planning Library, Memory Bank, draft revisions separated from confirmed chapters, optional review/refinement workflows, and confirmed-only export.
 
 ## Provider Call Boundary
 
