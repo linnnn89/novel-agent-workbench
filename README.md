@@ -1,133 +1,214 @@
 # Novel Agent Workbench / 小说创作工作台
 
-Novel Agent Workbench（小说创作工作台）是一个本地运行、可恢复、面向长篇小说和网文创作的 AI 辅助写作桌面工具。它支持项目隔离、角色设定、世界观设定、章节规划、记忆库、AI 审稿、重新生成章节、审稿精修、模型服务配置和确认稿导出。
+[中文说明](#中文说明) | [English](#english)
 
-Novel Agent Workbench is a local, recoverable AI-assisted writing workbench for long-form novels and serial fiction. It provides project isolation, character and world-building notes, chapter planning, a Memory Bank, AI review, chapter regeneration, review-based refinement, provider configuration, and confirmed-draft export.
+---
 
-## 中文搜索关键词 / Chinese Search Keywords
+## 中文说明
+
+Novel Agent Workbench（小说创作工作台）是一个本地运行、可恢复、面向长篇小说和网文创作的 AI 辅助写作桌面工具。它强调项目隔离、本地数据优先、显式操作边界、草稿与确认稿分离，以及可审计的模型调用流程。
+
+本项目适合用于：
+
+- 长篇小说、网文、系列故事的本地创作管理。
+- 角色设定、世界观设定、章节规划和记忆库管理。
+- AI 草稿生成、AI 审稿、修改建议、重写候选和人工确认稿流程。
+- 多模型 Provider 配置、连接测试、调用审计和安全发布前检查。
+- Windows 本地桌面工具打包与个人工作流实验。
+
+### 中文搜索关键词
 
 小说创作工作台，AI 小说写作，AI 网文写作，长篇小说创作工具，本地小说写作软件，角色设定，世界观设定，章节规划，记忆库，AI 审稿，章节重写，重新生成章节，审稿精修，小说草稿管理，网文创作助手。
 
-## Purpose
+### 核心设计原则
 
-构建一个稳定、可恢复、以本地数据为核心的个人长篇小说创作工作台；通过项目级隔离、安全本地存储、模型角色配置、资料库、记忆库、草稿版本、确认稿边界、AI 审稿/精修流程和确认稿导出，让长篇创作可以持续推进而不混乱。
+- **Local-first**：项目数据、草稿、确认稿、记忆库和本地配置优先保存在本机。
+- **Recoverable**：关键写入操作前尽量创建 checkpoint 或可恢复备份。
+- **Explicit gates**：草稿生成、审稿、修改、确认稿提交、真实模型调用都需要明确动作触发。
+- **Draft vs confirmed boundary**：AI 生成或人工重写的内容先进入草稿候选，不自动变成确认稿。
+- **Metadata-only safety**：默认状态、日志、审计和预览尽量只输出元数据，避免泄露正文、提示词或密钥。
+- **Provider call boundary**：实现、测试、打包和文档更新阶段默认不消耗真实 API；产品中的真实 Provider 调用必须由用户显式触发。
 
-Build a stable, recoverable, local personal long-novel writing workbench with project-level isolation, safe local storage, Provider roles, Planning Library, Memory Bank, draft revisions separated from confirmed chapters, optional review/refinement workflows, and confirmed-only export.
+### 主要功能
 
-## Provider Call Boundary
+- 多项目创建、打开和列表管理。
+- 项目级配置和本地密钥分离。
+- 角色、世界观、章节规划和 Memory Bank 的结构化管理。
+- 草稿生成、审稿、修订请求、重写候选、候选比较和确认稿提交。
+- 上下文包预览、最终提示词渲染 dry-run、Provider 执行 gate、runbook、authorization 和 preflight。
+- OpenAI-compatible Provider、DeepSeek、Chutes、本地 OpenAI-compatible endpoint 和 mock Provider 适配框架。
+- Provider 调用审计、smoke test、安全检查、prepublish-check 和 project-health。
+- Windows Tkinter 桌面启动器和 PyInstaller 打包脚本。
 
-The product may call configured model providers when the user explicitly starts an action such as connection testing, draft generation, review, revision, or a future Memory Bank update. Those calls must use project-local provider settings, safe secret references, visible action labels, and audit metadata.
+### 当前实现状态
 
-Codex development/QA runs are different: during implementation, tests, packaging, and documentation updates, Codex must not spend API credits or hit real LLM/API providers unless the user explicitly authorizes that specific run. Documentation that says "no real Provider call" for an implementation slice records what happened during that slice; it is not a product requirement that the software can never call models.
+当前仓库已经完成从本地项目存储、Provider 配置、安全审计、草稿生成、审稿、修订、Memory Bank、上下文装配、语料分析、人工重写、最终 Provider gate，到 Windows 桌面启动器的多阶段 MVP 实现。
 
-## Initial Folder Map
+最新 README 不逐条列出所有内部 MVP 日志；详细开发过程可参考 `codex_docs/`、提交记录和测试用例。当前重点状态是：
+
+- 最终 Provider 路径已经形成 gate -> runbook -> authorization -> preflight -> real execution -> postcheck 的显式链路。
+- Provider 输出会经过 sanitizer，以避免 reasoning markup 等不应保存的内容进入草稿。
+- Smoke-test drafts 仅保留为证据，不允许提升为确认稿。
+- 上传发布前由 `.gitignore`、`prepublish-check` 和 `project-health` 共同保护。
+- 桌面启动器保持 local-first，不应在启动时或隐藏后台流程中调用模型。
+
+### 目录结构
 
 ```text
-codex_docs/   durable architecture notes and handoff documents
-codex_logs/   timestamped operation logs
-src/          future application source code
-tests/        future tests
+codex_docs/   持久化架构说明、接口契约、交班文档和重要问题记录
+codex_logs/   操作日志
+src/          应用源码
+tests/        单元测试和安全测试
+scripts/      构建脚本
+workspace_projects/  本地运行项目目录，通常不上传 GitHub
 ```
 
-## Current Backend Status
+### 模型调用边界
 
-MVP-0 first storage slice is implemented:
+产品可以在用户明确触发动作时调用已配置的模型 Provider，例如连接测试、草稿生成、审稿、修订或未来的 Memory Bank 更新。此类调用应使用项目本地 Provider 设置、安全密钥引用、可见动作标签和审计元数据。
 
-- Python package skeleton.
-- `ProjectStore`.
-- Atomic JSON write with `.bak` backups.
-- Project initialization.
-- Basic project lock.
-- `config.json` and `secrets.local.json` separation.
-- Checkpoint ZIP with embedded manifest.
-- Reversible checkpoint restore using `.trash` for overwritten files.
-- `ProjectRegistry` for creating, opening, and listing multiple projects.
-- Default runtime routing to `workspace_projects/`.
-- Project config schema defaults and migration.
-- Placeholder files for Planning Library, Memory Bank, scoring/revision policy, and export settings.
-- Public state with masked secrets only.
-- Provider role config objects for writer/scorer/reviser.
-- Fake provider connection test with no network calls.
-- Provider interface objects and a deterministic local Mock Provider.
-- Provider call audit log at `data/provider_call_log.json`, with prompt/secrets excluded.
-- Draft Generation Service skeleton that writes mock writer output to draft artifacts only.
-- Explicit draft commit boundary that promotes drafts to confirmed chapter artifacts only when called.
-- Safe project state summary for future UI use, excluding prompt text, chapter content, and plaintext secrets.
-- Minimal backend application service facade for project creation, state, drafts, and explicit commit.
-- Backend-only CLI smoke runner for the project -> mock draft -> optional commit loop.
-- Backend-only safety audit for config, logs, checkpoints, and public state.
-- Quality hardening for safe ASCII `chapter_id` values and half-commit audit detection.
-- Provider adapter registry with `mock`, OpenAI-compatible HTTP providers, local OpenAI-compatible endpoints, DeepSeek, and Chutes.
-- Project secret resolver contract for `project_secret.<name>` references stored only in `data/secrets.local.json`.
-- Backend-only `provider-status` / `list-provider-adapters` CLI checks with no network calls.
-- Provider-aware audit checks for raw keys, disabled adapters, missing secret refs, and missing local secrets.
-- Safe Provider config preflight commands for writing disabled adapter configs and project-local secrets without printing plaintext keys.
-- No-network Provider dry-run command for HTTP providers, returning safe request summaries only.
-- Chutes OpenAI-compatible adapter id `chutes_openai` for explicit user-triggered connection tests and draft generation.
-- Explicit `provider-real-test` command for one approved Chutes connection test, separate from draft generation and without returning response text.
-- Chutes real draft generation now depends on the selected writer Provider config, project secret or local endpoint config, and audit leak checks; there is no separate network enable gate.
-- One-command Chutes runbook `chutes-generate-once` that performs audit precheck, safe secret/config setup, real draft generation, optional secret cleanup, and audit postcheck with metadata-only output.
-- Minimal chapter workflow state at `data/chapters_workflow.json`, tracking planned/drafting/draft_ready/committed/blocked without prompt text, chapter content, or plaintext secrets.
-- Draft Review / Quality Check skeleton using mock scorer output to create metadata-only review artifacts at `data/reviews/*.json` plus `data/reviews_index.json`.
-- Chapter workflow can now move to `review_ready` with `latest_review_id`; review does not auto-commit, update Memory Bank/RAG/export, or store draft content/prompt/API keys.
-- Manual review decision skeleton for `accepted`, `needs_revision`, and `blocked` decisions. Decisions update review/chapter metadata only and still do not commit or revise drafts automatically.
-- Revision Request skeleton that can create metadata-only `requested` artifacts from `needs_revision` decisions only; it does not call LLMs, mutate drafts, create confirmed chapters, or update Memory Bank/RAG/export.
-- Mock Revision Draft Service that creates a new draft candidate from a revision request using only the local mock reviser; it never overwrites the source draft and never auto-commits.
-- MVP-5 quality hardening: secret writes no longer create plaintext `.bak` backups, revision draft generation now has an explicit mock-only reviser gate, and `audit-project` checks revision request/generated draft consistency.
-- MVP-5.5 Revision Candidate Comparison read-model for listing and comparing source draft vs revision draft candidate metadata without returning content or making workflow decisions.
-- MVP-6 Confirmed Context Update Queue that explicitly queues confirmed chapters for future manual Memory Bank/RAG/export work without updating those systems automatically.
-- MVP-6.5 Context Update Preview artifacts that turn queue items into metadata-only plans for future formal context work without copying chapter text.
-- MVP-7 Formal Context Policy schema with priority order: world building, character relationships, chapter summary, style memory, foreshadowing.
-- MVP-7.5 Formal Context Extraction Plan artifacts that turn context previews into metadata-only category work plans without extracting text or writing Memory Bank/RAG/export.
-- World-book overlap policy for world building context: when `world_book_enabled=true`, formal context plans reduce world-building Memory Bank weight by default to avoid duplicate tokens.
-- MVP-8 Context Assembler dry-run that previews local context selection, estimated token budget, and selected/skipped metadata before any Provider call.
-- MVP-8.5 Formal Context Task Queue that turns formal context plans into metadata-only manual tasks without applying Memory Bank/RAG/export updates.
-- MVP-9 Memory Apply Preview that shows future Memory Bank candidate writes as metadata only, without changing `memory_bank.json`.
-- MVP-9.5 Memory Bank Apply Commit Gate that explicitly commits preview metadata into placeholder Memory Bank entries with a pre-write checkpoint.
-- MVP-10 Manual Memory Bank Text Fill/Edit that lets the operator explicitly fill placeholder text, creates a `pre_memory_text_update` checkpoint, rejects empty/secret-like text, stores a visible target token value as prompt guidance, and keeps default list/read/state output metadata-only.
-- MVP-10.5 Memory Bank Item Lifecycle Controls that allow explicit enable/disable with checkpointing and make Context Assembler dry-run skip disabled memory items.
-- MVP-11 Context Package Preview that assembles enabled manual Memory Bank text into a local preview, remains read-only, calls no Provider, and defaults to metadata-only output unless `include_text` is explicit.
-- MVP-11.5 Prompt Render Dry-Run that combines an operator prompt with the context package in a no-write envelope, defaulting to redacted prompt/context output unless explicit include flags are used.
-- MVP-12 Mock-Only Context-Aware Draft Generation that uses the prompt render envelope to create a draft through the local mock writer only, with no real Provider, no auto-commit, and no Memory Bank/RAG/export side effects.
-- MVP-12.5 Audit checks for context-aware draft metadata consistency and prompt/context/secret leakage before real Providers are allowed to use assembled context.
-- MVP-13 Corpus Profiler that reads an external `.txt` novel corpus in metadata-only mode, reports encoding/structure/chapter-length/dialogue/name-candidate statistics, and never copies source text into project files.
-- MVP-13.5 Corpus Profile Artifacts that explicitly save conservative project-local profile metadata while excluding source text, external source paths, and candidate-name text by default.
-- MVP-14 Corpus Boundary Indexes that explicitly save no-text chapter line/character offsets for future manual import planning while excluding heading text, excerpts, and source paths.
-- MVP-15 Corpus Sample Quarantine that can explicitly save bounded real-text samples for local testing only, marks them as `publish_blocker`, and keeps default reads/state/list output text-free.
-- MVP-15.5 Prepublish Readiness Check that scans the publishable source tree plus runtime projects for secrets, environment files, corpus samples, and audit blockers before GitHub publication.
-- MVP-16 Self Style Baseline that creates local metadata-only style statistics from the project's own confirmed chapters, with no external corpus, no Provider call, and no stored chapter text.
-- MVP-16.5 Draft vs Self Style Check that compares one draft to a self-style baseline using local statistics only, without storing draft text or triggering revision/commit.
-- MVP-16.6 Style Check Calibration that treats draft style checks as scene-mode-aware hints rather than strict pass/fail grading.
-- MVP-16.7 Style Check Policy Toggles that make style checks, calibration, and hint display configurable, with future UI placement recorded as the draft review side panel.
-- MVP-16.8 Style Suggestion Artifact that converts a style check into metadata-only manual suggestions, without modifying drafts or creating revision requests.
-- MVP-16.9 Manual Suggestion Decision that records explicit operator decisions on style suggestions without applying edits automatically.
-- MVP-17 Manual Rewrite Workspace Skeleton that turns `needs_manual_rewrite` style suggestions into metadata-only human rewrite tasks, without editing drafts or generating candidates.
-- MVP-17.5 Manual Rewrite Draft Submission that lets a human rewrite task explicitly create a new draft candidate without overwriting old drafts or auto-committing.
-- MVP-18 Manual Rewrite Candidate Comparison / Selection Gate that compares source vs submitted manual draft candidates with metadata-only structural metrics and explicit `selected_for_review` / `rejected` / `needs_more_manual_work` decisions.
-- MVP-18.5 Review Handoff From Selected Manual Rewrite Candidate that creates a metadata-only pending-review handoff only after `selected_for_review`, without auto-review, Provider calls, auto-commit, or Memory Bank/RAG/export side effects.
-- MVP-19 Planning Library and final prompt assembly safety that stores manual planning references, tracks active ids, injects only active/enabled planning sections into context package and prompt render dry-runs, and keeps default list/read/state/package outputs metadata-only.
-- MVP-19.5 Review-Draft Guard for Manual Rewrite Candidates that requires `selected_for_review` comparison or `pending_review` handoff before a submitted manual rewrite draft can be reviewed.
-- MVP-20 Final Provider Assembly Gate that stores metadata-only prompt/context/provider hashes, requires explicit approval before any future real context-aware Provider path, and still keeps real context-aware generation disabled in this phase.
-- MVP-20.5 Review Handoff Consumption Metadata that marks a `pending_review` handoff as `review_created` after its selected draft is successfully reviewed, without changing draft bodies or triggering commit/context side effects.
-- MVP-21 Accepted Review Commit Gate that requires an `accepted` review for the same draft before confirmed-chapter promotion, while failed gate checks do not block the chapter or mutate workflow state.
-- MVP-22 Final Provider Runbook Plan that derives a metadata-only operator runbook from an approved final assembly gate, records provider/model/digest/token checklist metadata, and stops at `pending_operator_authorization` without calling a real LLM, writing drafts, or updating Memory Bank/RAG/export.
-- MVP-23 Final Provider Authorization Checkpoint that records a metadata-only authorization from a pending runbook, creates a no-secrets pre-authorization checkpoint summary, and still does not enable or call a real Provider.
-- MVP-24 Final Provider Execution Preflight Verifier that checks the gate/runbook/authorization/current-provider chain and records passed or blocked metadata without enabling/calling a real Provider or writing drafts.
-- MVP-25 Final Provider Execution Stub / Abort Gate that created a no-network execution rehearsal after a passed preflight and deliberately fail-closed with `aborted_real_llm_disabled`, without enabling/calling Providers or writing drafts.
-- MVP-26 Final Provider Real Execution Readiness that checks the aborted attempt against current Chutes writer config, project-secret presence, and manual authorization requirements, while still not reading secret values, enabling Providers, calling LLMs, or writing drafts.
-- MVP-27 Final Provider Real Execution Path that can, after gate digest match, call the writer Provider and write one new draft. Tests patch the Chutes client; no real network call was made during implementation.
-- MVP-27.1 Real Execution Hardening that strips shell newlines from `--prompt-stdin` before gate digest comparison and adds a read-only `postcheck-final-provider-real-execution` verifier for draft creation, no confirmed chapter, and metadata-only safety flags.
-- MVP-27.2 Reasoning Leak Review Guard that detects `<think>` reasoning markup during `review-draft`, skips scorer calls, creates a metadata-only local-guard review, and automatically marks the draft as `needs_revision`.
-- MVP-27.3 Provider Response Sanitizer that removes `<think>...</think>` reasoning blocks from Provider output before draft content is saved, while recording only sanitizer metadata.
-- MVP-27.4 Sample-Only Commit Blocker that rejects `accepted` reviews with `reason_code=smoke_test_only` at commit time, so live smoke-test drafts can be retained as evidence without becoming confirmed chapters.
-- MVP-28 Provider Live Smoke Test Harness that persists metadata-only Provider connectivity checks when the user starts them, never writes drafts or confirmed chapters, and classifies all smoke outputs as sample-only/non-committable.
-- MVP-29 Provider Smoke Test Audit Gate that makes `audit-project` and `prepublish-check` validate smoke-test metadata, safety flags, no prompt/response/secret text storage, and no draft/confirmed-chapter linkage.
-- MVP-30 Provider Config Snapshot / Drift Audit that records safe Provider config snapshots in new smoke-test artifacts and warns when the latest passed smoke-test config drifts from current role config.
-- MVP-31 Runtime Project Health Summary and Upload Ignore Guard that exposes metadata-only project health, wraps audit/prepublish upload readiness, and expands `.gitignore`/prepublish coverage for build and coverage artifacts.
-- MVP-32 Desktop Launcher and Windows EXE Packaging that adds a Tkinter desktop shell, Win11-compatible multi-size manuscript-paper-and-pen icon assets, and a PyInstaller build script for `NovelAgentWorkbench.exe`.
-- Unit tests.
+Codex 开发、测试、打包和文档更新与产品真实调用不同。在实现阶段，除非用户明确授权某一次真实调用，否则不应消耗 API 额度或访问真实 LLM/API Provider。
 
-Verification command:
+### 验证命令
+
+```powershell
+py -3.13 -m unittest discover -s tests
+```
+
+最近记录的结果：
+
+```text
+Ran 312 tests
+OK
+```
+
+### Windows 桌面启动器
+
+```powershell
+I:\AI-NOVEL\novel_agent_workbench\dist\NovelAgentWorkbench\NovelAgentWorkbench.exe
+```
+
+构建命令：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File I:\AI-NOVEL\novel_agent_workbench\scripts\build_windows_exe.ps1
+```
+
+### 后端 CLI smoke 示例
+
+```powershell
+$env:PYTHONPATH="I:\AI-NOVEL\novel_agent_workbench\src"
+py -3.13 -m novel_agent_workbench.cli --projects-root I:\AI-NOVEL\novel_agent_workbench\workspace_projects smoke demo_project --title "Demo Novel" --chapter-id chapter_001 --chapter-title "Opening" --prompt "Write a short mock opening." --commit
+```
+
+### 新机器环境设置
+
+仓库不上传 `.venv/`、运行时项目、本地密钥或构建输出。在新的 Windows 机器上运行：
+
+```cmd
+SETUP_ENV.bat
+```
+
+该脚本会创建 `.venv`，使用 Python 3.13，以 editable mode 安装本项目，并安装桌面构建工具，例如 `pyinstaller` 和 `pillow`。它不会创建 API keys，也不会复制任何运行时写作项目。
+
+非交互验证：
+
+```cmd
+SETUP_ENV.bat --no-pause
+```
+
+### 操作文档
+
+```text
+codex_docs\CLI_QUICKSTART.md
+codex_docs\APPLICATION_SERVICE_CONTRACT.md
+codex_docs\PROVIDER_ADAPTER_CONTRACT.md
+codex_docs\IMPORTANT_OPEN_ISSUES.md
+```
+
+### 不上传的内容
+
+请不要向 GitHub 上传以下内容：
+
+- `.venv/`、构建产物、coverage 输出。
+- 本地真实写作项目、草稿正文、确认稿正文。
+- API key、token、endpoint secret 或明文密钥。
+- 不适合公开的私人设定、私人语料或未授权文本。
+
+### License
+
+本项目使用 **GNU Affero General Public License v3.0（AGPL-3.0）**。详见根目录 `LICENSE` 文件。
+
+AGPL-3.0 是强 copyleft 许可证，尤其适合 WebUI 或可能作为网络服务运行的软件。若修改版通过网络提供给用户使用，通常需要向这些远程用户提供对应修改版源码。
+
+---
+
+## English
+
+Novel Agent Workbench is a local, recoverable AI-assisted writing workbench for long-form novels and serial fiction. It focuses on project isolation, local-first data management, explicit operation boundaries, separation between draft candidates and confirmed chapters, and auditable model-provider workflows.
+
+This project is useful for:
+
+- Managing long-form novels, web novels, and serial fiction projects locally.
+- Organizing characters, world-building notes, chapter plans, and a Memory Bank.
+- Generating AI drafts, running AI reviews, recording revision requests, comparing rewrite candidates, and promoting only approved drafts to confirmed chapters.
+- Configuring multiple model providers with connection tests, audit metadata, and pre-publication safety checks.
+- Experimenting with a Windows local desktop writing workflow.
+
+### Chinese search keywords
+
+小说创作工作台，AI 小说写作，AI 网文写作，长篇小说创作工具，本地小说写作软件，角色设定，世界观设定，章节规划，记忆库，AI 审稿，章节重写，重新生成章节，审稿精修，小说草稿管理，网文创作助手。
+
+### Core design principles
+
+- **Local-first**: project data, drafts, confirmed chapters, memory files, and local configuration are stored locally by default.
+- **Recoverable**: important write operations should create checkpoints or recoverable backups where possible.
+- **Explicit gates**: draft generation, review, revision, confirmation, and real model-provider execution require explicit user-triggered actions.
+- **Draft vs confirmed boundary**: AI-generated or manually rewritten text first becomes a draft candidate; it is not automatically promoted to confirmed text.
+- **Metadata-only safety**: state summaries, logs, audits, and previews should default to metadata-only output to avoid leaking manuscript text, prompts, or secrets.
+- **Provider call boundary**: implementation, testing, packaging, and documentation work should not spend real API credits unless the user explicitly authorizes a specific real run.
+
+### Main features
+
+- Multi-project creation, opening, and listing.
+- Project-level configuration with local secret separation.
+- Structured management for characters, world-building notes, chapter plans, and Memory Bank entries.
+- Draft generation, review, revision requests, rewrite candidates, candidate comparison, and confirmed-chapter commit gates.
+- Context package preview, final prompt render dry-run, Provider execution gate, runbook, authorization, and preflight checks.
+- Adapter framework for OpenAI-compatible providers, DeepSeek, Chutes, local OpenAI-compatible endpoints, and a deterministic mock provider.
+- Provider call audit, smoke tests, safety checks, prepublish checks, and project health summaries.
+- Windows Tkinter desktop launcher and PyInstaller build script.
+
+### Current status
+
+The repository has implemented a multi-stage MVP from local project storage, Provider configuration, safety audit, draft generation, review, revision, Memory Bank, context assembly, corpus profiling, manual rewrite workflow, final Provider gate, and Windows desktop launcher.
+
+This README no longer lists every internal MVP item line by line. For detailed development history, see `codex_docs/`, commit history, and the test suite. The current high-level status is:
+
+- The final Provider path now has an explicit chain: gate -> runbook -> authorization -> preflight -> real execution -> postcheck.
+- Provider output is passed through a sanitizer to prevent reasoning markup or other non-draft material from being saved into drafts.
+- Smoke-test drafts are retained as evidence only and must not be promoted to confirmed chapters.
+- Upload readiness is guarded by `.gitignore`, `prepublish-check`, and `project-health`.
+- The desktop launcher is local-first and should not call models on startup or through hidden background flows.
+
+### Folder map
+
+```text
+codex_docs/   durable architecture notes, interface contracts, handoff documents, and important issue records
+codex_logs/   operation logs
+src/          application source code
+tests/        unit tests and safety tests
+scripts/      build scripts
+workspace_projects/  local runtime project directory, usually not uploaded to GitHub
+```
+
+### Provider call boundary
+
+The product may call configured model providers when the user explicitly starts an action such as connection testing, draft generation, review, revision, or a future Memory Bank update. Those calls should use project-local provider settings, safe secret references, visible action labels, and audit metadata.
+
+Codex development, testing, packaging, and documentation updates are different from real product calls. During implementation work, tests should not spend API credits or access real LLM/API providers unless the user explicitly authorizes that specific real run.
+
+### Verification command
 
 ```powershell
 py -3.13 -m unittest discover -s tests
@@ -140,7 +221,7 @@ Ran 312 tests
 OK
 ```
 
-Windows desktop launcher:
+### Windows desktop launcher
 
 ```powershell
 I:\AI-NOVEL\novel_agent_workbench\dist\NovelAgentWorkbench\NovelAgentWorkbench.exe
@@ -152,14 +233,30 @@ Build command:
 powershell -NoProfile -ExecutionPolicy Bypass -File I:\AI-NOVEL\novel_agent_workbench\scripts\build_windows_exe.ps1
 ```
 
-Backend-only CLI smoke example:
+### Backend-only CLI smoke example
 
 ```powershell
 $env:PYTHONPATH="I:\AI-NOVEL\novel_agent_workbench\src"
 py -3.13 -m novel_agent_workbench.cli --projects-root I:\AI-NOVEL\novel_agent_workbench\workspace_projects smoke demo_project --title "Demo Novel" --chapter-id chapter_001 --chapter-title "Opening" --prompt "Write a short mock opening." --commit
 ```
 
-Operator docs:
+### Fresh machine environment setup
+
+The repository does not upload `.venv/`, runtime projects, local secrets, or build output. On a new Windows machine, run:
+
+```cmd
+SETUP_ENV.bat
+```
+
+The script creates `.venv` with Python 3.13, installs this project in editable mode, and installs desktop build tools such as `pyinstaller` and `pillow`. It does not create API keys and does not copy any runtime writing projects.
+
+For non-interactive verification:
+
+```cmd
+SETUP_ENV.bat --no-pause
+```
+
+### Operator docs
 
 ```text
 codex_docs\CLI_QUICKSTART.md
@@ -168,24 +265,17 @@ codex_docs\PROVIDER_ADAPTER_CONTRACT.md
 codex_docs\IMPORTANT_OPEN_ISSUES.md
 ```
 
-## Fresh Machine Environment Setup
+### Do not upload
 
-The repository does not upload `.venv/`, runtime projects, local secrets, or build output. On a new Windows machine, run:
+Do not upload the following materials to GitHub:
 
-```cmd
-SETUP_ENV.bat
-```
+- `.venv/`, build outputs, or coverage outputs.
+- Local runtime writing projects, draft manuscript text, or confirmed manuscript text.
+- API keys, tokens, endpoint secrets, or plaintext secret values.
+- Private settings, private corpora, or unauthorized text materials.
 
-The script creates `.venv` with Python 3.13, installs this project in editable mode, and installs desktop build tools (`pyinstaller`, `pillow`). It does not create API keys and does not copy any runtime writing projects.
+### License
 
-For non-interactive verification:
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See the root `LICENSE` file for details.
 
-```cmd
-SETUP_ENV.bat --no-pause
-```
-
-Current重点难题:
-
-```text
-The final-provider path now has gate -> runbook -> authorization -> preflight -> fail-closed execution stub -> real execution readiness -> explicit real execution -> read-only postcheck coverage. Live Chutes runs have proven the execution and sanitizer chain. Smoke-test drafts are retained as evidence only and must not be promoted to confirmed chapters. Upload readiness is guarded by `.gitignore`, `prepublish-check`, and `project-health`. The desktop launcher is intentionally local-first: it must not call models on startup or in hidden background flows, but it may expose clear user-triggered model actions.
-```
+AGPL-3.0 is a strong copyleft license, especially relevant for WebUI or network-service software. If a modified version is made available to users over a network, the corresponding modified source code usually needs to be offered to those remote users.
