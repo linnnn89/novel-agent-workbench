@@ -43,3 +43,16 @@ The public README now includes explicit Chinese and English Windows installation
 - source-mode desktop launch: `.venv\Scripts\novel-agent-workbench-desktop.exe`.
 
 The README also now includes first-screen Chinese/English highlight bullets and developer entry points so GitHub visitors can quickly distinguish user value from extension points.
+
+## Chinese search-card positioning update
+
+The README first screen was rewritten in plainer Chinese for Chinese novel-writing users:
+
+- positions the app as a local AI writing workbench for web-novel and long-form authors;
+- says it is not merely a chat box that writes one passage;
+- foregrounds outlines, characters, world-building, Memory Bank, chapter drafts, AI review, rewrite candidates, confirmed-text workflow, local data, and one-click Windows build;
+- adds a recommended GitHub About description:
+
+```text
+给网文/长篇作者用的本地 AI 小说写作工作台：管大纲、人物世界观、记忆库、章节草稿、AI审稿和重写，数据本地保存，Windows 一键运行。
+```
