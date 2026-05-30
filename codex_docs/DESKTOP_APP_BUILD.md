@@ -1,6 +1,6 @@
 # Desktop App Build
 
-Date: 2026-05-22, Asia/Shanghai.
+Date: 2026-05-30, Asia/Shanghai.
 
 ## Entry Point
 
@@ -32,11 +32,21 @@ Do not launch the EXE under `build/NovelAgentWorkbench/`; that folder is PyInsta
 
 ## Build Command
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File I:\AI-NOVEL\novel_agent_workbench\scripts\build_windows_exe.ps1
+Recommended one-click build from a fresh clone:
+
+```cmd
+BUILD_NovelAgentWorkbench.bat
 ```
 
-The script creates/uses project-local `.venv`, installs `pyinstaller` and `pillow`, regenerates the icon, and builds the Windows EXE.
+The BAT resolves all paths relative to the repository root, runs setup/build steps in the foreground console, and prints the final runnable EXE path before asking whether to launch it.
+
+Direct PowerShell build command:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows_exe.ps1
+```
+
+The scripts create/use project-local `.venv`, require Python 3.10 or newer, install `pyinstaller` and `pillow`, reuse the committed icon by default, and build the Windows EXE. Pass `-RegenerateIcon` to the PowerShell script only when intentionally updating icon assets.
 
 ## Icon
 
@@ -133,4 +143,14 @@ The UI no longer asks users for a secret/reference name. The app derives an inte
 EXE launch smoke: process started and closed
 Ran 144 tests
 OK
+```
+
+2026-05-30 open-source build audit:
+
+```text
+Python floor relaxed from 3.13 to 3.10.
+Build entrypoint is BUILD_NovelAgentWorkbench.bat.
+Build scripts use repository-relative paths.
+Final EXE path is dist\NovelAgentWorkbench\NovelAgentWorkbench.exe.
+dist\NovelAgentWorkbench\用户数据 remains preserved during rebuild.
 ```

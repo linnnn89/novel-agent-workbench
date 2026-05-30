@@ -284,7 +284,7 @@ secrets.local.json content
 Before any real Provider adapter is generally enabled, the project must pass:
 
 ```powershell
-py -3.13 -m novel_agent_workbench.cli --projects-root <root> audit-project <project_id>
+py -3.10 -m novel_agent_workbench.cli --projects-root <root> audit-project <project_id>
 ```
 
 `audit-project` is read-only. It checks for obvious raw API keys in config, disabled provider adapter usage, missing secret refs, missing local secrets, prompt/key leaks in logs, unsafe checkpoints, and confirmed chapter consistency.

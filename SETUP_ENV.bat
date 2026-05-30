@@ -3,25 +3,36 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 
-set "PYTHON_LAUNCHER=py -3.13"
+set "PYTHON_LAUNCHER="
 set "VENV_PY=.venv\Scripts\python.exe"
 set "NO_PAUSE="
 
 if /I "%~1"=="--no-pause" set "NO_PAUSE=1"
 if /I "%~1"=="/no-pause" set "NO_PAUSE=1"
+if /I "%~2"=="--no-pause" set "NO_PAUSE=1"
+if /I "%~2"=="/no-pause" set "NO_PAUSE=1"
 
 echo.
 echo [Novel Agent Workbench] Setting up local Python environment
 echo Repo: %CD%
 echo.
 
-%PYTHON_LAUNCHER% --version >nul 2>nul
-if errorlevel 1 (
-    echo Python 3.13 was not found through the Windows py launcher.
-    echo Install Python 3.13, or make sure "py -3.13" works in PowerShell/CMD.
+if not defined PYTHON_LAUNCHER py -3.13 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul && set "PYTHON_LAUNCHER=py -3.13"
+if not defined PYTHON_LAUNCHER py -3.12 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul && set "PYTHON_LAUNCHER=py -3.12"
+if not defined PYTHON_LAUNCHER py -3.11 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul && set "PYTHON_LAUNCHER=py -3.11"
+if not defined PYTHON_LAUNCHER py -3.10 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul && set "PYTHON_LAUNCHER=py -3.10"
+if not defined PYTHON_LAUNCHER python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul && set "PYTHON_LAUNCHER=python"
+
+if not defined PYTHON_LAUNCHER (
+    echo No compatible Python was found.
+    echo Install Python 3.10 or newer, then rerun this file.
     if not defined NO_PAUSE pause
     exit /b 1
 )
+
+echo Using Python:
+%PYTHON_LAUNCHER% --version
+echo.
 
 if not exist "%VENV_PY%" (
     echo Creating .venv ...
@@ -35,6 +46,14 @@ if not exist "%VENV_PY%" (
     echo Reusing existing .venv.
 )
 
+"%VENV_PY%" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul
+if errorlevel 1 (
+    echo Existing .venv is older than Python 3.10.
+    echo Remove .venv and rerun this setup file with Python 3.10 or newer installed.
+    if not defined NO_PAUSE pause
+    exit /b 1
+)
+
 echo.
 echo Upgrading packaging tools ...
 "%VENV_PY%" -m pip install --upgrade pip setuptools wheel
@@ -46,11 +65,15 @@ if errorlevel 1 (
 
 echo.
 echo Installing project in editable mode ...
+if exist "src\novel_agent_workbench.egg-info" (
+    echo Removing stale editable-install metadata ...
+    rmdir /s /q "src\novel_agent_workbench.egg-info"
+)
 "%VENV_PY%" -m pip install -e .
 if errorlevel 1 (
-    echo Failed to install the project.
-    if not defined NO_PAUSE pause
-    exit /b 1
+    echo Editable install failed in this checkout.
+    echo Continuing because the app can still run from source with PYTHONPATH=src.
+    echo On a fresh clone, rerun this file after confirming the source directory is writable.
 )
 
 echo.
@@ -72,6 +95,7 @@ echo Run desktop app from source:
 echo   .venv\Scripts\novel-agent-workbench-desktop.exe
 echo.
 echo Build Windows EXE:
-echo   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows_exe.ps1 -SkipInstall
+echo   BUILD_NovelAgentWorkbench.bat
 echo.
 if not defined NO_PAUSE pause
+exit /b 0

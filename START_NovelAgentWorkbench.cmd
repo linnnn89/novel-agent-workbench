@@ -6,7 +6,7 @@ set "APP_EXE=%APP_DIR%\NovelAgentWorkbench.exe"
 if not exist "%APP_EXE%" (
     echo NovelAgentWorkbench.exe not found.
     echo Expected: %APP_EXE%
-    echo Run scripts\build_windows_exe.ps1 first.
+    echo Run BUILD_NovelAgentWorkbench.bat first.
     pause
     exit /b 1
 )
