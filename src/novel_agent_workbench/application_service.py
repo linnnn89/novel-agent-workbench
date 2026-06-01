@@ -1230,6 +1230,23 @@ class WorkbenchApplicationService:
             reasoning_callback=reasoning_callback if stream_callback is None else None,
         ).to_dict()
 
+    def generate_memory_bank_compression_text(
+        self,
+        project_id: str,
+        *,
+        current_memory: str,
+        target_token_budget: int | None = None,
+        stream_callback: Callable[[str], None] | None = None,
+        reasoning_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
+        return MemoryBankService(self._runtime_store(project_id)).generate_memory_compression_text(
+            current_memory=current_memory,
+            target_token_budget=target_token_budget,
+            stream_callback=safe_stream_callback,
+            reasoning_callback=reasoning_callback if stream_callback is None else None,
+        ).to_dict()
+
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()
 

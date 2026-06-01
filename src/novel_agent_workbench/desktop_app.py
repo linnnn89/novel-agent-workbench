@@ -2869,7 +2869,13 @@ class WorkbenchDesktopApp(tk.Tk):
         def set_api_generating(active: bool) -> None:
             api_generating["active"] = active
             state = "disabled" if active else "normal"
-            for button in (api_generate_button, api_preview_button, update_prompt_button, compression_prompt_button):
+            for button in (
+                api_generate_button,
+                api_preview_button,
+                update_prompt_button,
+                compression_prompt_button,
+                compression_generate_button,
+            ):
                 button.configure(state=state)
             if active:
                 api_status_var.set("正在调用当前 writer 模型服务生成记忆正文；返回前请不要重复点击。")
@@ -3058,6 +3064,153 @@ class WorkbenchDesktopApp(tk.Tk):
                 ),
             )
 
+        def generate_compression_via_api() -> None:
+            if api_generating["active"]:
+                return
+            current_memory = text_box.get("1.0", tk.END).strip()
+            if not current_memory:
+                messagebox.showinfo(APP_TITLE, "当前记忆银行正文为空，暂时不需要缩写。", parent=window)
+                return
+            target_tokens = current_target_tokens(normalize_entry=True)
+            if not messagebox.askyesno(
+                APP_TITLE,
+                "将调用当前 writer 模型服务，只发送当前记忆银行正文，用于生成缩写后的记忆正文，可能消耗额度。\n\n"
+                "生成结果会先回填到右侧文本框，不会自动保存。\n\n继续？",
+                parent=window,
+            ):
+                return
+            progress = tk.Toplevel(window)
+            progress.title("记忆银行缩写进度")
+            progress.transient(window)
+            progress.geometry("860x620")
+            progress.columnconfigure(0, weight=1)
+            progress.rowconfigure(3, weight=1)
+            is_generating = {"active": True}
+            ttk.Label(
+                progress,
+                text=f"正在把当前记忆银行缩写到约 {target_tokens} tokens。流式返回会显示在下方。",
+                wraplength=820,
+            ).grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 8))
+            progress_status_var = tk.StringVar(value="正在调用当前 writer 模型服务缩写记忆正文...")
+            ttk.Label(progress, textvariable=progress_status_var, foreground="#6b7280", wraplength=820).grid(
+                row=1,
+                column=0,
+                sticky="ew",
+                padx=18,
+                pady=(0, 12),
+            )
+            progress_bar = ttk.Progressbar(progress, mode="indeterminate")
+            progress_bar.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
+            progress_bar.start(12)
+            live_frame = ttk.Frame(progress)
+            live_frame.grid(row=3, column=0, sticky="nsew", padx=18, pady=(0, 12))
+            live_frame.rowconfigure(0, weight=1)
+            live_frame.columnconfigure(0, weight=1)
+            live_text_box = tk.Text(live_frame, wrap="word", undo=True)
+            live_text_box.grid(row=0, column=0, sticky="nsew")
+            live_text_box.configure(state="disabled")
+            live_scrollbar = ttk.Scrollbar(live_frame, orient="vertical", command=live_text_box.yview)
+            live_scrollbar.grid(row=0, column=1, sticky="ns")
+            live_text_box.configure(yscrollcommand=live_scrollbar.set)
+            progress_button_row = ttk.Frame(progress)
+            progress_button_row.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 18))
+
+            def live_text_content() -> str:
+                return live_text_box.get("1.0", tk.END).strip()
+
+            def append_stream_chunk(chunk: str) -> None:
+                if not chunk:
+                    return
+                live_text_box.configure(state="normal")
+                live_text_box.insert(tk.END, chunk)
+                live_text_box.see(tk.END)
+                live_text_box.configure(state="disabled")
+
+            def set_live_text(text: str, *, editable: bool) -> None:
+                live_text_box.configure(state="normal")
+                live_text_box.delete("1.0", tk.END)
+                live_text_box.insert("1.0", text)
+                live_text_box.see(tk.END)
+                live_text_box.configure(state="normal" if editable else "disabled")
+
+            def close_progress_window() -> None:
+                if is_generating["active"]:
+                    messagebox.showinfo(APP_TITLE, "记忆正文正在缩写，请等待完成。", parent=progress)
+                    return
+                progress.destroy()
+
+            close_progress_button = ttk.Button(
+                progress_button_row,
+                text="关闭",
+                command=close_progress_window,
+                state="disabled",
+            )
+            close_progress_button.pack(side="right")
+            progress.protocol("WM_DELETE_WINDOW", close_progress_window)
+
+            def stream_callback(chunk: str) -> None:
+                self.after(0, lambda chunk=chunk: append_stream_chunk(chunk))
+
+            set_api_generating(True)
+            self.write_log(f"记忆银行缩写 API 请求已发送: project={project_id}")
+
+            def worker() -> None:
+                try:
+                    result = self.app.generate_memory_bank_compression_text(
+                        project_id,
+                        current_memory=current_memory,
+                        target_token_budget=target_tokens,
+                        stream_callback=stream_callback,
+                    )
+                except Exception as exc:
+                    self.after(0, lambda exc=exc: finish(error=exc))
+                    return
+                self.after(0, lambda result=result: finish(result=result))
+
+            def finish(*, result: dict[str, Any] | None = None, error: BaseException | None = None) -> None:
+                is_generating["active"] = False
+                try:
+                    progress_bar.stop()
+                except tk.TclError:
+                    pass
+                set_api_generating(False)
+                if error is not None:
+                    api_status_var.set("AI 缩写记忆失败。")
+                    progress_status_var.set("AI 缩写记忆失败。")
+                    progress.title("记忆银行缩写失败")
+                    close_progress_button.configure(state="normal")
+                    messagebox.showerror(APP_TITLE, f"AI 缩写记忆失败:\n{error}", parent=window)
+                    self.write_log(f"记忆银行缩写 API 失败: {error}")
+                    return
+                result = result or {}
+                generated_text = str(result.get("text") or "").strip()
+                if generated_text and live_text_content() != generated_text:
+                    set_live_text(generated_text, editable=True)
+                else:
+                    live_text_box.configure(state="normal")
+                text_box.delete("1.0", tk.END)
+                text_box.insert("1.0", generated_text)
+                summary = result.get("request_summary") if isinstance(result.get("request_summary"), dict) else {}
+                api_status_var.set(
+                    "AI 已缩写记忆正文，已填入右侧文本框；请检查后点击“保存记忆正文”。"
+                    f" provider={result.get('provider') or '-'} model={result.get('model') or '-'}"
+                    f" chars={len(generated_text)} prompt_chars={summary.get('prompt_chars') or '-'}"
+                )
+                progress_status_var.set(
+                    "AI 已缩写记忆正文，已同步填入记忆银行窗口；请检查后点击“保存记忆正文”。"
+                    f" provider={result.get('provider') or '-'} model={result.get('model') or '-'}"
+                    f" chars={len(generated_text)} prompt_chars={summary.get('prompt_chars') or '-'}"
+                )
+                progress.title("记忆银行缩写结果")
+                close_progress_button.configure(state="normal")
+                self.write_log(
+                    f"记忆银行缩写 API 成功: project={project_id} provider={result.get('provider')} "
+                    f"model={result.get('model')} chars={len(generated_text)}"
+                )
+                update_status()
+
+            threading.Thread(target=worker, name="NovelMemoryBankCompression", daemon=True).start()
+
         def show_context_preview() -> None:
             try:
                 preview = self.app.context_package_preview(project_id, include_text=True)
@@ -3095,6 +3248,8 @@ class WorkbenchDesktopApp(tk.Tk):
         api_generate_button.pack(side="left", padx=(0, 8))
         compression_prompt_button = ttk.Button(button_row, text="生成缩写提示词", command=show_memory_compression_prompt)
         compression_prompt_button.pack(side="left", padx=(0, 8))
+        compression_generate_button = ttk.Button(button_row, text="发送给AI缩写记忆", command=generate_compression_via_api)
+        compression_generate_button.pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="查看生成时会带的上下文", command=show_context_preview).pack(side="left", padx=(0, 8))
         ttk.Button(
             button_row,
@@ -3683,6 +3838,17 @@ class WorkbenchDesktopApp(tk.Tk):
                 text="刷新",
                 command=lambda: self.replace_text_window_content(body, refresh()),
             ).pack(side="left", padx=(0, 8))
+
+        def copy_text() -> None:
+            try:
+                value = body.get("1.0", tk.END).strip()
+                window.clipboard_clear()
+                window.clipboard_append(value)
+                self.write_log(f"已复制文本窗口内容: title={title} chars={len(value)}")
+            except tk.TclError:
+                return
+
+        ttk.Button(button_bar, text="复制全文", command=copy_text).pack(side="left", padx=(0, 8))
         for label, command in actions:
             ttk.Button(button_bar, text=label, command=command).pack(side="left", padx=(0, 8))
         ttk.Button(button_bar, text="关闭", command=window.destroy).pack(side="right")

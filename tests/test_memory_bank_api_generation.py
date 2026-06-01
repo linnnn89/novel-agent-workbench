@@ -86,10 +86,18 @@ class MemoryBankApiGenerationTests(unittest.TestCase):
         source = inspect.getsource(WorkbenchDesktopApp.show_memory_bank_window)
 
         self.assertIn("记忆银行生成进度", source)
+        self.assertIn("记忆银行缩写进度", source)
         self.assertIn("ttk.Progressbar(progress, mode=\"indeterminate\")", source)
         self.assertIn("def stream_callback(chunk: str)", source)
         self.assertIn("stream_callback=stream_callback", source)
         self.assertIn("已同步填入记忆银行窗口", source)
+        self.assertIn("发送给AI缩写记忆", source)
+
+    def test_text_preview_windows_offer_copy_button(self) -> None:
+        source = inspect.getsource(WorkbenchDesktopApp.show_text_window)
+
+        self.assertIn("复制全文", source)
+        self.assertIn("clipboard_append", source)
 
     def test_preview_and_mock_generation_are_structured_and_not_auto_saved(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -157,6 +165,39 @@ class MemoryBankApiGenerationTests(unittest.TestCase):
             self.assertIn("memory_bank_generation", log_text)
             self.assertNotIn("旧钥匙", log_text)
             self.assertNotIn("林澈", log_text)
+
+    def test_memory_bank_compression_generation_uses_writer_and_is_not_auto_saved(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = WorkbenchApplicationService.open(Path(temp_dir) / "projects")
+            app.create_project("novel_a", title="Novel A")
+            app.configure_mock_writer("novel_a", model="mock-writer")
+            app.ensure_main_memory_item("novel_a")
+            current_memory = "主角林澈已经确认旧钥匙和北塔有关，需要后续继续追查。"
+            streamed_chunks: list[str] = []
+
+            result = app.generate_memory_bank_compression_text(
+                "novel_a",
+                current_memory=current_memory,
+                target_token_budget=800,
+                stream_callback=streamed_chunks.append,
+            )
+
+            self.assertEqual(result["provider"], "mock")
+            self.assertIn("MOCK writer draft placeholder", result["text"])
+            self.assertIn("MOCK writer draft placeholder", "".join(streamed_chunks))
+            self.assertEqual(result["request_summary"]["provider_request_role"], "writer")
+            self.assertEqual(result["request_summary"]["source_chapter_ids"], [])
+            self.assertEqual(result["request_summary"]["request_max_tokens"], 8000)
+            self.assertTrue(result["request_summary"]["stream"])
+
+            memory_item = app.read_memory_item("novel_a", "main_memory_bank", include_text=True)
+            self.assertEqual(memory_item["text"], "")
+
+            provider_log = Path(temp_dir) / "projects" / "novel_a" / "data" / "provider_call_log.json"
+            log_text = provider_log.read_text(encoding="utf-8")
+            self.assertIn("memory_bank_compression", log_text)
+            self.assertNotIn("旧钥匙", log_text)
+            self.assertNotIn("北塔", log_text)
 
     def test_memory_bank_streaming_hides_inline_thinking_before_ui_callback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
