@@ -46,7 +46,7 @@ Direct PowerShell build command:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows_exe.ps1
 ```
 
-The scripts create/use project-local `.venv`, require Python 3.10 or newer, install `pyinstaller` and `pillow`, reuse the committed icon by default, and build the Windows EXE. Pass `-RegenerateIcon` to the PowerShell script only when intentionally updating icon assets.
+The scripts create/use project-local `.venv`, require Python 3.11-3.14 for the Windows EXE build, install `pyinstaller` and `pillow`, reuse the committed icon by default, and build the Windows EXE. Pass `-RegenerateIcon` to the PowerShell script only when intentionally updating icon assets.
 
 ## Icon
 

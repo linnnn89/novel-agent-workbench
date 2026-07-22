@@ -927,15 +927,32 @@ def render_context_prompt(render: dict[str, Any]) -> str:
     )
     target_chapter = str(target_message.get("content") or "").strip()
     lines: list[str] = []
+    context_text = render_context_materials(sections)
+    if context_text:
+        lines.append("【创作资料】")
+        lines.append(context_text)
     if target_chapter:
+        if lines:
+            lines.append("")
         lines.append("【目标章节】")
         lines.append(target_chapter)
-        lines.append("")
     if prompt:
+        if lines:
+            lines.append("")
         lines.append("【用户本次要求】")
         lines.append(prompt)
-    for group in grouped_context_sections(sections):
-        lines.append("")
+    if not lines:
+        lines.append("【用户本次要求】")
+        lines.append(prompt)
+    return "\n".join(lines).strip()
+
+
+def render_context_materials(sections: list[object]) -> str:
+    stable, volatile = partition_context_sections(sections)
+    lines: list[str] = []
+    for group in [*grouped_context_sections(stable), *grouped_context_sections(volatile)]:
+        if lines:
+            lines.append("")
         lines.append(f"【{group['label']}】")
         for item in group["items"]:
             title = str(item.get("title") or item.get("source_id") or "").strip()
@@ -945,10 +962,25 @@ def render_context_prompt(render: dict[str, Any]) -> str:
             if title:
                 lines.append(f"{title}:")
             lines.append(text)
-    if not lines:
-        lines.append("【用户本次要求】")
-        lines.append(prompt)
     return "\n".join(lines).strip()
+
+
+def partition_context_sections(sections: list[object]) -> tuple[list[object], list[object]]:
+    stable: list[object] = []
+    volatile: list[object] = []
+    for item in sections:
+        if not isinstance(item, dict):
+            continue
+        source_type = str(item.get("source_type") or "")
+        category_id = str(item.get("category_id") or "")
+        if source_type in {"memory_bank", "recent_confirmed_chapter"} or category_id in {
+            "chapter_plan",
+            "recent_chapters",
+        }:
+            volatile.append(item)
+        else:
+            stable.append(item)
+    return stable, volatile
 
 
 def grouped_context_sections(sections: list[object]) -> list[dict[str, Any]]:

@@ -27,6 +27,7 @@ from .corpus_samples import CorpusSampleService
 from .drafts import (
     DraftGenerationRequest,
     DraftGenerationService,
+    render_context_materials,
     render_context_prompt,
     sanitize_provider_draft_text,
     stream_sanitizer_callback,
@@ -1514,13 +1515,18 @@ def render_ai_refinement_prompt(
     review: dict[str, Any],
     instruction: str = "",
 ) -> str:
-    context_text = render_context_prompt(render)
+    package = render.get("context_package") if isinstance(render.get("context_package"), dict) else {}
+    sections = package.get("sections") if isinstance(package.get("sections"), list) else []
+    context_text = render_context_materials(sections)
     draft_text = sanitize_provider_draft_text(str(draft.get("content") or ""))["content"]
     review_text = str(review.get("comment") or "").strip()
     chapter_id = str(draft.get("chapter_id") or "")
     title = str(draft.get("title") or "")
     version_label = str(draft.get("version_label") or "")
     lines = [
+        "【上下文与资料】",
+        context_text or "无额外上下文。",
+        "",
         "【精修任务】",
         "你将根据 AI 审稿意见，把当前草稿改成一个新的修订版。",
         "AI 审稿意见是本次精修的主要执行清单；必须优先落实，不要只做普通续写或表层润色。",
@@ -1530,9 +1536,6 @@ def render_ai_refinement_prompt(
         f"章节 ID：{chapter_id}",
         f"标题：{title or chapter_id}",
         f"源草稿版本：{version_label or '-'}",
-        "",
-        "【上下文与资料】",
-        context_text or "无额外上下文。",
         "",
         "【必须落实的 AI 审稿意见】",
         review_text or "（无审稿意见）",

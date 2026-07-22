@@ -296,6 +296,34 @@ def enable_windows_dpi_awareness() -> None:
         return
 
 
+def wrapped_row_positions(
+    item_widths: list[int],
+    available_width: int,
+    *,
+    horizontal_gap: int = 8,
+) -> list[tuple[int, int]]:
+    """Return row/column positions that keep each item inside the available width."""
+    positions: list[tuple[int, int]] = []
+    row = 0
+    column = 0
+    used_width = 0
+    usable_width = max(1, int(available_width))
+    gap = max(0, int(horizontal_gap))
+
+    for requested_width in item_widths:
+        item_width = max(1, int(requested_width))
+        next_width = item_width if column == 0 else used_width + gap + item_width
+        if column > 0 and next_width > usable_width:
+            row += 1
+            column = 0
+            used_width = item_width
+        else:
+            used_width = next_width
+        positions.append((row, column))
+        column += 1
+    return positions
+
+
 class WorkbenchDesktopApp(tk.Tk):
     def __init__(self, *, projects_root: Path | None = None, repo_root: Path | None = None) -> None:
         enable_windows_dpi_awareness()
@@ -3843,33 +3871,79 @@ class WorkbenchDesktopApp(tk.Tk):
         button_row = ttk.Frame(window, style="DialogFooter.TFrame")
         button_row.grid(row=4, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 14))
         update_prompt_button = ttk.Button(button_row, text="生成更新记忆提示词", command=show_memory_update_prompt)
-        update_prompt_button.pack(side="left", padx=(0, 8))
         api_preview_button = ttk.Button(button_row, text="查看API发送结构", command=show_memory_api_request_preview)
-        api_preview_button.pack(side="left", padx=(0, 8))
         api_generate_button = ttk.Button(
             button_row,
             text="发送给AI生成记忆",
             command=generate_memory_via_api,
             style="Primary.TButton",
         )
-        api_generate_button.pack(side="left", padx=(0, 8))
         compression_prompt_button = ttk.Button(button_row, text="生成缩写提示词", command=show_memory_compression_prompt)
-        compression_prompt_button.pack(side="left", padx=(0, 8))
         compression_generate_button = ttk.Button(button_row, text="发送给AI缩写记忆", command=generate_compression_via_api)
-        compression_generate_button.pack(side="left", padx=(0, 8))
-        ttk.Button(button_row, text="查看生成时会带的上下文", command=show_context_preview).pack(side="left", padx=(0, 8))
-        ttk.Button(
+        context_preview_button = ttk.Button(button_row, text="查看生成时会带的上下文", command=show_context_preview)
+        refresh_button = ttk.Button(
             button_row,
             text="刷新窗口",
             command=lambda: refresh() if confirm_discard_unsaved("刷新窗口") else None,
-        ).pack(side="left", padx=(0, 8))
-        ttk.Button(button_row, text="保存加入上下文设置", command=save_lifecycle).pack(side="left", padx=(0, 8))
-        ttk.Button(button_row, text="保存记忆正文", command=save_text, style="Confirm.TButton").pack(side="right", padx=(8, 0))
-        ttk.Button(
+        )
+        lifecycle_button = ttk.Button(button_row, text="保存加入上下文设置", command=save_lifecycle)
+        close_button = ttk.Button(
             button_row,
             text="关闭",
             command=lambda: window.destroy() if confirm_discard_unsaved("关闭窗口") else None,
-        ).pack(side="right")
+        )
+        save_text_button = ttk.Button(button_row, text="保存记忆正文", command=save_text, style="Confirm.TButton")
+        action_buttons = [
+            update_prompt_button,
+            api_preview_button,
+            api_generate_button,
+            compression_prompt_button,
+            compression_generate_button,
+            context_preview_button,
+            refresh_button,
+            lifecycle_button,
+            close_button,
+            save_text_button,
+        ]
+        button_layout_state: dict[str, object] = {"scheduled": False, "positions": None}
+
+        def apply_button_layout() -> None:
+            button_layout_state["scheduled"] = False
+            try:
+                available_width = button_row.winfo_width()
+                if available_width <= 1:
+                    available_width = max(1, window.winfo_width() - 28)
+                positions = wrapped_row_positions(
+                    [button.winfo_reqwidth() for button in action_buttons],
+                    available_width,
+                )
+            except tk.TclError:
+                return
+            if positions == button_layout_state["positions"]:
+                return
+            button_layout_state["positions"] = positions
+            last_column_by_row: dict[int, int] = {}
+            last_row = 0
+            for row, column in positions:
+                last_column_by_row[row] = column
+                last_row = max(last_row, row)
+            for button, (row, column) in zip(action_buttons, positions, strict=True):
+                button.grid(
+                    row=row,
+                    column=column,
+                    sticky="w",
+                    padx=(0, 8 if column < last_column_by_row[row] else 0),
+                    pady=(0, 8 if row < last_row else 0),
+                )
+
+        def schedule_button_layout(_event: tk.Event | None = None) -> None:
+            if button_layout_state["scheduled"]:
+                return
+            button_layout_state["scheduled"] = True
+            button_row.after_idle(apply_button_layout)
+
+        button_row.bind("<Configure>", schedule_button_layout, add="+")
+        schedule_button_layout()
         window.protocol("WM_DELETE_WINDOW", lambda: window.destroy() if confirm_discard_unsaved("关闭窗口") else None)
 
         refresh()

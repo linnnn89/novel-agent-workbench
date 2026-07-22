@@ -24,7 +24,7 @@ function Test-PythonCommand {
     try {
         Invoke-PythonCommand -Command $Command -Arguments @(
             "-c",
-            "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
+            "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)"
         ) *> $null
         return $LASTEXITCODE -eq 0
     }
@@ -39,14 +39,14 @@ function Resolve-PythonCommand {
         if (Test-PythonCommand -Command $custom) {
             return $custom
         }
-        throw "Requested Python command is unavailable or older than 3.10: $Python"
+        throw "Requested Python command is unavailable or outside the supported EXE build range (Python 3.11-3.14): $Python"
     }
 
     $candidates = @(
+        @("py", "-3.14"),
         @("py", "-3.13"),
         @("py", "-3.12"),
         @("py", "-3.11"),
-        @("py", "-3.10"),
         @("python")
     )
     foreach ($candidate in $candidates) {
@@ -54,14 +54,14 @@ function Resolve-PythonCommand {
             return $candidate
         }
     }
-    throw "No compatible Python was found. Install Python 3.10 or newer."
+    throw "No compatible Python was found. Install Python 3.11-3.14 for the Windows EXE build."
 }
 
 function Assert-VenvPythonSupported {
     param([string]$VenvPython)
-    & $VenvPython -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
+    & $VenvPython -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)"
     if ($LASTEXITCODE -ne 0) {
-        throw "Existing .venv uses Python older than 3.10. Remove .venv and rerun the build."
+        throw "Existing .venv uses Python outside the supported EXE build range. Recreate .venv with Python 3.11-3.14 and rerun the build."
     }
 }
 

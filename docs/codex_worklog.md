@@ -178,3 +178,73 @@
 ### USER_DECISION_REQUIRED
 
 - 本阶段无。
+
+## 2026-07-22：DeepSeek 请求前缀缓存优化与 EXE 重打包
+
+### 目标
+
+- 借鉴 Reasonix 的稳定前缀思路，降低草稿生成、AI 审稿和审稿驱动精修请求的前缀漂移。
+- 保留 DeepSeek 返回的缓存命中统计，并确保流式请求返回完整 usage。
+- 不进行真实 API 调用或单元测试；完成代码静态检查后重新打包 EXE。
+
+### 关键变更
+
+- `drafts.py` 将总纲、节拍表、世界观、人物设定、约束等低频变化资料排在请求最前；章节计划、Memory Bank 和最近确认章节排在其后；目标章节与本次要求位于末尾。
+- `reviews.py` 和 `application_service.py` 的 AI 审稿、审稿驱动精修采用相同的稳定资料优先顺序，待审草稿、审稿意见和用户额外要求保留在动态尾部。
+- `providers.py` 保留 `prompt_cache_hit_tokens` 与 `prompt_cache_miss_tokens`，不再被通用 usage 清洗丢弃。
+- DeepSeek 流式请求增加 `stream_options.include_usage=true`，使流结束前能够接收完整 usage 块。
+- 未改变 API Key、模型配置、采样参数、草稿保存、确认稿件或其他 Provider 的既有请求规则。
+
+### 检查与打包
+
+- Python 3.10：目标文件 AST 解析与模块导入检查通过。
+- Python 3.14.5：目标文件 AST 解析与模块导入检查通过。
+- 未运行单元测试，未启动桌面 EXE，未调用任何模型 API，符合用户本轮要求。
+- 第一次暂存构建使用旧 Python 3.10.0 环境，在 PyInstaller 模块扫描阶段触发标准库 `dis.py` 的 `IndexError`；未发布该产物。
+- 改用项目原有 Python 3.14.5 与 PyInstaller 6.20.0 后构建成功。
+- 新 EXE：`dist/NovelAgentWorkbench/NovelAgentWorkbench.exe`。
+- EXE SHA-256：`F84419DCEEB10FE34DB27F670A8A6742FACBD3E32B8702639C7323AEC06A8508`。
+- 发布时只替换 EXE 与 `_internal`，`dist/NovelAgentWorkbench/用户数据` 已确认保留。
+
+### 反证自审与限制
+
+- 本轮确认的是语法、模块导入和 PyInstaller 构建完整性，不代表真实 DeepSeek 服务端一定达到某个缓存命中率；实际命中仍受缓存持久化、过期、模型切换和资料更新影响。
+- 同一章节反复生成仍不是完整 append-only 会话；本轮优先采用改动较小的稳定前缀方案。
+- PyInstaller 警告文件只列出 Windows 下不会使用的 POSIX/Java/VMS 条件模块及标准库分析提示，未出现项目业务模块缺失。
+
+### USER_DECISION_REQUIRED
+
+- 本阶段无。
+
+## 2026-07-22：记忆银行底部按钮响应式换行
+
+### 目标
+
+- 修复“记忆银行”窗口拉窄后，底部右侧重要操作按钮被窗口边界裁切的问题。
+- 宽窗口继续使用单行按钮；可用宽度不足时自动排成两行或更多行，并让上方正文区相应缩小。
+
+### 关键变更
+
+- 新增按按钮实际请求宽度和可用宽度计算行列位置的 `wrapped_row_positions()`。
+- 将记忆银行底部操作区从固定单行 `pack` 改为响应式 `grid`；监听操作区宽度变化并在空闲时合并重复重排。
+- 保持原有按钮、命令、顺序和主操作样式不变；“关闭”之后仍是绿色“保存记忆正文”。
+- 未修改记忆银行正文、API 调用、保存逻辑或其他窗口的按钮布局。
+
+### 检查与打包
+
+- `desktop_app.py` AST 语法检查通过。
+- 定向检查通过：模拟约 892 px 可用宽度时 10 个按钮分成两行，约 1700 px 时保持一行；超宽单按钮会独占一行。
+- 未启动桌面界面，未调用模型 API，未运行完整单元测试。
+- 使用项目原有 Python 3.14.5 与 PyInstaller 6.20.0、`-SkipInstall` 构建成功，未安装或升级依赖。
+- 新 EXE：`dist/NovelAgentWorkbench/NovelAgentWorkbench.exe`。
+- EXE SHA-256：`6CD91A0FCBDC2B2CD44EFBF0A6579D35135B5CA3941355A2E96F48B2E62B761F`。
+- 发布时只替换 EXE 与 `_internal`；`dist/NovelAgentWorkbench/用户数据` 已确认保留。
+
+### 反证自审与限制
+
+- 若将窗口缩到比单个最长按钮还窄，该按钮本身仍可能超出可用宽度；当前记忆银行窗口最小宽度为 920 px，因此实际可用范围不会触发这一极端情况。
+- 本轮按用户要求侧重代码正确性和打包完整性，实际系统缩放比例下的视觉效果留待用户直接使用确认。
+
+### USER_DECISION_REQUIRED
+
+- 本阶段无。
