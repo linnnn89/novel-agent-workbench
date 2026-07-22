@@ -7,6 +7,7 @@ __pycache__/
 
 # Local environments
 .venv/
+.venv_*/
 venv/
 env/
 
@@ -24,6 +25,8 @@ backups/
 run_logs/
 usage_logs/
 *.log
+work/test_outputs/
+**/用户数据/
 
 # Build and coverage artifacts
 build/

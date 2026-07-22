@@ -1036,6 +1036,8 @@ def send_openai_compatible_chat_completion(
         "stream": stream_response,
         "max_tokens": request.max_tokens or 16,
     }
+    if stream_response and role_config.provider == DEEPSEEK_PROVIDER_ID:
+        payload["stream_options"] = {"include_usage": True}
     if request.temperature is not None and "temperature" in supported_sampling_keys:
         payload["temperature"] = request.temperature
     payload.update(openai_compatible_sampling_payload(request, role_config))
@@ -1278,7 +1280,13 @@ def choice_text(choice: dict[str, Any]) -> str:
 
 def safe_usage(value: dict[str, Any]) -> dict[str, int]:
     safe: dict[str, int] = {}
-    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "prompt_cache_hit_tokens",
+        "prompt_cache_miss_tokens",
+    ):
         item = value.get(key)
         if isinstance(item, int):
             safe[key] = item

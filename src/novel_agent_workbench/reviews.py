@@ -9,7 +9,7 @@ from .chapters import ChapterWorkflowService
 from .config import DEFAULT_REVIEW_SYSTEM_PROMPT, DEFAULT_REVIEW_TASK_PROMPT, effective_generation_settings
 from .drafts import (
     DraftGenerationService,
-    grouped_context_sections,
+    render_context_materials,
     sanitize_provider_draft_text,
     stream_sanitizer_callback,
     validate_chapter_id,
@@ -853,6 +853,9 @@ def render_ai_review_prompt(
     version_label = str(draft.get("version_label") or "")
     task_text = str(review_prompt or "").strip() or ai_review_task_prompt(chapter_id=chapter_id, title=title)
     lines = [
+        "【上下文与资料】",
+        context_text or "无额外上下文。",
+        "",
         "【审稿任务】",
         task_text,
         "",
@@ -860,9 +863,6 @@ def render_ai_review_prompt(
         f"章节 ID：{chapter_id}",
         f"标题：{title or chapter_id}",
         f"草稿版本：{version_label or '-'}",
-        "",
-        "【上下文与资料】",
-        context_text or "无额外上下文。",
         "",
         "【待审草稿正文】",
         draft_text or "（空草稿）",
@@ -873,19 +873,7 @@ def render_ai_review_prompt(
 def render_review_context_materials(render: dict[str, Any]) -> str:
     package = render.get("context_package") if isinstance(render.get("context_package"), dict) else {}
     sections = package.get("sections") if isinstance(package.get("sections"), list) else []
-    lines: list[str] = []
-    for group in grouped_context_sections(sections):
-        lines.append(f"【{group['label']}】")
-        for item in group["items"]:
-            title = str(item.get("title") or item.get("source_id") or "").strip()
-            text = str(item.get("text") or "").strip()
-            if not text:
-                continue
-            if title:
-                lines.append(f"{title}:")
-            lines.append(text)
-        lines.append("")
-    return "\n".join(lines).strip()
+    return render_context_materials(sections)
 
 
 def render_context_stats(render: dict[str, Any]) -> dict[str, int]:

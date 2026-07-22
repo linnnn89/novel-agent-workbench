@@ -42,6 +42,16 @@ class PlanningLibraryItemResult:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class PlanningLibraryDeleteResult:
+    planning_id: str
+    checkpoint: dict[str, Any]
+    deleted_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class PlanningLibraryService:
     """Manual planning-reference storage for local context assembly."""
 
@@ -196,6 +206,24 @@ class PlanningLibraryService:
 
     def set_planning_item_enabled(self, planning_id: str, *, enabled: bool) -> PlanningLibraryItemResult:
         return self._update_flags(planning_id, active=None, enabled=bool(enabled))
+
+    def delete_planning_item(self, planning_id: str) -> PlanningLibraryDeleteResult:
+        safe_id = validate_planning_id(planning_id)
+        self.store.initialize()
+        with self.store.lock():
+            library = self._read_library()
+            if not any(item_id(item) == safe_id for item in library["items"]):
+                raise PlanningLibraryError(f"Planning item not found: {safe_id}")
+            checkpoint = self.store.create_checkpoint(label="pre_planning_library_delete")
+            now = utc_stamp()
+            library["items"] = [item for item in library["items"] if item_id(item) != safe_id]
+            library["updated_at"] = now
+            write_library(self.store, library)
+            return PlanningLibraryDeleteResult(
+                planning_id=safe_id,
+                checkpoint=checkpoint,
+                deleted_at=now,
+            )
 
     def _update_flags(
         self,

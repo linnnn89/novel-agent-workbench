@@ -8,7 +8,7 @@ import time
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Iterator
@@ -550,7 +550,7 @@ def path_size(path: Path) -> int:
 
 
 def utc_stamp() -> str:
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
 def safe_filename(value: str) -> str:

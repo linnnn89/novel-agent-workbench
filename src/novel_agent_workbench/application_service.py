@@ -27,6 +27,7 @@ from .corpus_samples import CorpusSampleService
 from .drafts import (
     DraftGenerationRequest,
     DraftGenerationService,
+    render_context_materials,
     render_context_prompt,
     sanitize_provider_draft_text,
     stream_sanitizer_callback,
@@ -480,6 +481,9 @@ class WorkbenchApplicationService:
             planning_id,
             enabled=enabled,
         ).to_dict()
+
+    def delete_planning_item(self, project_id: str, planning_id: str) -> dict[str, Any]:
+        return PlanningLibraryService(self._open_store(project_id)).delete_planning_item(planning_id).to_dict()
 
     def mark_chapter_planned(self, project_id: str, chapter_id: str, *, title: str = "") -> dict[str, Any]:
         return ChapterWorkflowService(self._open_store(project_id)).mark_planned(chapter_id, title=title)
@@ -1227,6 +1231,23 @@ class WorkbenchApplicationService:
             reasoning_callback=reasoning_callback if stream_callback is None else None,
         ).to_dict()
 
+    def generate_memory_bank_compression_text(
+        self,
+        project_id: str,
+        *,
+        current_memory: str,
+        target_token_budget: int | None = None,
+        stream_callback: Callable[[str], None] | None = None,
+        reasoning_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
+        return MemoryBankService(self._runtime_store(project_id)).generate_memory_compression_text(
+            current_memory=current_memory,
+            target_token_budget=target_token_budget,
+            stream_callback=safe_stream_callback,
+            reasoning_callback=reasoning_callback if stream_callback is None else None,
+        ).to_dict()
+
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:
         return DraftGenerationService(self._open_store(project_id)).list_confirmed_chapters()
 
@@ -1494,13 +1515,18 @@ def render_ai_refinement_prompt(
     review: dict[str, Any],
     instruction: str = "",
 ) -> str:
-    context_text = render_context_prompt(render)
+    package = render.get("context_package") if isinstance(render.get("context_package"), dict) else {}
+    sections = package.get("sections") if isinstance(package.get("sections"), list) else []
+    context_text = render_context_materials(sections)
     draft_text = sanitize_provider_draft_text(str(draft.get("content") or ""))["content"]
     review_text = str(review.get("comment") or "").strip()
     chapter_id = str(draft.get("chapter_id") or "")
     title = str(draft.get("title") or "")
     version_label = str(draft.get("version_label") or "")
     lines = [
+        "【上下文与资料】",
+        context_text or "无额外上下文。",
+        "",
         "【精修任务】",
         "你将根据 AI 审稿意见，把当前草稿改成一个新的修订版。",
         "AI 审稿意见是本次精修的主要执行清单；必须优先落实，不要只做普通续写或表层润色。",
@@ -1510,9 +1536,6 @@ def render_ai_refinement_prompt(
         f"章节 ID：{chapter_id}",
         f"标题：{title or chapter_id}",
         f"源草稿版本：{version_label or '-'}",
-        "",
-        "【上下文与资料】",
-        context_text or "无额外上下文。",
         "",
         "【必须落实的 AI 审稿意见】",
         review_text or "（无审稿意见）",
