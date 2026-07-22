@@ -24,6 +24,8 @@ backups/
 run_logs/
 usage_logs/
 *.log
+work/test_outputs/
+**/用户数据/
 
 # Build and coverage artifacts
 build/

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import re
@@ -28,6 +29,15 @@ from .storage import DEFAULT_PROJECTS_DIRNAME
 APP_TITLE = "小说创作工作台"
 APP_SUBTITLE = "本地小说创作工作台"
 WINDOW_MIN_SIZE = (1120, 720)
+SIDEBAR_MIN_WIDTH = 230
+EDITOR_MIN_WIDTH = 560
+INSPECTOR_MIN_WIDTH = 190
+EDITOR_QUICK_ACTIONS = (
+    ("rewrite_draft", "重新生成（随机）"),
+    ("refine_draft", "根据审稿意见精修"),
+    ("ai_review", "AI审稿"),
+    ("confirm_draft", "确认稿件"),
+)
 TOP_NAV_SECTIONS = (
     {
         "label": "工作台",
@@ -44,6 +54,16 @@ TOP_NAV_SECTIONS = (
             ("generate_draft", "生成草稿"),
             ("review_rewrite", "审稿与改写"),
             ("confirmed_chapters", "已确认章节"),
+        ),
+    },
+    {
+        "label": "编辑",
+        "items": (
+            ("save_draft", "保存当前稿件"),
+            ("undo_draft", "撤销编辑"),
+            ("redo_draft", "重做编辑"),
+            ("rewrite_draft", "要求重写"),
+            ("refine_draft", "根据审稿精修"),
         ),
     },
     {
@@ -199,6 +219,46 @@ PLANNING_ADHERENCE_OPTIONS = (
 )
 SINGLETON_PLANNING_TYPES = {"outline", "world_plan"}
 
+# ----------------------------------------------------------------------------
+# 视觉设计令牌：集中管理配色与字体，仅影响外观，不改变任何功能行为。
+# ----------------------------------------------------------------------------
+PALETTE = {
+    "app_bg": "#edf0f6",
+    "surface": "#ffffff",
+    "surface_sunken": "#f4f6fb",
+    "border": "#dfe4ef",
+    "border_input": "#c9d2e4",
+    "ink": "#1d2637",
+    "ink_soft": "#4a5570",
+    "muted": "#828da3",
+    "accent": "#4c63d2",
+    "accent_hover": "#4154ba",
+    "accent_pressed": "#384aa3",
+    "accent_disabled": "#c2cbea",
+    "accent_soft_text": "#3a4cad",
+    "pill_bg": "#e9eef9",
+    "select_bg": "#dfe6fb",
+    "select_fg": "#2f3f96",
+    "success": "#1e9e63",
+    "success_hover": "#1a8a56",
+    "success_pressed": "#16764a",
+    "success_disabled": "#b7dfcd",
+    "warn": "#9d6703",
+    "danger": "#b3261e",
+}
+FONT_FAMILY = "Microsoft YaHei UI"
+FONT_BASE = (FONT_FAMILY, 10)
+FONT_SMALL = (FONT_FAMILY, 9)
+FONT_STRONG = (FONT_FAMILY, 10, "bold")
+FONT_SMALL_STRONG = (FONT_FAMILY, 9, "bold")
+FONT_BRAND = (FONT_FAMILY, 15, "bold")
+FONT_TITLE = (FONT_FAMILY, 13, "bold")
+FONT_SECTION = (FONT_FAMILY, 12, "bold")
+FONT_SECTION_SMALL = (FONT_FAMILY, 9, "bold")
+FONT_EDITOR_TITLE = (FONT_FAMILY, 14, "bold")
+FONT_DIALOG_TITLE = (FONT_FAMILY, 14, "bold")
+FONT_PANEL_TITLE = (FONT_FAMILY, 11, "bold")
+
 
 def default_projects_root() -> Path:
     if getattr(sys, "frozen", False):
@@ -222,8 +282,23 @@ def icon_path() -> Path:
     return asset_path("novel_agent_workbench.ico")
 
 
+def enable_windows_dpi_awareness() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return
+    except (AttributeError, OSError):
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except (AttributeError, OSError):
+        return
+
+
 class WorkbenchDesktopApp(tk.Tk):
     def __init__(self, *, projects_root: Path | None = None, repo_root: Path | None = None) -> None:
+        enable_windows_dpi_awareness()
         super().__init__()
         self.projects_root = projects_root or default_projects_root()
         self.repo_root = repo_root or default_repo_root()
@@ -244,14 +319,161 @@ class WorkbenchDesktopApp(tk.Tk):
         self.hidden_stale_draft_ids: set[tuple[str, str]] = set()
         self.prompted_stale_draft_ids: set[tuple[str, str]] = set()
         self.active_auto_memory_projects: set[str] = set()
+        self._last_normal_geometry: tuple[int, int, int, int] | None = None
+        self._restore_visibility_job: str | None = None
 
         self.title(APP_TITLE)
         self.minsize(*WINDOW_MIN_SIZE)
         self.geometry("1180x760")
+        self._bind_window_restore_guard()
         self._set_window_icon()
         self._configure_style()
         self._build_layout()
         self.refresh_projects()
+        self.after_idle(self._maximize_initial_window)
+
+    def _maximize_initial_window(self) -> None:
+        try:
+            self.state("zoomed")
+        except tk.TclError:
+            return
+
+    def _secondary_window(
+        self,
+        title: str,
+        *,
+        owner: tk.Misc | None = None,
+        geometry: str = "760x520",
+        minsize: tuple[int, int] = (520, 360),
+        resizable: tuple[bool, bool] = (True, True),
+    ) -> tk.Toplevel:
+        parent = owner or self
+        window = tk.Toplevel(parent)
+        window.title(title)
+        window.transient(parent)
+        window.configure(background=PALETTE["app_bg"])
+        window.geometry(geometry)
+        window.minsize(*minsize)
+        window.resizable(*resizable)
+        path = icon_path()
+        if path.exists():
+            try:
+                window.iconbitmap(str(path))
+            except tk.TclError:
+                pass
+        window.after_idle(lambda: self._center_secondary_window(window, parent))
+        return window
+
+    def _center_secondary_window(self, window: tk.Toplevel, owner: tk.Misc) -> None:
+        try:
+            window.update_idletasks()
+            width = window.winfo_width()
+            height = window.winfo_height()
+            owner_x = owner.winfo_rootx()
+            owner_y = owner.winfo_rooty()
+            owner_width = owner.winfo_width()
+            owner_height = owner.winfo_height()
+            x = owner_x + max(0, (owner_width - width) // 2)
+            y = owner_y + max(0, (owner_height - height) // 2)
+            max_x = max(0, window.winfo_screenwidth() - width)
+            max_y = max(0, window.winfo_screenheight() - height)
+            window.geometry(f"+{min(max(x, 0), max_x)}+{min(max(y, 0), max_y)}")
+        except tk.TclError:
+            return
+
+    def _dialog_header(self, parent: tk.Misc, title: str, description: str) -> ttk.Frame:
+        header = ttk.Frame(parent, padding=(20, 16, 20, 14), style="DialogHeader.TFrame")
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text=title, style="DialogTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            header,
+            text=description,
+            style="DialogText.TLabel",
+            justify="left",
+            wraplength=760,
+        ).grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        return header
+
+    def _style_text_widget(self, widget: tk.Text, *, monospace: bool = False) -> None:
+        widget.configure(
+            background=PALETTE["surface"],
+            foreground=PALETTE["ink"],
+            insertbackground=PALETTE["accent"],
+            selectbackground=PALETTE["select_bg"],
+            selectforeground=PALETTE["select_fg"],
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=PALETTE["border"],
+            highlightcolor=PALETTE["accent"],
+            font=(("Consolas", 10) if monospace else (FONT_FAMILY, 10)),
+            padx=14,
+            pady=12,
+        )
+
+    def _bind_window_restore_guard(self) -> None:
+        self.bind("<Configure>", self._remember_normal_window_geometry, add="+")
+        self.bind("<Map>", lambda _event: self._schedule_window_visibility_check(), add="+")
+        self.bind("<FocusIn>", lambda _event: self._schedule_window_visibility_check(), add="+")
+        self.after(250, self._schedule_window_visibility_check)
+
+    def _remember_normal_window_geometry(self, event: tk.Event[Any]) -> None:
+        if event.widget is not self:
+            return
+        try:
+            if self.state() == "iconic":
+                return
+            width = int(event.width)
+            height = int(event.height)
+            x = self.winfo_x()
+            y = self.winfo_y()
+        except (tk.TclError, TypeError, ValueError):
+            return
+        if self._is_broken_window_geometry(width, height, x, y):
+            return
+        self._last_normal_geometry = (width, height, x, y)
+
+    def _schedule_window_visibility_check(self) -> None:
+        if self._restore_visibility_job is not None:
+            try:
+                self.after_cancel(self._restore_visibility_job)
+            except tk.TclError:
+                pass
+        self._restore_visibility_job = self.after(80, self._restore_window_if_offscreen)
+
+    def _restore_window_if_offscreen(self) -> None:
+        self._restore_visibility_job = None
+        try:
+            if self.state() == "iconic":
+                return
+            self.update_idletasks()
+            width = self.winfo_width()
+            height = self.winfo_height()
+            x = self.winfo_x()
+            y = self.winfo_y()
+        except tk.TclError:
+            return
+        if not self._is_broken_window_geometry(width, height, x, y):
+            return
+
+        screen_width = max(self.winfo_screenwidth(), WINDOW_MIN_SIZE[0])
+        screen_height = max(self.winfo_screenheight(), WINDOW_MIN_SIZE[1])
+        target_width, target_height, target_x, target_y = self._last_normal_geometry or (
+            1180,
+            760,
+            40,
+            40,
+        )
+        target_width = max(WINDOW_MIN_SIZE[0], min(target_width, screen_width))
+        target_height = max(WINDOW_MIN_SIZE[1], min(target_height, screen_height))
+        target_x = min(max(target_x, 0), max(0, screen_width - 200))
+        target_y = min(max(target_y, 0), max(0, screen_height - 120))
+        self.geometry(f"{target_width}x{target_height}+{target_x}+{target_y}")
+        self.deiconify()
+        self.lift()
+
+    @staticmethod
+    def _is_broken_window_geometry(width: int, height: int, x: int, y: int) -> bool:
+        return x <= -10000 or y <= -10000 or width < 400 or height < 300
 
     def _set_window_icon(self) -> None:
         path = icon_path()
@@ -262,246 +484,608 @@ class WorkbenchDesktopApp(tk.Tk):
                 pass
 
     def _configure_style(self) -> None:
-        self.configure(bg="#f6f7fb")
+        self.configure(bg=PALETTE["app_bg"])
         style = ttk.Style(self)
         try:
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure(".", font=("Microsoft YaHei UI", 10))
-        style.configure("TopNav.TFrame", background="#f5edf5")
-        style.configure("TopNav.TLabel", font=("Microsoft YaHei UI", 11), background="#f5edf5", foreground="#5d5560")
-        style.configure("TopNav.TMenubutton", font=("Microsoft YaHei UI", 11), background="#f5edf5", foreground="#4b4550")
-        style.configure("Settings.TFrame", background="#ffffff")
-        style.configure("Sidebar.TFrame", background="#fbf5fb")
-        style.configure("Title.TLabel", font=("Microsoft YaHei UI", 18, "bold"), background="#ffffff", foreground="#19202d")
-        style.configure("Subtle.TLabel", background="#f6f7fb", foreground="#5a6475")
-        style.configure("SettingsLabel.TLabel", background="#ffffff", foreground="#5a6475")
-        style.configure("SidebarLabel.TLabel", background="#fbf5fb", foreground="#8a8190")
-        style.configure("Panel.TFrame", background="#ffffff", relief="solid", borderwidth=1)
-        style.configure("PanelTitle.TLabel", font=("Microsoft YaHei UI", 11, "bold"), background="#ffffff", foreground="#19202d")
-        style.configure("PanelText.TLabel", background="#ffffff", foreground="#394150")
-        style.configure("Primary.TButton", font=("Microsoft YaHei UI", 10, "bold"), foreground="#ffffff", background="#2563eb")
+
+        app_bg = PALETTE["app_bg"]
+        surface = PALETTE["surface"]
+        border = PALETTE["border"]
+        border_input = PALETTE["border_input"]
+        ink = PALETTE["ink"]
+        ink_soft = PALETTE["ink_soft"]
+        muted = PALETTE["muted"]
+        accent = PALETTE["accent"]
+
+        # tk 原生控件（菜单、下拉弹窗）不走 ttk 样式，用 option_add 统一配色。
+        self.option_add("*Menu.background", surface)
+        self.option_add("*Menu.foreground", ink_soft)
+        self.option_add("*Menu.activeBackground", accent)
+        self.option_add("*Menu.activeForeground", "#ffffff")
+        self.option_add("*Menu.disabledForeground", muted)
+        self.option_add("*Menu.selectColor", accent)
+        self.option_add("*Menu.relief", "flat")
+        self.option_add("*Menu.borderWidth", 1)
+        self.option_add("*Menu.font", FONT_BASE)
+        self.option_add("*TCombobox*Listbox.background", surface)
+        self.option_add("*TCombobox*Listbox.foreground", ink)
+        self.option_add("*TCombobox*Listbox.selectBackground", accent)
+        self.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+        self.option_add("*TCombobox*Listbox.font", FONT_BASE)
+        self.option_add("*TCombobox*Listbox.relief", "flat")
+
+        # 全局基础样式：窗口底色为冷灰，内容卡片为白色。
+        style.configure(".", font=FONT_BASE, background=app_bg, foreground=ink_soft)
+        style.configure("App.TFrame", background=app_bg)
+        style.configure("TFrame", background=app_bg)
+        style.configure("TLabel", background=app_bg, foreground=ink_soft)
+        style.configure("TCheckbutton", background=app_bg, foreground=ink_soft)
+        style.map("TCheckbutton", background=[("active", app_bg)])
+        style.configure("TRadiobutton", background=app_bg, foreground=ink_soft)
+        style.map("TRadiobutton", background=[("active", app_bg)])
+
+        # 主界面区域卡片。
+        style.configure("Topbar.TFrame", background=surface)
+        style.configure("Sidebar.TFrame", background=surface)
+        style.configure("Editor.TFrame", background=surface)
+        style.configure("Inspector.TFrame", background=surface)
+        style.configure("Panel.TFrame", background=surface, borderwidth=1, relief="solid", bordercolor=border)
+        style.configure("PanelTitle.TLabel", background=surface, foreground=ink, font=FONT_PANEL_TITLE)
+
+        # 文字层级。
+        style.configure("Title.TLabel", font=FONT_TITLE, background=surface, foreground=ink)
+        style.configure("SidebarTitle.TLabel", font=FONT_SECTION, background=surface, foreground=ink)
+        style.configure("Brand.TLabel", font=FONT_BRAND, background=surface, foreground=ink)
+        style.configure("BrandSub.TLabel", font=FONT_SMALL, background=surface, foreground=muted)
+        style.configure("ProjectName.TLabel", font=FONT_STRONG, background=surface, foreground=ink)
+        style.configure("EditorTitle.TLabel", font=FONT_EDITOR_TITLE, background=surface, foreground=ink)
+        style.configure("InspectorTitle.TLabel", font=FONT_SECTION_SMALL, background=surface, foreground=muted)
+        style.configure("InspectorText.TLabel", background=surface, foreground=ink_soft)
+        style.configure("Subtle.TLabel", background=surface, foreground=muted)
+        style.configure("SidebarLabel.TLabel", background=surface, foreground=muted, font=FONT_SMALL)
+        style.configure("Status.TLabel", background=surface, foreground=muted, font=FONT_SMALL)
+        style.configure("TopStatus.TLabel", background=surface, foreground=ink_soft, font=FONT_SMALL)
+        style.configure(
+            "StatusPill.TLabel",
+            background=PALETTE["pill_bg"],
+            foreground=ink_soft,
+            font=FONT_SMALL,
+            padding=(10, 4),
+        )
+
+        # 对话框。
+        style.configure("DialogHeader.TFrame", background=surface)
+        style.configure("DialogFooter.TFrame", background=app_bg)
+        style.configure("DialogTitle.TLabel", background=surface, foreground=ink, font=FONT_DIALOG_TITLE)
+        style.configure("DialogText.TLabel", background=surface, foreground=ink_soft)
+        style.configure("DialogHint.TLabel", background=app_bg, foreground=muted, font=FONT_SMALL)
+
+        # 按钮族：默认柔和灰、主按钮青蓝、确认翠绿、次级浅底、静默透明。
+        style.configure(
+            "TButton",
+            font=FONT_BASE,
+            padding=(14, 8),
+            foreground=ink_soft,
+            background="#e9edf5",
+            bordercolor="#d6dde9",
+            darkcolor="#e9edf5",
+            lightcolor="#e9edf5",
+            borderwidth=1,
+            focusthickness=0,
+        )
+        style.map(
+            "TButton",
+            background=[("pressed", "#d8dfec"), ("active", "#dfe5f1"), ("disabled", "#eef1f7")],
+            foreground=[("disabled", muted)],
+            bordercolor=[("focus", accent)],
+        )
+        style.configure(
+            "Primary.TButton",
+            font=FONT_STRONG,
+            padding=(16, 9),
+            foreground="#ffffff",
+            background=accent,
+            bordercolor=accent,
+            darkcolor=accent,
+            lightcolor=accent,
+            borderwidth=0,
+            focusthickness=0,
+        )
         style.map(
             "Primary.TButton",
-            background=[("active", "#1d4ed8"), ("pressed", "#1e40af"), ("disabled", "#93a4c7")],
-            foreground=[("disabled", "#f5f7fb")],
+            background=[("active", PALETTE["accent_hover"]), ("pressed", PALETTE["accent_pressed"]), ("disabled", PALETTE["accent_disabled"])],
+            foreground=[("disabled", "#f4f6fd")],
         )
-        style.configure("Secondary.TButton", font=("Microsoft YaHei UI", 10), foreground="#374151", background="#eef2f7")
-        style.map("Secondary.TButton", background=[("active", "#e2e8f0"), ("pressed", "#cbd5e1")])
-        style.configure("Quiet.TButton", font=("Microsoft YaHei UI", 9), foreground="#4b5563", background="#f8fafc")
-        style.map("Quiet.TButton", background=[("active", "#eef2f7"), ("pressed", "#e2e8f0")])
-        style.configure("StatusOk.TLabel", background="#ffffff", foreground="#176b3a", font=("Microsoft YaHei UI", 11, "bold"))
-        style.configure("StatusWarn.TLabel", background="#ffffff", foreground="#9a5b00", font=("Microsoft YaHei UI", 11, "bold"))
-        style.configure("StatusBlock.TLabel", background="#ffffff", foreground="#9d1c1c", font=("Microsoft YaHei UI", 11, "bold"))
+        style.configure(
+            "Confirm.TButton",
+            font=FONT_STRONG,
+            padding=(16, 9),
+            foreground="#ffffff",
+            background=PALETTE["success"],
+            bordercolor=PALETTE["success"],
+            darkcolor=PALETTE["success"],
+            lightcolor=PALETTE["success"],
+            borderwidth=0,
+            focusthickness=0,
+        )
+        style.map(
+            "Confirm.TButton",
+            background=[("active", PALETTE["success_hover"]), ("pressed", PALETTE["success_pressed"]), ("disabled", PALETTE["success_disabled"])],
+            foreground=[("disabled", "#f4fbf7")],
+        )
+        style.configure(
+            "Secondary.TButton",
+            font=FONT_BASE,
+            padding=(14, 8),
+            foreground="#3d4a68",
+            background="#e9edf6",
+            bordercolor="#d4dbe9",
+            darkcolor="#e9edf6",
+            lightcolor="#e9edf6",
+            borderwidth=1,
+            focusthickness=0,
+        )
+        style.map(
+            "Secondary.TButton",
+            background=[("active", "#dde4f0"), ("pressed", "#d0d9e9")],
+            bordercolor=[("focus", accent)],
+        )
+        style.configure(
+            "Secondary.TMenubutton",
+            font=FONT_BASE,
+            padding=(14, 8),
+            foreground="#3d4a68",
+            background="#e9edf6",
+            bordercolor="#d4dbe9",
+            borderwidth=1,
+        )
+        style.map("Secondary.TMenubutton", background=[("active", "#dde4f0"), ("pressed", "#d0d9e9")])
+        style.configure(
+            "Quiet.TButton",
+            font=FONT_BASE,
+            padding=(10, 7),
+            foreground=ink_soft,
+            background=surface,
+            bordercolor=surface,
+            darkcolor=surface,
+            lightcolor=surface,
+            borderwidth=0,
+            focusthickness=0,
+        )
+        style.map(
+            "Quiet.TButton",
+            background=[("active", "#edf0f8"), ("pressed", "#e2e8f4")],
+            foreground=[("active", PALETTE["accent_soft_text"])],
+        )
+
+        # 状态文字。
+        style.configure("StatusOk.TLabel", background=surface, foreground="#177a4c", font=(FONT_FAMILY, 11, "bold"))
+        style.configure("StatusWarn.TLabel", background=surface, foreground=PALETTE["warn"], font=(FONT_FAMILY, 11, "bold"))
+        style.configure("StatusBlock.TLabel", background=surface, foreground=PALETTE["danger"], font=(FONT_FAMILY, 11, "bold"))
+
+        # 输入控件。
+        style.configure(
+            "TEntry",
+            padding=(8, 6),
+            fieldbackground=surface,
+            background=surface,
+            foreground=ink,
+            insertcolor=accent,
+            bordercolor=border_input,
+            lightcolor="#e8edf6",
+            darkcolor="#e8edf6",
+            borderwidth=1,
+        )
+        style.map(
+            "TEntry",
+            bordercolor=[("focus", accent), ("hover", "#b7c2d9")],
+            fieldbackground=[("disabled", "#f1f4f9"), ("readonly", PALETTE["surface_sunken"])],
+            foreground=[("disabled", muted), ("readonly", ink_soft)],
+        )
+        style.configure(
+            "TCombobox",
+            padding=(8, 6),
+            fieldbackground=surface,
+            background=surface,
+            foreground=ink,
+            insertcolor=accent,
+            bordercolor=border_input,
+            arrowcolor="#5f6a84",
+            arrowsize=14,
+            lightcolor="#e8edf6",
+            darkcolor="#e8edf6",
+            borderwidth=1,
+        )
+        style.map(
+            "TCombobox",
+            bordercolor=[("focus", accent), ("hover", "#b7c2d9"), ("readonly", border_input)],
+            fieldbackground=[("readonly", surface), ("disabled", "#f1f4f9")],
+            foreground=[("readonly", ink), ("disabled", muted)],
+            arrowcolor=[("disabled", muted)],
+        )
+
+        # 树形列表。
+        style.configure(
+            "Treeview",
+            background=surface,
+            fieldbackground=surface,
+            foreground=ink,
+            rowheight=32,
+            borderwidth=0,
+            font=FONT_BASE,
+        )
+        style.configure(
+            "Treeview.Heading",
+            background="#eef1f8",
+            foreground="#4b5670",
+            font=FONT_SMALL_STRONG,
+            padding=(10, 8),
+            borderwidth=0,
+            relief="flat",
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", PALETTE["select_bg"])],
+            foreground=[("selected", PALETTE["select_fg"])],
+        )
+        style.map("Treeview.Heading", background=[("active", "#e3e9f4")])
+
+        # 滚动条：细窄低饱和，悬停加深。
+        for orientation in ("Vertical", "Horizontal"):
+            style.configure(
+                f"{orientation}.TScrollbar",
+                background="#ccd4e3",
+                troughcolor="#f2f4f9",
+                bordercolor="#f2f4f9",
+                arrowcolor="#ccd4e3",
+                darkcolor="#ccd4e3",
+                lightcolor="#ccd4e3",
+                borderwidth=1,
+                arrowsize=12,
+            )
+            style.map(
+                f"{orientation}.TScrollbar",
+                background=[("active", "#b4bfd4"), ("pressed", "#a2aecb"), ("disabled", "#e3e8f1")],
+                arrowcolor=[("disabled", "#e3e8f1")],
+            )
+
+        # 选项卡与进度条。
+        style.configure("TNotebook", background=app_bg, borderwidth=0, tabmargins=(6, 4, 6, 0))
+        style.configure(
+            "TNotebook.Tab",
+            background="#dfe5f1",
+            foreground=ink_soft,
+            padding=(16, 8),
+            font=FONT_BASE,
+            borderwidth=0,
+            focusthickness=0,
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", app_bg), ("active", "#eaeff7")],
+            foreground=[("selected", PALETTE["accent_soft_text"])],
+        )
+        style.configure(
+            "TProgressbar",
+            troughcolor="#e3e8f2",
+            background=accent,
+            bordercolor="#e3e8f2",
+            lightcolor=accent,
+            darkcolor=accent,
+            borderwidth=0,
+            thickness=8,
+        )
+        style.configure("TSeparator", background=border)
+        style.configure("TSizegrip", background=app_bg)
 
     def _build_layout(self) -> None:
-        self.columnconfigure(0, weight=0)
-        self.columnconfigure(1, weight=1)
-        self.rowconfigure(2, weight=1)
+        self.columnconfigure(0, weight=0, minsize=SIDEBAR_MIN_WIDTH)
+        self.columnconfigure(1, weight=1, minsize=EDITOR_MIN_WIDTH)
+        self.columnconfigure(2, weight=0, minsize=INSPECTOR_MIN_WIDTH)
+        self.rowconfigure(1, weight=1)
 
-        nav = ttk.Frame(self, padding=(20, 10, 20, 8), style="TopNav.TFrame")
-        nav.grid(row=0, column=0, columnspan=2, sticky="ew")
+        topbar = ttk.Frame(self, height=62, padding=(18, 10, 18, 10), style="Topbar.TFrame")
+        topbar.grid(row=0, column=0, columnspan=3, sticky="ew")
+        topbar.pack_propagate(False)
+        brand_badge = tk.Label(
+            topbar,
+            text="墨",
+            font=(FONT_FAMILY, 14, "bold"),
+            background=PALETTE["accent"],
+            foreground="#ffffff",
+            padx=9,
+            pady=3,
+        )
+        brand_badge.pack(side="left")
+        brand_text = ttk.Frame(topbar, style="Topbar.TFrame")
+        brand_text.pack(side="left", padx=(12, 0))
+        ttk.Label(brand_text, text=APP_TITLE, style="Brand.TLabel").pack(side="left")
+        ttk.Label(brand_text, text=APP_SUBTITLE, style="BrandSub.TLabel").pack(side="left", padx=(10, 0), pady=(5, 0))
+        ttk.Separator(topbar, orient="vertical").pack(side="left", fill="y", padx=16, pady=4)
+        self.current_project_var = tk.StringVar(value="未选择作品")
+        ttk.Label(topbar, textvariable=self.current_project_var, style="ProjectName.TLabel").pack(side="left")
+        self.autosave_status_var = tk.StringVar(value="本地保存就绪")
+        self.model_status_var = tk.StringVar(value="模型待配置")
+        self.editor_status_var = tk.StringVar(value="字数：0")
+        feature_button = ttk.Button(topbar, text="功能", width=6, style="Quiet.TButton")
+        feature_menu = tk.Menu(self, tearoff=False)
         for section in TOP_NAV_SECTIONS:
-            button = ttk.Menubutton(nav, text=str(section["label"]), style="TopNav.TMenubutton")
-            menu = tk.Menu(button, tearoff=False)
+            submenu = tk.Menu(feature_menu, tearoff=False)
             for action, item_label in section["items"]:
                 command = self.top_nav_command(str(action))
-                menu.add_command(label=str(item_label), command=command or self.show_unavailable)
-            button["menu"] = menu
-            button.pack(side="left", padx=(0, 18))
+                submenu.add_command(label=str(item_label), command=command or self.show_unavailable)
+            feature_menu.add_cascade(label=str(section["label"]), menu=submenu)
+        feature_button.configure(
+            command=lambda: feature_menu.tk_popup(
+                feature_button.winfo_rootx(),
+                feature_button.winfo_rooty() + feature_button.winfo_height(),
+            )
+        )
+        feature_button.pack(side="left", padx=(18, 0))
+        ttk.Button(
+            topbar,
+            text="模型设置",
+            command=self.configure_model_connection,
+            style="Quiet.TButton",
+        ).pack(side="left", padx=(6, 0))
+        ttk.Label(topbar, textvariable=self.editor_status_var, style="StatusPill.TLabel").pack(side="right")
+        ttk.Label(topbar, textvariable=self.autosave_status_var, style="StatusPill.TLabel").pack(side="right", padx=(0, 8))
+        ttk.Label(topbar, textvariable=self.model_status_var, style="StatusPill.TLabel").pack(side="right", padx=(0, 8))
 
-        header = ttk.Frame(self, padding=(24, 14, 24, 12), style="Settings.TFrame")
-        header.grid(row=1, column=0, columnspan=2, sticky="ew")
-        header.columnconfigure(2, weight=1)
-        ttk.Label(header, text=APP_TITLE, style="Title.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 22))
-        ttk.Label(header, text="项目库位置", style="SettingsLabel.TLabel").grid(row=0, column=1, sticky="e", padx=(0, 8))
-        self.root_var = tk.StringVar(value=str(self.projects_root))
-        ttk.Entry(header, textvariable=self.root_var, width=44).grid(row=0, column=2, sticky="ew", padx=(0, 10))
-        for offset, (label, command) in enumerate(
-            [
-                ("更改项目库", self.choose_data_root),
-                ("打开项目库", self.open_data_root),
-                ("刷新", self.refresh_all),
-            ],
-            start=3,
-        ):
-            ttk.Button(header, text=label, command=command).grid(row=0, column=offset, sticky="e", padx=(0, 8))
-
-        sidebar = ttk.Frame(self, padding=(18, 18, 12, 18), style="Sidebar.TFrame")
-        sidebar.grid(row=2, column=0, sticky="ns")
-        sidebar.rowconfigure(1, weight=1)
+        sidebar = ttk.Frame(self, padding=(16, 18, 14, 14), style="Sidebar.TFrame")
+        sidebar.grid(row=1, column=0, sticky="nsew", padx=(12, 6), pady=(10, 12))
+        sidebar.rowconfigure(3, weight=1)
         sidebar.columnconfigure(0, weight=1)
 
-        ttk.Label(sidebar, text="项目", style="SidebarLabel.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
-        self.project_tree = ttk.Treeview(sidebar, show="tree", selectmode="browse", height=23)
-        self.project_tree.grid(row=1, column=0, sticky="nsew")
+        ttk.Label(sidebar, text="作品与章节", style="SidebarTitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        search_row = ttk.Frame(sidebar, style="Sidebar.TFrame")
+        search_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        search_row.columnconfigure(0, weight=1)
+        self.project_search_var = tk.StringVar(value="")
+        search_entry = ttk.Entry(search_row, textvariable=self.project_search_var, width=16)
+        search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        search_entry.bind("<Return>", lambda _event: self.focus_tree_match())
+        ttk.Button(search_row, text="查找", command=self.focus_tree_match, style="Secondary.TButton").grid(row=0, column=1)
+
+        create_row = ttk.Frame(sidebar, style="Sidebar.TFrame")
+        create_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        create_row.columnconfigure(0, weight=1)
+        create_row.columnconfigure(1, weight=1)
+        ttk.Button(create_row, text="新建作品", command=self.create_project_dialog, style="Secondary.TButton").grid(
+            row=0, column=0, sticky="ew", padx=(0, 5)
+        )
+        ttk.Button(create_row, text="生成新章节", command=self.show_generate_draft_dialog, style="Primary.TButton").grid(
+            row=0, column=1, sticky="ew", padx=(5, 0)
+        )
+
+        self.project_tree = ttk.Treeview(sidebar, show="tree", selectmode="browse", height=8)
+        tree_scroll = ttk.Scrollbar(sidebar, orient="vertical", command=self.project_tree.yview)
+        self.project_tree.configure(yscrollcommand=tree_scroll.set)
+        self.project_tree.grid(row=3, column=0, sticky="nsew")
+        tree_scroll.grid(row=3, column=1, sticky="ns")
         self.project_tree.bind("<<TreeviewSelect>>", self.on_project_selected)
         self.project_tree.bind("<<TreeviewOpen>>", self.on_project_tree_open)
         self.project_tree.bind("<Double-1>", self.on_project_tree_double_click)
         self.project_tree.bind("<Button-3>", self.show_project_context_menu)
         self.project_tree.bind("<Button-2>", self.show_project_context_menu)
-        project_actions = ttk.Frame(sidebar, padding=(0, 12, 0, 0), style="Sidebar.TFrame")
-        project_actions.grid(row=2, column=0, sticky="ew")
-        project_actions.columnconfigure(0, weight=1)
-        quick_actions: list[tuple[str, Callable[[], None], str]] = [
-            ("生成草稿", self.show_generate_draft_dialog, "Primary.TButton"),
-            ("AI审稿", self.ai_review_current_draft, "Secondary.TButton"),
-            ("确认稿件", self.confirm_current_draft, "Secondary.TButton"),
-            ("要求重写（重新随机）", self.rewrite_current_draft, "Secondary.TButton"),
-            ("根据审稿精修", self.refine_current_draft_from_ai_review, "Secondary.TButton"),
-        ]
-        project_actions_list: list[tuple[str, Callable[[], None], str]] = [
-            ("新建作品", self.create_project_dialog, "Quiet.TButton"),
-            ("项目专属设置", self.show_project_generation_settings_dialog, "Quiet.TButton"),
-            ("打开作品文件夹", self.open_selected_project_folder, "Quiet.TButton"),
-        ]
-        row = 0
-        ttk.Label(project_actions, text="快捷操作", style="SidebarLabel.TLabel").grid(row=row, column=0, sticky="w", pady=(0, 8))
-        row += 1
-        for label, command, style_name in quick_actions:
-            ttk.Button(project_actions, text=label, command=command, style=style_name).grid(
-                row=row,
-                column=0,
-                sticky="ew",
-                pady=(0, 8),
-            )
-            row += 1
-        ttk.Label(project_actions, text="项目", style="SidebarLabel.TLabel").grid(row=row, column=0, sticky="w", pady=(6, 8))
-        row += 1
-        for label, command, style_name in project_actions_list:
-            ttk.Button(project_actions, text=label, command=command, style=style_name).grid(
-                row=row,
-                column=0,
-                sticky="ew",
-                pady=(0, 8),
-            )
-            row += 1
+        ttk.Label(
+            sidebar,
+            text="双击打开稿件 · 右键查看更多操作",
+            style="SidebarLabel.TLabel",
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
-        main_host = ttk.Frame(self, style="TFrame")
-        main_host.grid(row=2, column=1, sticky="nsew")
-        main_host.rowconfigure(0, weight=1)
-        main_host.columnconfigure(0, weight=1)
-        self.main_canvas = tk.Canvas(main_host, borderwidth=0, highlightthickness=0, background="#f6f7fb")
-        self.main_scrollbar = ttk.Scrollbar(main_host, orient="vertical", command=self.main_canvas.yview)
-        self.main_canvas.configure(yscrollcommand=self.on_main_canvas_scroll)
-        self.main_canvas.grid(row=0, column=0, sticky="nsew")
-        main = ttk.Frame(self.main_canvas, padding=(12, 18, 24, 18), style="TFrame")
-        main_window = self.main_canvas.create_window((0, 0), window=main, anchor="nw")
-        main.bind("<Configure>", lambda event: self.update_main_scroll_region())
-        self.main_canvas.bind(
-            "<Configure>",
-            lambda event: (
-                self.main_canvas.itemconfigure(main_window, width=event.width),
-                self.update_main_scroll_region(),
-            )
-            if self.main_canvas
-            else None,
-        )
-        main.columnconfigure(0, weight=1)
-        main.columnconfigure(1, weight=1)
-        main.rowconfigure(0, weight=0, minsize=150)
-        main.rowconfigure(1, weight=24, minsize=380)
-        main.rowconfigure(2, weight=0, minsize=86)
+        editor = ttk.Frame(self, padding=(0, 0, 0, 0), style="Editor.TFrame")
+        editor.grid(row=1, column=1, sticky="nsew", padx=6, pady=(10, 12))
+        editor.columnconfigure(0, weight=1)
+        editor.rowconfigure(2, weight=1)
+        editor_header = ttk.Frame(editor, padding=(24, 18, 20, 6), style="Editor.TFrame")
+        editor_header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        editor_header.columnconfigure(0, weight=1)
+        self.draft_meta_var = tk.StringVar(value="选择章节或生成新章节")
+        ttk.Label(editor_header, textvariable=self.draft_meta_var, style="EditorTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Button(editor_header, text="上一版", command=self.show_previous_draft_version, style="Quiet.TButton").grid(row=0, column=1, padx=(6, 0))
+        ttk.Button(editor_header, text="下一版", command=self.show_next_draft_version, style="Quiet.TButton").grid(row=0, column=2, padx=(6, 0))
 
-        self.summary_frame = self._panel(main, row=0, column=0, title="项目状态")
-        self.summary_text = tk.StringVar(value="请选择一个项目。")
-        self.summary_label = ttk.Label(
-            self.summary_frame,
-            textvariable=self.summary_text,
-            style="PanelText.TLabel",
-            justify="left",
-            wraplength=470,
-        )
-        self.summary_label.grid(row=1, column=0, sticky="nw", padx=18, pady=(4, 18))
+        editor_actions = ttk.Frame(editor_header, style="Editor.TFrame")
+        editor_actions.grid(row=1, column=0, columnspan=3, sticky="e", pady=(12, 0))
+        quick_action_commands = {
+            "rewrite_draft": self.rewrite_current_draft,
+            "refine_draft": self.refine_current_draft_from_ai_review,
+            "ai_review": self.ai_review_current_draft,
+            "confirm_draft": self.confirm_current_draft,
+        }
+        quick_action_styles = {
+            "rewrite_draft": "Secondary.TButton",
+            "refine_draft": "Primary.TButton",
+            "ai_review": "Primary.TButton",
+            "confirm_draft": "Confirm.TButton",
+        }
+        for index, (action, label) in enumerate(EDITOR_QUICK_ACTIONS):
+            ttk.Button(
+                editor_actions,
+                text=label,
+                command=quick_action_commands[action],
+                style=quick_action_styles[action],
+            ).pack(side="left", padx=((0 if index == 0 else 6), 0))
 
-        self.provider_frame = self._panel(main, row=0, column=1, title="模型服务")
-        self.provider_frame.rowconfigure(1, weight=1)
-        self.provider_body = tk.Text(
-            self.provider_frame,
-            height=9,
-            wrap="word",
-            borderwidth=0,
-            font=("Microsoft YaHei UI", 10),
-            foreground="#273043",
-            background="#fbfcff",
-            padx=8,
-            pady=6,
-        )
-        provider_scroll = ttk.Scrollbar(self.provider_frame, orient="vertical", command=self.provider_body.yview)
-        self.provider_body.configure(yscrollcommand=provider_scroll.set)
-        self.provider_body.grid(row=1, column=0, sticky="nsew", padx=(18, 0), pady=(4, 18))
-        provider_scroll.grid(row=1, column=1, sticky="ns", padx=(0, 18), pady=(4, 18))
-        self.set_provider_summary("模型服务默认不会自动联网。")
-
-        draft_panel = self._panel(main, row=1, column=0, columnspan=2, title="稿件浏览与确认")
-        draft_panel.rowconfigure(3, weight=1, minsize=260)
-        draft_panel.columnconfigure(0, weight=1)
-        self.draft_meta_var = tk.StringVar(value="生成草稿后会在这里显示；也可以展开左侧项目下的确认章节查看。")
-        ttk.Label(draft_panel, textvariable=self.draft_meta_var, style="PanelText.TLabel").grid(
-            row=1,
-            column=0,
-            sticky="ew",
-            padx=18,
-            pady=(0, 2),
-        )
-        self.draft_hint_var = tk.StringVar(value="编辑会自动保存到当前项目文件夹。")
-        ttk.Label(draft_panel, textvariable=self.draft_hint_var, style="Subtle.TLabel").grid(
-            row=2,
-            column=0,
-            sticky="ew",
-            padx=18,
-            pady=(0, 8),
+        self.draft_hint_var = tk.StringVar(value="编辑会自动保存；AI 操作只在你明确点击时调用模型。")
+        ttk.Label(editor, textvariable=self.draft_hint_var, style="Subtle.TLabel").grid(
+            row=1, column=0, columnspan=2, sticky="ew", padx=24, pady=(2, 8)
         )
         self.draft_body = tk.Text(
-            draft_panel,
-            height=16,
+            editor,
+            height=8,
+            width=38,
             wrap="word",
             borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=PALETTE["border"],
+            highlightcolor=PALETTE["accent"],
             undo=True,
             maxundo=200,
             autoseparators=True,
-            font=("Microsoft YaHei UI", 12),
-            foreground="#1f2937",
-            background="#fbfcff",
+            font=(FONT_FAMILY, 13),
+            foreground=PALETTE["ink"],
+            background=PALETTE["surface"],
+            selectbackground=PALETTE["select_bg"],
+            selectforeground=PALETTE["select_fg"],
+            insertbackground=PALETTE["accent"],
             insertwidth=2,
-            padx=12,
-            pady=10,
+            padx=40,
+            pady=24,
+            spacing1=5,
+            spacing3=10,
         )
-        draft_scroll = ttk.Scrollbar(draft_panel, orient="vertical", command=self.draft_body.yview)
+        draft_scroll = ttk.Scrollbar(editor, orient="vertical", command=self.draft_body.yview)
         self.draft_body.configure(yscrollcommand=draft_scroll.set)
-        self.draft_body.grid(row=3, column=0, sticky="nsew", padx=(18, 0), pady=(0, 8))
-        draft_scroll.grid(row=3, column=1, sticky="ns", padx=(0, 18), pady=(0, 8))
+        self.draft_body.grid(row=2, column=0, sticky="nsew", padx=(24, 6), pady=(8, 20))
+        draft_scroll.grid(row=2, column=1, sticky="ns", padx=(0, 14), pady=(8, 20))
         self.draft_body.insert("1.0", "暂无稿件。")
         self.draft_body.configure(state="disabled")
         self.draft_body.bind("<<Modified>>", self.on_draft_text_modified)
-        draft_buttons = ttk.Frame(draft_panel)
-        draft_buttons.grid(row=4, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 14))
-        ttk.Button(draft_buttons, text="前一版", command=self.show_previous_draft_version).pack(side="left", padx=(0, 8))
-        ttk.Button(draft_buttons, text="下一版", command=self.show_next_draft_version).pack(side="left", padx=(0, 16))
-        ttk.Button(draft_buttons, text="保存编辑", command=self.save_current_draft_edit, style="Secondary.TButton").pack(side="left", padx=(0, 8))
-        ttk.Button(draft_buttons, text="AI审稿", command=self.ai_review_current_draft, style="Secondary.TButton").pack(side="left", padx=(0, 8))
-        ttk.Button(draft_buttons, text="确认稿件", command=self.confirm_current_draft, style="Primary.TButton").pack(side="right", padx=(8, 0))
-        ttk.Button(draft_buttons, text="根据审稿精修", command=self.refine_current_draft_from_ai_review, style="Secondary.TButton").pack(
-            side="right",
-            padx=(8, 0),
+        inspector = ttk.Frame(self, padding=(18, 20, 16, 16), style="Inspector.TFrame")
+        inspector.grid(row=1, column=2, sticky="nsew", padx=(6, 12), pady=(10, 12))
+        inspector.columnconfigure(0, weight=1)
+        ttk.Label(inspector, text="本章目标", style="InspectorTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.summary_text = tk.StringVar(value="选择作品后显示章节与草稿概览。")
+        self.summary_label = ttk.Label(
+            inspector,
+            textvariable=self.summary_text,
+            style="InspectorText.TLabel",
+            justify="left",
+            wraplength=176,
         )
-        ttk.Button(draft_buttons, text="要求重写（重新随机）", command=self.rewrite_current_draft, style="Quiet.TButton").pack(side="right")
+        self.summary_label.grid(row=1, column=0, sticky="nw", pady=(10, 14))
+        target_actions = ttk.Frame(inspector, style="Inspector.TFrame")
+        target_actions.grid(row=2, column=0, sticky="ew", pady=(0, 16))
+        target_actions.columnconfigure(0, weight=1)
+        ttk.Button(target_actions, text="大纲与章节", command=self.show_planning_library, style="Secondary.TButton").grid(
+            row=0, column=0, sticky="ew"
+        )
+        ttk.Button(target_actions, text="世界观与人物", command=self.show_world_materials, style="Secondary.TButton").grid(
+            row=1, column=0, sticky="ew", pady=(6, 0)
+        )
 
-        log_panel = self._panel(main, row=2, column=0, columnspan=2, title="运行记录")
-        log_panel.rowconfigure(1, weight=1)
-        log_panel.columnconfigure(0, weight=1)
-        self.log = tk.Text(
-            log_panel,
-            height=3,
-            wrap="word",
-            borderwidth=0,
-            font=("Consolas", 10),
-            foreground="#273043",
-            background="#fbfcff",
+        ttk.Separator(inspector, orient="horizontal").grid(row=3, column=0, sticky="ew", pady=(0, 16))
+        ttk.Label(inspector, text="上下文", style="InspectorTitle.TLabel").grid(row=4, column=0, sticky="w")
+        self.context_info_var = tk.StringVar(value="记忆库、资料和前文章节会在生成前按预算组装。")
+        ttk.Label(
+            inspector,
+            textvariable=self.context_info_var,
+            style="InspectorText.TLabel",
+            justify="left",
+            wraplength=176,
+        ).grid(row=5, column=0, sticky="nw", pady=(10, 10))
+        context_actions = ttk.Frame(inspector, style="Inspector.TFrame")
+        context_actions.grid(row=6, column=0, sticky="ew")
+        context_actions.columnconfigure(0, weight=1)
+        ttk.Button(context_actions, text="查看全部上下文", command=self.summarize_project_context, style="Secondary.TButton").grid(
+            row=0, column=0, sticky="ew"
         )
-        self.log.grid(row=1, column=0, sticky="nsew", padx=18, pady=(4, 18))
+        ttk.Button(context_actions, text="记忆库", command=self.show_memory_bank, style="Secondary.TButton").grid(
+            row=1, column=0, sticky="ew", pady=(6, 0)
+        )
+
+        self.root_var = tk.StringVar(value=str(self.projects_root))
+        self.log = tk.Text(self)
+        self.refresh_editor_status()
         self.write_log("启动完成。保存模型配置不会联网；点击测试连接或生成草稿时才会联网。")
+
+    def focus_tree_match(self) -> None:
+        query = self.project_search_var.get().strip().casefold()
+        if not query:
+            return
+
+        def walk(parent: str = "") -> list[str]:
+            matches: list[str] = []
+            for child in self.project_tree.get_children(parent):
+                text = str(self.project_tree.item(child, "text") or "")
+                if query in text.casefold():
+                    matches.append(child)
+                matches.extend(walk(child))
+            return matches
+
+        matches = walk()
+        if not matches:
+            self.autosave_status_var.set("未找到匹配项")
+            return
+        current = str(self.project_tree.selection()[0]) if self.project_tree.selection() else ""
+        target = matches[0]
+        if current in matches:
+            target = matches[(matches.index(current) + 1) % len(matches)]
+        parent = self.project_tree.parent(target)
+        while parent:
+            self.project_tree.item(parent, open=True)
+            parent = self.project_tree.parent(parent)
+        self.project_tree.selection_set(target)
+        self.project_tree.focus(target)
+        self.project_tree.see(target)
+
+    def undo_draft_edit(self) -> None:
+        try:
+            self.draft_body.edit_undo()
+        except tk.TclError:
+            return
+
+    def redo_draft_edit(self) -> None:
+        try:
+            self.draft_body.edit_redo()
+        except tk.TclError:
+            return
+
+    def refresh_editor_status(self) -> None:
+        if not hasattr(self, "draft_body") or not hasattr(self, "editor_status_var"):
+            return
+        try:
+            content = self.draft_body.get("1.0", "end-1c")
+        except tk.TclError:
+            content = ""
+        self.editor_status_var.set(f"字数：{visible_character_count(content):,}")
+
+    def refresh_project_overview(self, project_id: str) -> None:
+        project_title = next(
+            (
+                str(item.get("title") or project_id)
+                for item in self.projects
+                if str(item.get("project_id") or "") == project_id
+            ),
+            project_id,
+        )
+        self.current_project_var.set(project_title)
+        try:
+            state = self.app.project_state(project_id)
+        except Exception as exc:
+            self.summary_text.set("作品概览暂时无法读取，仍可从左侧打开章节。")
+            self.context_info_var.set("上下文统计暂不可用。")
+            self.model_status_var.set("模型状态未知")
+            self.write_log(f"作品轻量概览读取失败: project={project_id} reason={exc}")
+            return
+
+        self.summary_text.set(
+            "\n".join(
+                [
+                    f"章节 {state.get('chapter_count', 0)} · 草稿 {state.get('draft_count', 0)}",
+                    f"已确认 {state.get('committed_chapter_count', 0)} · 审稿 {state.get('review_count', 0)}",
+                    "作品数据保存在当前本地项目库。",
+                ]
+            )
+        )
+        self.context_info_var.set(
+            "\n".join(
+                [
+                    f"大纲与资料 {state.get('planning_item_count', 0)} 项",
+                    f"记忆库 {state.get('memory_bank_item_count', 0)} 项",
+                    "生成前会按预算组装，不会自动联网。",
+                ]
+            )
+        )
+        roles = state.get("provider_roles") if isinstance(state.get("provider_roles"), dict) else {}
+        configured_count = sum(1 for role, _label in MODEL_ROLE_OPTIONS if bool((roles.get(role) or {}).get("configured")))
+        self.model_status_var.set(f"模型 {configured_count}/{len(MODEL_ROLE_OPTIONS)} 已配置")
+        self.set_provider_summary(format_provider_roles_compact(roles))
 
     def top_nav_command(self, action: str) -> Any:
         commands = {
@@ -512,6 +1096,11 @@ class WorkbenchDesktopApp(tk.Tk):
             "generate_draft": self.show_generate_draft_dialog,
             "review_rewrite": self.show_review_rewrite,
             "confirmed_chapters": self.show_confirmed_chapters,
+            "save_draft": self.save_current_draft_edit,
+            "undo_draft": self.undo_draft_edit,
+            "redo_draft": self.redo_draft_edit,
+            "rewrite_draft": self.rewrite_current_draft,
+            "refine_draft": self.refine_current_draft_from_ai_review,
             "planning_library": self.show_planning_library,
             "world_materials": self.show_world_materials,
             "memory_bank": self.show_memory_bank,
@@ -563,8 +1152,6 @@ class WorkbenchDesktopApp(tk.Tk):
 
     def refresh_all(self) -> None:
         self.refresh_projects()
-        if self.selected_project_id:
-            self.run_project_health(silent=True)
 
     def refresh_projects(self) -> None:
         previous_project_id = self.selected_project_id
@@ -582,7 +1169,7 @@ class WorkbenchDesktopApp(tk.Tk):
             title = str(item.get("title") or project_id)
             node_id = project_node_id(project_id)
             self.project_tree.insert("", "end", iid=node_id, text=f"{title}  ({project_id})", open=False)
-            self.load_project_work_nodes(project_id)
+            self.project_tree.insert(node_id, "end", iid=project_placeholder_node_id(project_id), text="展开查看章节")
         if self.projects:
             project_ids = {str(item.get("project_id") or "") for item in self.projects}
             target_project_id = previous_project_id if previous_project_id in project_ids else str(self.projects[0].get("project_id") or "")
@@ -592,7 +1179,10 @@ class WorkbenchDesktopApp(tk.Tk):
             self.on_project_selected()
         else:
             self.selected_project_id = ""
+            self.current_project_var.set("未选择作品")
+            self.model_status_var.set("模型待配置")
             self.summary_text.set("当前项目库还没有作品。可以点击“新建作品”。")
+            self.context_info_var.set("创建作品后可管理大纲、资料与记忆库。")
             self.set_provider_summary("模型服务默认不会自动联网。")
 
     def on_project_selected(self, event: object | None = None) -> None:
@@ -603,7 +1193,7 @@ class WorkbenchDesktopApp(tk.Tk):
         if kind not in {"project", "chapter", "draft"} or not project_id:
             return
         self.selected_project_id = project_id
-        self.run_project_health(silent=True)
+        self.refresh_project_overview(project_id)
         if kind == "chapter" and item_id:
             self.show_chapter_browser(project_id, item_id)
         elif kind == "draft" and item_id:
@@ -986,25 +1576,28 @@ class WorkbenchDesktopApp(tk.Tk):
         prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
         sampling = settings.get("sampling") if isinstance(settings.get("sampling"), dict) else {}
         context_settings = settings.get("context") if isinstance(settings.get("context"), dict) else {}
-        dialog = tk.Toplevel(self)
-        dialog.title("生成草稿")
-        dialog.transient(self)
-        dialog.geometry("620x460")
+        dialog = self._secondary_window("生成草稿", geometry="700x560", minsize=(620, 500))
         dialog.columnconfigure(1, weight=1)
-        dialog.rowconfigure(3, weight=1)
+        dialog.rowconfigure(4, weight=1)
+        self._dialog_header(
+            dialog,
+            "生成新章节",
+            "先确认章节与本次写作目标，再预览将发送给模型的结构；只有点击生成后才会联网。",
+        ).grid(row=0, column=0, columnspan=2, sticky="ew")
 
         try:
             chapter_var = tk.StringVar(value=suggest_next_chapter_id(self.app.list_chapters(project_id)))
         except Exception:
             chapter_var = tk.StringVar(value="chapter_001")
         title_var = tk.StringVar(value="")
-        ttk.Label(dialog, text="章节 ID").grid(row=0, column=0, sticky="e", padx=(18, 10), pady=(18, 8))
-        ttk.Entry(dialog, textvariable=chapter_var, width=44).grid(row=0, column=1, sticky="ew", padx=(0, 18), pady=(18, 8))
-        ttk.Label(dialog, text="章节标题").grid(row=1, column=0, sticky="e", padx=(18, 10), pady=8)
-        ttk.Entry(dialog, textvariable=title_var, width=44).grid(row=1, column=1, sticky="ew", padx=(0, 18), pady=8)
-        ttk.Label(dialog, text="本次要求").grid(row=2, column=0, sticky="ne", padx=(18, 10), pady=8)
+        ttk.Label(dialog, text="章节 ID").grid(row=1, column=0, sticky="e", padx=(20, 10), pady=(16, 8))
+        ttk.Entry(dialog, textvariable=chapter_var, width=44).grid(row=1, column=1, sticky="ew", padx=(0, 20), pady=(16, 8))
+        ttk.Label(dialog, text="章节标题").grid(row=2, column=0, sticky="e", padx=(20, 10), pady=8)
+        ttk.Entry(dialog, textvariable=title_var, width=44).grid(row=2, column=1, sticky="ew", padx=(0, 20), pady=8)
+        ttk.Label(dialog, text="本次要求").grid(row=3, column=0, sticky="ne", padx=(20, 10), pady=8)
         prompt_box = tk.Text(dialog, height=12, wrap="word")
-        prompt_box.grid(row=2, column=1, rowspan=2, sticky="nsew", padx=(0, 18), pady=8)
+        self._style_text_widget(prompt_box)
+        prompt_box.grid(row=3, column=1, rowspan=2, sticky="nsew", padx=(0, 20), pady=8)
         prompt_box.insert("1.0", str(prompting.get("default_user_prompt") or ""))
         status_var = tk.StringVar(
             value="生成前会按当前创作设置拼装提示词和资料；保存设置不会联网，点击生成草稿会调用当前模型服务。"
@@ -1015,9 +1608,10 @@ class WorkbenchDesktopApp(tk.Tk):
             wraplength=560,
             justify="left",
         )
-        note.grid(row=4, column=0, columnspan=2, sticky="ew", padx=18, pady=(8, 12))
-        button_row = ttk.Frame(dialog)
-        button_row.grid(row=5, column=0, columnspan=2, sticky="e", padx=18, pady=(0, 18))
+        note.configure(style="DialogHint.TLabel")
+        note.grid(row=5, column=0, columnspan=2, sticky="ew", padx=20, pady=(8, 12))
+        button_row = ttk.Frame(dialog, style="DialogFooter.TFrame")
+        button_row.grid(row=6, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 18))
         generating = {"active": False}
 
         def set_generating(active: bool) -> None:
@@ -1126,11 +1720,11 @@ class WorkbenchDesktopApp(tk.Tk):
                 return
             self.show_text_window("将发送给模型的结构预览", format_prompt_preview(render), parent=dialog)
 
-        cancel_button = ttk.Button(button_row, text="取消", command=close_dialog)
+        cancel_button = ttk.Button(button_row, text="取消", command=close_dialog, style="Secondary.TButton")
         cancel_button.pack(side="right", padx=(8, 0))
-        generate_button = ttk.Button(button_row, text="生成草稿", command=generate)
+        generate_button = ttk.Button(button_row, text="生成草稿", command=generate, style="Primary.TButton")
         generate_button.pack(side="right")
-        preview_button = ttk.Button(button_row, text="预览格式", command=preview)
+        preview_button = ttk.Button(button_row, text="预览格式", command=preview, style="Quiet.TButton")
         preview_button.pack(side="right", padx=(0, 8))
         dialog.protocol("WM_DELETE_WINDOW", close_dialog)
         dialog.grab_set()
@@ -1144,14 +1738,16 @@ class WorkbenchDesktopApp(tk.Tk):
         self.current_draft_ids = []
         self.current_draft_index = -1
         self.current_draft_loading = True
-        self.draft_meta_var.set(f"{project_id} / {chapter_id}    正在生成草稿...")
-        self.draft_hint_var.set(f"标题: {title or '-'}    模型返回会实时写入下方编辑区，完成保存后可直接修改。")
+        self.draft_meta_var.set(f"{chapter_id} · {title or '未命名章节'}")
+        self.draft_hint_var.set("正在生成草稿 · 模型返回会实时写入编辑区")
+        self.autosave_status_var.set("正在生成…")
         self.draft_body.configure(state="normal")
         self.draft_body.delete("1.0", tk.END)
         self.draft_body.insert("1.0", "")
         self.draft_body.edit_modified(False)
         self.draft_body.configure(state="disabled")
         self.current_draft_loading = False
+        self.refresh_editor_status()
 
     def reset_thinking_stream_window(self) -> None:
         if self.thinking_window is not None:
@@ -1174,10 +1770,11 @@ class WorkbenchDesktopApp(tk.Tk):
     def show_thinking_stream_window(self, project_id: str, chapter_id: str) -> None:
         if self.thinking_stream_window_exists():
             return
-        window = tk.Toplevel(self)
-        window.title("模型 <think> 流式输出")
-        window.geometry("560x340")
-        window.minsize(420, 240)
+        window = self._secondary_window(
+            "模型思考过程",
+            geometry="620x400",
+            minsize=(460, 300),
+        )
         window.columnconfigure(0, weight=1)
         window.rowconfigure(1, weight=1)
         ttk.Label(
@@ -1194,6 +1791,7 @@ class WorkbenchDesktopApp(tk.Tk):
             padx=10,
             pady=8,
         )
+        self._style_text_widget(body, monospace=True)
         scrollbar = ttk.Scrollbar(window, orient="vertical", command=body.yview)
         body.configure(yscrollcommand=scrollbar.set)
         body.grid(row=1, column=0, sticky="nsew", padx=(12, 0), pady=(0, 12))
@@ -1239,6 +1837,7 @@ class WorkbenchDesktopApp(tk.Tk):
         self.draft_body.edit_modified(False)
         self.draft_body.configure(state="disabled")
         self.current_draft_loading = False
+        self.refresh_editor_status()
 
     def finish_live_draft_generation(
         self,
@@ -1251,8 +1850,9 @@ class WorkbenchDesktopApp(tk.Tk):
             return
         self.live_generation_key = None
         if error is not None:
-            self.draft_meta_var.set(f"{project_id} / {chapter_id}    生成失败，尚未保存为正式草稿。")
+            self.draft_meta_var.set(f"{chapter_id} · 生成失败")
             self.draft_hint_var.set("当前窗口里如果已有部分返回内容，可手动复制保留。")
+            self.autosave_status_var.set("生成失败")
             self.draft_body.configure(state="normal")
 
     def show_chapter_browser(self, project_id: str, chapter_id: str) -> None:
@@ -1283,6 +1883,8 @@ class WorkbenchDesktopApp(tk.Tk):
         self.draft_body.edit_modified(False)
         self.draft_body.configure(state="disabled")
         self.current_draft_loading = False
+        self.autosave_status_var.set("已保存")
+        self.refresh_editor_status()
 
     def show_draft_workspace(self, project_id: str, draft_id: str) -> None:
         if not draft_id:
@@ -1305,14 +1907,16 @@ class WorkbenchDesktopApp(tk.Tk):
         version_label = str(draft.get("version_label") or draft_version_text(draft, self.current_draft_index))
         status = str(draft.get("status") or "")
         title = str(draft.get("title") or chapter_id)
-        self.draft_meta_var.set(f"{project_id} / {chapter_id} / {version_label}")
-        self.draft_hint_var.set(f"状态: {draft_status_label(status)}    标题: {title or '-'}    编辑会自动保存到当前项目文件夹。")
+        self.draft_meta_var.set(f"{chapter_id} · {title or '未命名章节'}")
+        self.draft_hint_var.set(f"{version_label} · {draft_status_label(status)} · 编辑会自动保存到当前作品")
         self.current_draft_loading = True
         self.draft_body.configure(state="normal")
         self.draft_body.delete("1.0", tk.END)
         self.draft_body.insert("1.0", str(draft.get("content") or ""))
         self.draft_body.edit_modified(False)
         self.current_draft_loading = False
+        self.autosave_status_var.set("已自动保存")
+        self.refresh_editor_status()
         self.write_log(f"打开稿件: project={project_id} draft_id={draft_id} {version_label}")
 
     def readable_draft_summaries(self, project_id: str, *, chapter_id: str = "") -> list[dict[str, Any]]:
@@ -1408,8 +2012,10 @@ class WorkbenchDesktopApp(tk.Tk):
         if not self.draft_body.edit_modified():
             return
         self.draft_body.edit_modified(False)
+        self.refresh_editor_status()
         if not self.current_draft_project_id or self.current_draft_index < 0:
             return
+        self.autosave_status_var.set("保存中…")
         if self.current_draft_autosave_job is not None:
             self.after_cancel(self.current_draft_autosave_job)
         self.current_draft_autosave_job = self.after(900, lambda: self.save_current_draft_edit(silent=True))
@@ -1423,12 +2029,14 @@ class WorkbenchDesktopApp(tk.Tk):
         try:
             result = self.app.update_draft_content(self.current_draft_project_id, draft_id, text=text)
         except Exception as exc:
+            self.autosave_status_var.set("保存失败")
             if not silent:
                 messagebox.showerror(APP_TITLE, f"保存编辑失败:\n{exc}")
             self.write_log(f"保存编辑失败: {exc}")
             return
         if not silent:
             messagebox.showinfo(APP_TITLE, "编辑已保存。")
+        self.autosave_status_var.set("已自动保存" if silent else "已保存")
         synced = str(result.get("synced_confirmed_chapter") or "")
         suffix = f" synced_confirmed={synced}" if synced else ""
         self.write_log(f"编辑已保存: draft_id={draft_id}{suffix}")
@@ -1530,7 +2138,7 @@ class WorkbenchDesktopApp(tk.Tk):
                 f"AI审稿完成: project={project_id} draft_id={draft_id} "
                 f"review_id={result.get('review_id')} status={result.get('status')}"
             )
-            self.run_project_health(silent=True)
+            self.refresh_project_overview(project_id)
             self.load_project_work_nodes(project_id)
             self.add_text_window_action(
                 review_window,
@@ -2099,10 +2707,7 @@ class WorkbenchDesktopApp(tk.Tk):
         self.show_outline_chapter_plan_window(project_id)
 
     def show_outline_chapter_plan_window(self, project_id: str) -> None:
-        window = tk.Toplevel(self)
-        window.title("大纲与章节")
-        window.transient(self)
-        window.geometry("960x620")
+        window = self._secondary_window("大纲与章节", geometry="1040x680", minsize=(860, 560))
         window.columnconfigure(1, weight=1)
         window.rowconfigure(1, weight=1)
 
@@ -2158,6 +2763,7 @@ class WorkbenchDesktopApp(tk.Tk):
         adherence_box.grid(row=4, column=1, sticky="ew", pady=8)
 
         content_box = tk.Text(editor, wrap="word", height=18)
+        self._style_text_widget(content_box)
         content_box.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(8, 8))
         ttk.Checkbutton(editor, text="加入生成上下文", variable=include_context_var).grid(
             row=6, column=0, columnspan=2, sticky="w", pady=(0, 8)
@@ -2286,7 +2892,7 @@ class WorkbenchDesktopApp(tk.Tk):
                 return
             clear_editor(item_type="outline")
 
-        button_row = ttk.Frame(window)
+        button_row = ttk.Frame(window, style="DialogFooter.TFrame")
         button_row.grid(row=2, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 14))
         ttk.Button(button_row, text="新增章节计划", command=lambda: clear_editor(item_type="chapter_plan")).pack(
             side="left", padx=(0, 8)
@@ -2296,8 +2902,8 @@ class WorkbenchDesktopApp(tk.Tk):
         )
         ttk.Button(button_row, text="切换加入上下文", command=toggle_context).pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="刷新", command=refresh).pack(side="left", padx=(0, 8))
-        ttk.Button(button_row, text="保存当前", command=save_current).pack(side="right", padx=(8, 0))
-        ttk.Button(button_row, text="关闭", command=window.destroy).pack(side="right")
+        ttk.Button(button_row, text="保存当前", command=save_current, style="Primary.TButton").pack(side="right", padx=(8, 0))
+        ttk.Button(button_row, text="关闭", command=window.destroy, style="Secondary.TButton").pack(side="right")
 
         plan_tree.bind("<<TreeviewSelect>>", on_select)
         refresh()
@@ -2327,10 +2933,7 @@ class WorkbenchDesktopApp(tk.Tk):
         item_types: set[str],
         actions: tuple[tuple[str, str], ...],
     ) -> None:
-        window = tk.Toplevel(self)
-        window.title(title)
-        window.transient(self)
-        window.geometry("980x620")
+        window = self._secondary_window(title, geometry="1040x680", minsize=(860, 560))
         window.columnconfigure(1, weight=1)
         window.rowconfigure(1, weight=1)
 
@@ -2372,6 +2975,7 @@ class WorkbenchDesktopApp(tk.Tk):
         detail_frame.columnconfigure(0, weight=1)
         ttk.Label(detail_frame, text="选中资料内容").grid(row=0, column=0, sticky="w", pady=(0, 6))
         detail_box = tk.Text(detail_frame, wrap="word", font=("Consolas", 10), borderwidth=0)
+        self._style_text_widget(detail_box, monospace=True)
         detail_scrollbar = ttk.Scrollbar(detail_frame, orient="vertical", command=detail_box.yview)
         detail_box.configure(yscrollcommand=detail_scrollbar.set)
         detail_box.grid(row=1, column=0, sticky="nsew")
@@ -2503,14 +3107,14 @@ class WorkbenchDesktopApp(tk.Tk):
             self.write_log(f"资料库删除条目: project={project_id} planning_id={result.get('planning_id')}")
             refresh(update_project_state=True)
 
-        button_row = ttk.Frame(window)
+        button_row = ttk.Frame(window, style="DialogFooter.TFrame")
         button_row.grid(row=2, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 14))
         for label, item_type in actions:
             ttk.Button(button_row, text=label, command=open_editor_for_type(item_type)).pack(side="left", padx=(0, 8))
-        ttk.Button(button_row, text="编辑选中", command=edit_selected).pack(side="left", padx=(0, 8))
+        ttk.Button(button_row, text="编辑选中", command=edit_selected, style="Primary.TButton").pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="删除选中", command=delete_selected).pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="刷新", command=lambda: refresh()).pack(side="left", padx=(0, 8))
-        ttk.Button(button_row, text="关闭", command=window.destroy).pack(side="right")
+        ttk.Button(button_row, text="关闭", command=window.destroy, style="Secondary.TButton").pack(side="right")
 
         record_tree.bind("<<TreeviewSelect>>", on_select)
         record_tree.bind("<Double-1>", lambda event: edit_selected())
@@ -2524,10 +3128,7 @@ class WorkbenchDesktopApp(tk.Tk):
         self.show_memory_bank_window(project_id)
 
     def show_memory_bank_window(self, project_id: str) -> None:
-        window = tk.Toplevel(self)
-        window.title("记忆银行")
-        window.transient(self)
-        window.geometry("1080x700")
+        window = self._secondary_window("记忆银行", geometry="1160x740", minsize=(920, 620))
         window.columnconfigure(1, weight=1)
         window.rowconfigure(3, weight=1)
 
@@ -2606,6 +3207,7 @@ class WorkbenchDesktopApp(tk.Tk):
         text_frame.rowconfigure(0, weight=1)
         text_frame.columnconfigure(0, weight=1)
         text_box = tk.Text(text_frame, wrap="word", height=22, undo=True)
+        self._style_text_widget(text_box)
         text_box.grid(row=0, column=0, sticky="nsew")
         text_scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_box.yview)
         text_scrollbar.grid(row=0, column=1, sticky="ns")
@@ -3238,13 +3840,18 @@ class WorkbenchDesktopApp(tk.Tk):
         ttk.Button(select_buttons, text="全选", command=check_all_chapters).pack(side="left", padx=(0, 6))
         ttk.Button(select_buttons, text="清空", command=clear_checked_chapters).pack(side="left")
 
-        button_row = ttk.Frame(window)
+        button_row = ttk.Frame(window, style="DialogFooter.TFrame")
         button_row.grid(row=4, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 14))
         update_prompt_button = ttk.Button(button_row, text="生成更新记忆提示词", command=show_memory_update_prompt)
         update_prompt_button.pack(side="left", padx=(0, 8))
         api_preview_button = ttk.Button(button_row, text="查看API发送结构", command=show_memory_api_request_preview)
         api_preview_button.pack(side="left", padx=(0, 8))
-        api_generate_button = ttk.Button(button_row, text="发送给AI生成记忆", command=generate_memory_via_api)
+        api_generate_button = ttk.Button(
+            button_row,
+            text="发送给AI生成记忆",
+            command=generate_memory_via_api,
+            style="Primary.TButton",
+        )
         api_generate_button.pack(side="left", padx=(0, 8))
         compression_prompt_button = ttk.Button(button_row, text="生成缩写提示词", command=show_memory_compression_prompt)
         compression_prompt_button.pack(side="left", padx=(0, 8))
@@ -3257,7 +3864,7 @@ class WorkbenchDesktopApp(tk.Tk):
             command=lambda: refresh() if confirm_discard_unsaved("刷新窗口") else None,
         ).pack(side="left", padx=(0, 8))
         ttk.Button(button_row, text="保存加入上下文设置", command=save_lifecycle).pack(side="left", padx=(0, 8))
-        ttk.Button(button_row, text="保存记忆正文", command=save_text).pack(side="right", padx=(8, 0))
+        ttk.Button(button_row, text="保存记忆正文", command=save_text, style="Confirm.TButton").pack(side="right", padx=(8, 0))
         ttk.Button(
             button_row,
             text="关闭",
@@ -3381,10 +3988,7 @@ class WorkbenchDesktopApp(tk.Tk):
             reset_label = "恢复出厂默认"
             save_path_text = f"保存位置：{self.projects_root / 'global_settings.json'}"
 
-        dialog = tk.Toplevel(self)
-        dialog.title(title)
-        dialog.transient(self)
-        dialog.geometry("820x720")
+        dialog = self._secondary_window(title, geometry="900x740", minsize=(760, 620))
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(2, weight=1)
 
@@ -3417,9 +4021,11 @@ class WorkbenchDesktopApp(tk.Tk):
         prompt_tab.rowconfigure(3, weight=1)
         ttk.Label(prompt_tab, text="系统提示词").grid(row=0, column=0, sticky="ne", padx=(14, 10), pady=(14, 6))
         system_box = tk.Text(prompt_tab, wrap="word", height=10)
+        self._style_text_widget(system_box)
         system_box.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(0, 14), pady=(14, 8))
         ttk.Label(prompt_tab, text="默认写作要求").grid(row=2, column=0, sticky="ne", padx=(14, 10), pady=8)
         user_box = tk.Text(prompt_tab, wrap="word", height=8)
+        self._style_text_widget(user_box)
         user_box.grid(row=2, column=1, rowspan=2, sticky="nsew", padx=(0, 14), pady=8)
 
         params_tab.columnconfigure(1, weight=1)
@@ -3493,6 +4099,7 @@ class WorkbenchDesktopApp(tk.Tk):
         review_system_frame.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 10))
         review_system_frame.columnconfigure(0, weight=1)
         review_system_box = tk.Text(review_system_frame, wrap="word", height=3, undo=True)
+        self._style_text_widget(review_system_box)
         review_system_scrollbar = ttk.Scrollbar(review_system_frame, orient="vertical", command=review_system_box.yview)
         review_system_box.configure(yscrollcommand=review_system_scrollbar.set)
         review_system_box.grid(row=0, column=0, sticky="ew")
@@ -3506,6 +4113,7 @@ class WorkbenchDesktopApp(tk.Tk):
         review_prompt_frame.columnconfigure(0, weight=1)
         review_prompt_frame.rowconfigure(0, weight=1)
         review_prompt_box = tk.Text(review_prompt_frame, wrap="word", height=14, undo=True)
+        self._style_text_widget(review_prompt_box)
         review_prompt_scrollbar = ttk.Scrollbar(review_prompt_frame, orient="vertical", command=review_prompt_box.yview)
         review_prompt_box.configure(yscrollcommand=review_prompt_scrollbar.set)
         review_prompt_box.grid(row=0, column=0, sticky="nsew")
@@ -3650,12 +4258,12 @@ class WorkbenchDesktopApp(tk.Tk):
             self.show_text_window("将发送给模型的结构预览", format_prompt_preview(render), parent=dialog)
 
         load(settings)
-        button_row = ttk.Frame(dialog)
+        button_row = ttk.Frame(dialog, style="DialogFooter.TFrame")
         button_row.grid(row=3, column=0, sticky="ew", padx=14, pady=(0, 14))
         ttk.Button(button_row, text=reset_label, command=restore_defaults).pack(side="left")
         ttk.Button(button_row, text="预览格式", command=preview).pack(side="left", padx=(8, 0))
-        ttk.Button(button_row, text="关闭", command=dialog.destroy).pack(side="right")
-        ttk.Button(button_row, text=save_label, command=save).pack(side="right", padx=(0, 8))
+        ttk.Button(button_row, text="关闭", command=dialog.destroy, style="Secondary.TButton").pack(side="right")
+        ttk.Button(button_row, text=save_label, command=save, style="Primary.TButton").pack(side="right", padx=(0, 8))
 
     def show_model_call_records(self) -> None:
         project_id = self.require_project()
@@ -3817,21 +4425,22 @@ class WorkbenchDesktopApp(tk.Tk):
         refresh: Callable[[], str] | None = None,
     ) -> tuple[tk.Toplevel, tk.Text]:
         owner = parent or self
-        window = tk.Toplevel(owner)
-        window.title(title)
-        window.transient(owner)
-        window.geometry("760x520")
+        window = self._secondary_window(title, owner=owner, geometry="820x600", minsize=(620, 440))
         window.columnconfigure(0, weight=1)
-        window.rowconfigure(0, weight=1)
-        body = tk.Text(window, wrap="word", font=("Consolas", 10), borderwidth=0)
+        window.rowconfigure(1, weight=1)
+        self._dialog_header(window, title, "查看、复制或刷新当前记录；此窗口不会修改正文或调用模型。").grid(
+            row=0, column=0, columnspan=2, sticky="ew"
+        )
+        body = tk.Text(window, wrap="word")
+        self._style_text_widget(body, monospace=True)
         scrollbar = ttk.Scrollbar(window, orient="vertical", command=body.yview)
         body.configure(yscrollcommand=scrollbar.set)
-        body.grid(row=0, column=0, sticky="nsew", padx=(16, 0), pady=16)
-        scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 16), pady=16)
+        body.grid(row=1, column=0, sticky="nsew", padx=(20, 0), pady=16)
+        scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 20), pady=16)
         body.insert("1.0", text.rstrip() + "\n")
         body.configure(state="disabled")
-        button_bar = ttk.Frame(window)
-        button_bar.grid(row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 16))
+        button_bar = ttk.Frame(window, style="DialogFooter.TFrame")
+        button_bar.grid(row=2, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 18))
         if refresh is not None:
             ttk.Button(
                 button_bar,
@@ -3848,10 +4457,10 @@ class WorkbenchDesktopApp(tk.Tk):
             except tk.TclError:
                 return
 
-        ttk.Button(button_bar, text="复制全文", command=copy_text).pack(side="left", padx=(0, 8))
+        ttk.Button(button_bar, text="复制全文", command=copy_text, style="Quiet.TButton").pack(side="left", padx=(0, 8))
         for label, command in actions:
             ttk.Button(button_bar, text=label, command=command).pack(side="left", padx=(0, 8))
-        ttk.Button(button_bar, text="关闭", command=window.destroy).pack(side="right")
+        ttk.Button(button_bar, text="关闭", command=window.destroy, style="Primary.TButton").pack(side="right")
         return window, body
 
     def replace_text_window_content(self, body: tk.Text, text: str) -> None:
@@ -3871,24 +4480,25 @@ class WorkbenchDesktopApp(tk.Tk):
         parent: tk.Misc | None = None,
     ) -> tuple[tk.Toplevel, tk.Text]:
         owner = parent or self
-        window = tk.Toplevel(owner)
-        window.title(title)
-        window.transient(owner)
-        window.geometry("760x520")
+        window = self._secondary_window(title, owner=owner, geometry="820x600", minsize=(620, 440))
         window.columnconfigure(0, weight=1)
-        window.rowconfigure(0, weight=1)
-        body = tk.Text(window, wrap="word", font=("Consolas", 10), borderwidth=0)
+        window.rowconfigure(1, weight=1)
+        self._dialog_header(window, title, "内容会在任务运行期间实时更新；关闭窗口不会删除已经生成的记录。").grid(
+            row=0, column=0, columnspan=2, sticky="ew"
+        )
+        body = tk.Text(window, wrap="word")
+        self._style_text_widget(body, monospace=True)
         scrollbar = ttk.Scrollbar(window, orient="vertical", command=body.yview)
         body.configure(yscrollcommand=scrollbar.set)
-        body.grid(row=0, column=0, sticky="nsew", padx=(16, 0), pady=16)
-        scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 16), pady=16)
+        body.grid(row=1, column=0, sticky="nsew", padx=(20, 0), pady=16)
+        scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 20), pady=16)
         if initial_text:
             body.insert("1.0", initial_text)
         body.configure(state="disabled")
-        button_bar = ttk.Frame(window)
-        button_bar.grid(row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 16))
+        button_bar = ttk.Frame(window, style="DialogFooter.TFrame")
+        button_bar.grid(row=2, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 18))
         setattr(window, "_button_bar", button_bar)
-        ttk.Button(button_bar, text="关闭", command=window.destroy).pack(side="right")
+        ttk.Button(button_bar, text="关闭", command=window.destroy, style="Primary.TButton").pack(side="right")
         return window, body
 
     def add_text_window_action(self, window: tk.Toplevel, label: str, command: Callable[[], None]) -> None:
@@ -3919,26 +4529,16 @@ class WorkbenchDesktopApp(tk.Tk):
         initial_text: str = "",
     ) -> str | None:
         owner = parent or self
-        dialog = tk.Toplevel(owner)
-        dialog.title(title)
-        dialog.transient(owner)
-        dialog.geometry("660x360")
-        dialog.minsize(520, 280)
-        dialog.resizable(True, True)
+        dialog = self._secondary_window(title, owner=owner, geometry="700x440", minsize=(560, 340))
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(1, weight=1)
-        ttk.Label(dialog, text=prompt, wraplength=600, justify="left").grid(
-            row=0,
-            column=0,
-            sticky="ew",
-            padx=16,
-            pady=(16, 8),
-        )
+        self._dialog_header(dialog, title, prompt).grid(row=0, column=0, sticky="ew")
         text_frame = ttk.Frame(dialog)
-        text_frame.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 12))
+        text_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=16)
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(0, weight=1)
         body = tk.Text(text_frame, wrap="word", height=9, undo=True)
+        self._style_text_widget(body)
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=body.yview)
         body.configure(yscrollcommand=scrollbar.set)
         body.grid(row=0, column=0, sticky="nsew")
@@ -3955,10 +4555,10 @@ class WorkbenchDesktopApp(tk.Tk):
             result["value"] = None
             dialog.destroy()
 
-        button_bar = ttk.Frame(dialog)
-        button_bar.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 16))
-        ttk.Button(button_bar, text="取消", command=cancel).pack(side="right")
-        ttk.Button(button_bar, text="开始再审", command=confirm).pack(side="right", padx=(0, 8))
+        button_bar = ttk.Frame(dialog, style="DialogFooter.TFrame")
+        button_bar.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 18))
+        ttk.Button(button_bar, text="取消", command=cancel, style="Secondary.TButton").pack(side="right")
+        ttk.Button(button_bar, text="开始再审", command=confirm, style="Primary.TButton").pack(side="right", padx=(0, 8))
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         body.focus_set()
         dialog.wait_window()
@@ -3995,10 +4595,12 @@ class WorkbenchDesktopApp(tk.Tk):
         )
         editing = bool(existing_item)
         owner = parent or self
-        dialog = tk.Toplevel(owner)
-        dialog.title("编辑资料" if editing else "新增资料")
-        dialog.transient(owner)
-        dialog.geometry("640x520")
+        dialog = self._secondary_window(
+            "编辑资料" if editing else "新增资料",
+            owner=owner,
+            geometry="700x580",
+            minsize=(600, 500),
+        )
         dialog.columnconfigure(1, weight=1)
         dialog.rowconfigure(5, weight=1)
 
@@ -4043,6 +4645,7 @@ class WorkbenchDesktopApp(tk.Tk):
         ttk.Checkbutton(flags, text="用于生成上下文", variable=include_context_var).pack(side="left")
         ttk.Label(dialog, text="内容").grid(row=5, column=0, sticky="ne", padx=(18, 10), pady=8)
         text_box = tk.Text(dialog, wrap="word", height=12)
+        self._style_text_widget(text_box)
         text_box.grid(row=5, column=1, sticky="nsew", padx=(0, 18), pady=8)
         text_box.insert("1.0", str(existing_item.get("text") or ""))
         note = ttk.Label(dialog, text="勾选后会随写作请求一起进入上下文；保存资料本身不会调用模型。", foreground="#6b7280")
@@ -4138,11 +4741,18 @@ class WorkbenchDesktopApp(tk.Tk):
         messagebox.showinfo(APP_TITLE, "我的风格基线已建立。")
 
     def configure_model_connection(self) -> None:
-        dialog = tk.Toplevel(self)
-        dialog.title("模型服务")
-        dialog.transient(self)
-        dialog.resizable(False, False)
+        dialog = self._secondary_window(
+            "模型服务",
+            geometry="700x540",
+            minsize=(640, 500),
+            resizable=(False, False),
+        )
         dialog.columnconfigure(1, weight=1)
+        self._dialog_header(
+            dialog,
+            "模型服务",
+            "按用途配置正文生成、AI 审稿和精修模型。保存只更新本地配置，不会发起网络请求。",
+        ).grid(row=0, column=0, columnspan=2, sticky="ew")
 
         role_labels = [label for _, label in MODEL_ROLE_OPTIONS]
         preset_labels = [str(item["label"]) for item in MODEL_PROVIDER_PRESETS]
@@ -4157,30 +4767,30 @@ class WorkbenchDesktopApp(tk.Tk):
         thinking_var = tk.BooleanVar(value=bool(current_state["deepseek_thinking_enabled"]))
         note_var = tk.StringVar(value=str(current_state["note"]))
 
-        ttk.Label(dialog, text="用途").grid(row=0, column=0, sticky="e", padx=(18, 10), pady=(18, 8))
+        ttk.Label(dialog, text="用途").grid(row=1, column=0, sticky="e", padx=(20, 10), pady=(16, 8))
         role_box = ttk.Combobox(dialog, textvariable=role_var, values=role_labels, state="readonly", width=36)
         role_box.grid(
-            row=0, column=1, sticky="ew", padx=(0, 18), pady=(18, 8)
+            row=1, column=1, sticky="ew", padx=(0, 20), pady=(16, 8)
         )
 
-        ttk.Label(dialog, text="服务类型").grid(row=1, column=0, sticky="e", padx=(18, 10), pady=8)
+        ttk.Label(dialog, text="服务类型").grid(row=2, column=0, sticky="e", padx=(20, 10), pady=8)
         preset_box = ttk.Combobox(dialog, textvariable=preset_var, values=preset_labels, state="readonly", width=36)
-        preset_box.grid(row=1, column=1, sticky="ew", padx=(0, 18), pady=8)
+        preset_box.grid(row=2, column=1, sticky="ew", padx=(0, 20), pady=8)
 
-        ttk.Label(dialog, text="模型 ID").grid(row=2, column=0, sticky="e", padx=(18, 10), pady=8)
-        ttk.Entry(dialog, textvariable=model_var, width=40).grid(row=2, column=1, sticky="ew", padx=(0, 18), pady=8)
+        ttk.Label(dialog, text="模型 ID").grid(row=3, column=0, sticky="e", padx=(20, 10), pady=8)
+        ttk.Entry(dialog, textvariable=model_var, width=40).grid(row=3, column=1, sticky="ew", padx=(0, 20), pady=8)
 
-        ttk.Label(dialog, text="API 地址").grid(row=3, column=0, sticky="e", padx=(18, 10), pady=8)
-        ttk.Entry(dialog, textvariable=base_url_var, width=40).grid(row=3, column=1, sticky="ew", padx=(0, 18), pady=8)
+        ttk.Label(dialog, text="API 地址").grid(row=4, column=0, sticky="e", padx=(20, 10), pady=8)
+        ttk.Entry(dialog, textvariable=base_url_var, width=40).grid(row=4, column=1, sticky="ew", padx=(0, 20), pady=8)
 
-        ttk.Label(dialog, text="API Key").grid(row=4, column=0, sticky="e", padx=(18, 10), pady=8)
+        ttk.Label(dialog, text="API Key").grid(row=5, column=0, sticky="e", padx=(20, 10), pady=8)
         ttk.Entry(dialog, textvariable=api_key_var, width=40, show="*").grid(
-            row=4, column=1, sticky="ew", padx=(0, 18), pady=8
+            row=5, column=1, sticky="ew", padx=(0, 20), pady=8
         )
 
-        ttk.Label(dialog, text="生成等待上限（秒）").grid(row=5, column=0, sticky="e", padx=(18, 10), pady=8)
+        ttk.Label(dialog, text="生成等待上限（秒）").grid(row=6, column=0, sticky="e", padx=(20, 10), pady=8)
         ttk.Entry(dialog, textvariable=timeout_var, width=40).grid(
-            row=5, column=1, sticky="ew", padx=(0, 18), pady=8
+            row=6, column=1, sticky="ew", padx=(0, 20), pady=8
         )
 
         thinking_check = ttk.Checkbutton(
@@ -4188,21 +4798,22 @@ class WorkbenchDesktopApp(tk.Tk):
             text="DeepSeek 启用思考模式",
             variable=thinking_var,
         )
-        thinking_check.grid(row=6, column=1, sticky="w", padx=(0, 18), pady=8)
+        thinking_check.grid(row=7, column=1, sticky="w", padx=(0, 20), pady=8)
 
         ttk.Label(
             dialog,
             textvariable=note_var,
             wraplength=430,
             justify="left",
-        ).grid(row=7, column=0, columnspan=2, sticky="ew", padx=18, pady=(8, 14))
+            style="DialogHint.TLabel",
+        ).grid(row=8, column=0, columnspan=2, sticky="ew", padx=20, pady=(8, 14))
 
-        button_row = ttk.Frame(dialog)
-        button_row.grid(row=8, column=0, columnspan=2, sticky="e", padx=18, pady=(0, 18))
+        button_row = ttk.Frame(dialog, style="DialogFooter.TFrame")
+        button_row.grid(row=9, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 18))
 
         def sync_thinking_visibility(preset: dict[str, Any]) -> None:
             if str(preset.get("provider") or "") == "deepseek":
-                thinking_check.grid(row=6, column=1, sticky="w", padx=(0, 18), pady=8)
+                thinking_check.grid(row=7, column=1, sticky="w", padx=(0, 20), pady=8)
                 thinking_check.state(["!disabled"])
             else:
                 thinking_var.set(False)
@@ -4305,14 +4916,14 @@ class WorkbenchDesktopApp(tk.Tk):
             )
             dialog.destroy()
             if self.selected_project_id:
-                self.run_project_health(silent=True)
+                self.refresh_project_overview(self.selected_project_id)
             else:
                 self.set_provider_summary("模型服务已保存。创建或打开作品后，生成、审稿、精修会使用这套软件级设置。")
 
         preset_box.bind("<<ComboboxSelected>>", on_preset_changed)
         role_box.bind("<<ComboboxSelected>>", on_role_changed)
-        ttk.Button(button_row, text="取消", command=dialog.destroy).pack(side="right", padx=(8, 0))
-        ttk.Button(button_row, text="保存设置", command=save).pack(side="right")
+        ttk.Button(button_row, text="取消", command=dialog.destroy, style="Secondary.TButton").pack(side="right", padx=(8, 0))
+        ttk.Button(button_row, text="保存设置", command=save, style="Primary.TButton").pack(side="right")
         dialog.grab_set()
         dialog.wait_window()
 
@@ -5062,6 +5673,10 @@ def project_node_id(project_id: str) -> str:
     return f"project:{project_id}"
 
 
+def project_placeholder_node_id(project_id: str) -> str:
+    return f"placeholder:{project_id}"
+
+
 def chapter_node_id(project_id: str, chapter_id: str) -> str:
     return f"chapter:{project_id}:{chapter_id}"
 
@@ -5084,6 +5699,24 @@ def parse_tree_node_id(node_id: str) -> tuple[str, str, str]:
             project_id, draft_id = parts[1], parts[2]
             return "draft", project_id, draft_id
     return "", "", ""
+
+
+def visible_character_count(text: str) -> int:
+    return sum(1 for character in text if not character.isspace())
+
+
+def format_provider_roles_compact(roles: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for role_id, role_label in MODEL_ROLE_OPTIONS:
+        raw_role = roles.get(role_id)
+        role = raw_role if isinstance(raw_role, dict) else {}
+        configured = bool(role.get("configured"))
+        state = "已配置" if configured else "未配置"
+        provider = provider_display_name(str(role.get("provider") or "")) if role.get("provider") else "-"
+        model = str(role.get("model") or "-")
+        lines.append(f"{role_label} · {state}\n{provider} / {model}")
+    lines.append("\n仅在你点击生成、审稿或精修时调用模型。")
+    return "\n\n".join(lines)
 
 
 def sorted_draft_versions(drafts: list[dict[str, Any]]) -> list[dict[str, Any]]:
