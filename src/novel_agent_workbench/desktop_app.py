@@ -22,6 +22,7 @@ from .memory_bank import (
     DEFAULT_MEMORY_TARGET_TOKENS,
     normalize_memory_target_tokens,
 )
+from .model_settings_ui import open_model_settings_dialog
 from .providers import DEFAULT_PROVIDER_TIMEOUT_SECONDS
 from .storage import DEFAULT_PROJECTS_DIRNAME
 
@@ -142,6 +143,13 @@ MODEL_PROVIDER_PRESETS = (
         "provider": "openai_compatible",
         "default_model": "",
         "default_base_url": "",
+        "secret_required": True,
+    },
+    {
+        "label": "硅基流动 API",
+        "provider": "siliconflow",
+        "default_model": "",
+        "default_base_url": "https://api.siliconflow.cn/v1",
         "secret_required": True,
     },
     {
@@ -353,6 +361,7 @@ class WorkbenchDesktopApp(tk.Tk):
         self.title(APP_TITLE)
         self.minsize(*WINDOW_MIN_SIZE)
         self.geometry("1180x760")
+        self.resizable(True, True)
         self._bind_window_restore_guard()
         self._set_window_icon()
         self._configure_style()
@@ -373,7 +382,6 @@ class WorkbenchDesktopApp(tk.Tk):
         owner: tk.Misc | None = None,
         geometry: str = "760x520",
         minsize: tuple[int, int] = (520, 360),
-        resizable: tuple[bool, bool] = (True, True),
     ) -> tk.Toplevel:
         parent = owner or self
         window = tk.Toplevel(parent)
@@ -382,7 +390,7 @@ class WorkbenchDesktopApp(tk.Tk):
         window.configure(background=PALETTE["app_bg"])
         window.geometry(geometry)
         window.minsize(*minsize)
-        window.resizable(*resizable)
+        window.resizable(True, True)
         path = icon_path()
         if path.exists():
             try:
@@ -1339,12 +1347,20 @@ class WorkbenchDesktopApp(tk.Tk):
         self.on_project_selected()
         menu = tk.Menu(self, tearoff=False)
         if kind == "chapter" and item_id:
+            confirmed_exists = any(
+                str(item.get("chapter_id") or "") == item_id for item in self.app.list_confirmed_chapters(project_id)
+            )
             menu.add_command(label="打开章节", command=lambda: self.show_chapter_browser(project_id, item_id))
             menu.add_command(label="AI审稿当前稿", command=self.ai_review_current_draft)
             menu.add_command(label="本地初审当前稿", command=self.review_current_draft)
             menu.add_command(label="要求重写（重新随机）当前稿", command=self.rewrite_current_draft)
             menu.add_command(label="根据审稿精修当前稿", command=self.refine_current_draft_from_ai_review)
             menu.add_separator()
+            if confirmed_exists:
+                menu.add_command(
+                    label="删除已确认章节",
+                    command=lambda: self.delete_confirmed_chapter_dialog(project_id, item_id),
+                )
             menu.add_command(label="删除本章草稿", command=lambda: self.delete_chapter_drafts_dialog(project_id, item_id))
             menu.add_separator()
             menu.add_command(label="记忆库", command=self.show_memory_bank)
@@ -1478,6 +1494,56 @@ class WorkbenchDesktopApp(tk.Tk):
             APP_TITLE,
             f"已删除本章草稿 {deleted_count} 个，审稿记录 {review_count} 个，精修请求 {revision_count} 个。\n"
             f"已确认章节保留：{'是' if result.get('confirmed_chapter_retained') else '否'}",
+        )
+
+    def delete_confirmed_chapter_dialog(self, project_id: str, chapter_id: str) -> None:
+        confirmed = next(
+            (item for item in self.app.list_confirmed_chapters(project_id) if item.get("chapter_id") == chapter_id),
+            {},
+        )
+        title = str(confirmed.get("title") or chapter_id)
+        message = (
+            f"将删除已确认章节：{chapter_id}\n\n"
+            f"标题：{title}\n\n"
+            "这会删除整个章节：定稿、该章所有草稿、AI审稿记录、精修请求和章节列表节点都会从软件中移除。\n"
+            "相关文件会移入 .trash；不会清空记忆库，也不会影响其他章节。\n\n"
+            "如果只是想保留定稿、只清理草稿，请改用“删除本章草稿”。"
+        )
+        if not messagebox.askyesno(APP_TITLE, message):
+            return
+        typed = simpledialog.askstring(APP_TITLE, "如需删除已确认章节，请输入：确认删除定稿")
+        if typed != "确认删除定稿":
+            self.write_log(f"取消删除已确认章节: project={project_id} chapter={chapter_id}")
+            messagebox.showinfo(APP_TITLE, "未输入“确认删除定稿”，已取消。")
+            return
+        try:
+            result = self.app.delete_confirmed_chapter(project_id, chapter_id)
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, f"删除已确认章节失败:\n{exc}")
+            self.write_log(f"删除已确认章节失败: project={project_id} chapter={chapter_id} error={exc}")
+            return
+        retired_count = len(result.get("retired_paths") or [])
+        draft_count = len(result.get("deleted_draft_ids") or [])
+        review_count = len(result.get("removed_reviews") or [])
+        revision_count = len(result.get("removed_revision_requests") or [])
+        self.write_log(
+            f"删除已确认章节: project={project_id} chapter={chapter_id} "
+            f"source_draft={result.get('source_draft_id') or '-'} drafts={draft_count} "
+            f"reviews={review_count} revisions={revision_count} retired={retired_count}"
+        )
+        self.load_project_work_nodes(project_id)
+        self.run_project_health(silent=True)
+        if self.current_draft_project_id == project_id:
+            self.current_draft_project_id = ""
+            self.current_draft_ids = []
+            self.current_draft_index = -1
+            self.draft_meta_var.set("稿件浏览与确认")
+            self.draft_body.delete("1.0", tk.END)
+        messagebox.showinfo(
+            APP_TITLE,
+            f"已删除整个章节 {chapter_id}。\n"
+            f"草稿 {draft_count} 个，审稿记录 {review_count} 个，精修请求 {revision_count} 个。\n"
+            f"相关文件已移入 .trash：{retired_count} 个。",
         )
 
     def clear_trash_dialog(self) -> None:
@@ -2331,10 +2397,11 @@ class WorkbenchDesktopApp(tk.Tk):
         target_tokens = normalize_memory_target_tokens(memory_item.get("target_token_budget"))
         current_memory = str(memory_item.get("text") or "")
         range_label = memory_auto_summary_range_label(chapter_ids)
-        progress = tk.Toplevel(self)
-        progress.title("记忆银行自动总结")
-        progress.transient(self)
-        progress.geometry("860x620")
+        progress = self._secondary_window(
+            "记忆银行自动总结",
+            geometry="860x620",
+            minsize=(640, 480),
+        )
         progress.columnconfigure(0, weight=1)
         progress.rowconfigure(3, weight=1)
         is_generating = {"active": True}
@@ -3539,10 +3606,12 @@ class WorkbenchDesktopApp(tk.Tk):
             ):
                 return
             current_memory = text_box.get("1.0", tk.END).strip()
-            progress = tk.Toplevel(window)
-            progress.title("记忆银行生成进度")
-            progress.transient(window)
-            progress.geometry("860x620")
+            progress = self._secondary_window(
+                "记忆银行生成进度",
+                owner=window,
+                geometry="860x620",
+                minsize=(640, 480),
+            )
             progress.columnconfigure(0, weight=1)
             progress.rowconfigure(3, weight=1)
             is_generating = {"active": True}
@@ -3709,10 +3778,12 @@ class WorkbenchDesktopApp(tk.Tk):
                 parent=window,
             ):
                 return
-            progress = tk.Toplevel(window)
-            progress.title("记忆银行缩写进度")
-            progress.transient(window)
-            progress.geometry("860x620")
+            progress = self._secondary_window(
+                "记忆银行缩写进度",
+                owner=window,
+                geometry="860x620",
+                minsize=(640, 480),
+            )
             progress.columnconfigure(0, weight=1)
             progress.rowconfigure(3, weight=1)
             is_generating = {"active": True}
@@ -4815,11 +4886,25 @@ class WorkbenchDesktopApp(tk.Tk):
         messagebox.showinfo(APP_TITLE, "我的风格基线已建立。")
 
     def configure_model_connection(self) -> None:
+        def on_saved() -> None:
+            if self.selected_project_id:
+                self.refresh_project_overview(self.selected_project_id)
+            else:
+                self.set_provider_summary("模型设置已保存。创建或打开作品后会使用这套软件级设置。")
+
+        open_model_settings_dialog(
+            self,
+            self.app,
+            on_saved=on_saved,
+            write_log=self.write_log,
+        )
+        return
+
+        # Legacy single-role form retained below temporarily for reference.
         dialog = self._secondary_window(
             "模型服务",
-            geometry="700x540",
-            minsize=(640, 500),
-            resizable=(False, False),
+            geometry="700x640",
+            minsize=(640, 600),
         )
         dialog.columnconfigure(1, weight=1)
         self._dialog_header(

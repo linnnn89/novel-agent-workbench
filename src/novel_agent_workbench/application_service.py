@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 from .audit import audit_project
 from .config import (
@@ -46,6 +48,23 @@ from .manual_rewrite import ManualRewriteTaskService
 from .manual_rewrite_comparison import ManualRewriteComparisonService
 from .memory_apply_preview import MemoryApplyPreviewService
 from .memory_bank import DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL, MemoryBankService
+from .model_catalog import (
+    MODEL_CATALOG_CACHE_FILENAME,
+    fetch_model_catalog,
+    read_catalog_cache,
+    write_catalog_cache,
+)
+from .model_settings import (
+    BUILTIN_PROVIDER_PROFILES,
+    FEATURE_IDS,
+    MODEL_SETTINGS_SCHEMA_VERSION,
+    make_model_ref,
+    migrate_global_model_settings,
+    normalize_model_profile,
+    normalize_provider_profile,
+    resolve_model_role_mapping,
+    sync_legacy_model_roles,
+)
 from .planning_library import PlanningLibraryService
 from .project_state import public_project_state
 from .project_health import project_health
@@ -60,6 +79,7 @@ from .providers import (
     generate_with_provider,
     get_model_role_config,
     list_provider_adapters,
+    mask_secret,
     provider_dry_run,
     provider_real_test,
     provider_request_role_or_writer_fallback,
@@ -75,7 +95,7 @@ from .reviews import DraftReviewService, is_ai_review, render_context_stats
 from .revision_candidates import RevisionCandidateService
 from .revisions import RevisionRequestService
 from .self_style import SelfStyleBaselineService
-from .storage import ProjectRegistry, ProjectStore, atomic_write_json_file
+from .storage import ProjectRegistry, ProjectStore, atomic_write_json_file, utc_stamp
 
 
 GLOBAL_SETTINGS_FILENAME = "global_settings.json"
@@ -85,9 +105,9 @@ GLOBAL_SECRETS_FILENAME = "global_secrets.local.json"
 class RuntimeModelSettingsStore:
     """Project store view that reads software-level model settings at runtime."""
 
-    def __init__(self, store: ProjectStore, *, model_roles: dict[str, Any], secrets: dict[str, Any]):
+    def __init__(self, store: ProjectStore, *, model_settings: dict[str, Any], secrets: dict[str, Any]):
         self._store = store
-        self._model_roles = model_roles
+        self._model_settings = model_settings
         self._secrets = secrets
 
     def __getattr__(self, name: str) -> Any:
@@ -95,8 +115,7 @@ class RuntimeModelSettingsStore:
 
     def read_config(self) -> dict[str, Any]:
         config = dict(self._store.read_config())
-        if self._model_roles:
-            config["model_roles"] = self._model_roles
+        config.update(self._model_settings)
         return config
 
     def read_secrets(self) -> dict[str, Any]:
@@ -526,6 +545,10 @@ class WorkbenchApplicationService:
         return get_model_role_config(self._runtime_store(project_id), role).to_dict()
 
     def global_model_role_config(self, role: str) -> dict[str, Any]:
+        settings = self._read_global_settings()
+        resolved = resolve_model_role_mapping(settings, role=role)
+        if resolved:
+            return ModelRoleConfig.from_mapping(role, resolved).to_dict()
         return ModelRoleConfig.from_mapping(role, self._global_model_roles().get(role)).to_dict()
 
     def configure_global_provider_role(
@@ -558,10 +581,237 @@ class WorkbenchApplicationService:
         validate_model_role_config(role_config, self._read_global_secrets(), require_secret_value=False)
         global_settings = self._read_global_settings()
         roles = global_settings.get("model_roles") if isinstance(global_settings.get("model_roles"), dict) else {}
-        global_settings["schema_version"] = 1
+        global_settings["schema_version"] = MODEL_SETTINGS_SCHEMA_VERSION
         global_settings["model_roles"] = {**roles, role: role_config.to_dict()}
         self._write_global_settings(global_settings)
         return role_config.to_dict()
+
+    def model_settings_state(self) -> dict[str, Any]:
+        settings = self._read_global_settings()
+        secrets = self._read_global_secrets()
+        cache = read_catalog_cache(self._model_catalog_cache_path())
+        providers = settings.get("provider_profiles") if isinstance(settings.get("provider_profiles"), dict) else {}
+        provider_items: list[dict[str, Any]] = []
+        for profile_id, profile in providers.items():
+            normalized = normalize_provider_profile(str(profile_id), profile)
+            secret_name = self._secret_name_from_ref(str(normalized.get("api_key_ref") or ""))
+            secret_value = str(secrets.get(secret_name) or "") if secret_name else ""
+            cached = (
+                cache.get("providers", {}).get(profile_id, {})
+                if isinstance(cache.get("providers"), dict)
+                else {}
+            )
+            provider_items.append(
+                {
+                    **normalized,
+                    "has_api_key": bool(secret_value),
+                    "masked_api_key": mask_secret(secret_value),
+                    "catalog_refreshed_at": str(cached.get("refreshed_at") or ""),
+                    "catalog_model_count": len(cached.get("models") or [])
+                    if isinstance(cached.get("models"), list)
+                    else 0,
+                }
+            )
+        provider_items.sort(key=lambda item: (not bool(item.get("built_in")), str(item.get("display_name") or "").lower()))
+        models = settings.get("model_profiles") if isinstance(settings.get("model_profiles"), dict) else {}
+        model_items = [normalize_model_profile(str(model_ref), model) for model_ref, model in models.items()]
+        model_items.sort(key=lambda item: (str(item["provider_profile_id"]), str(item["display_name"]).lower()))
+        return {
+            "schema_version": settings.get("schema_version"),
+            "providers": provider_items,
+            "models": model_items,
+            "primary_model_ref": str(settings.get("primary_model_ref") or ""),
+            "feature_assignments": settings.get("feature_assignments")
+            if isinstance(settings.get("feature_assignments"), dict)
+            else {},
+        }
+
+    def upsert_provider_profile(
+        self,
+        profile_id: str = "",
+        *,
+        display_name: str,
+        base_url: str,
+        adapter: str = "openai_compatible",
+        timeout_seconds: float = 300.0,
+    ) -> dict[str, Any]:
+        name = str(display_name or "").strip()
+        if not name:
+            raise ValueError("接入商名称不能为空。")
+        clean_id = self._safe_provider_profile_id(profile_id or name)
+        settings = self._read_global_settings()
+        profiles = settings.get("provider_profiles") if isinstance(settings.get("provider_profiles"), dict) else {}
+        existing = profiles.get(clean_id) if isinstance(profiles.get(clean_id), dict) else {}
+        adapter_id = str(adapter or existing.get("adapter") or "openai_compatible").strip()
+        if get_provider_adapter(adapter_id) is None:
+            raise ValueError(f"未注册的接入适配器：{adapter_id}")
+        key_ref = str(existing.get("api_key_ref") or f"{SECRET_REF_PREFIX}provider_{clean_id}_api_key")
+        profile = normalize_provider_profile(
+            clean_id,
+            {
+                **existing,
+                "display_name": name,
+                "adapter": adapter_id,
+                "base_url": str(base_url or "").strip(),
+                "api_key_ref": key_ref,
+                "timeout_seconds": timeout_seconds,
+                "built_in": clean_id in BUILTIN_PROVIDER_PROFILES,
+            },
+        )
+        if adapter_id != "mock" and not profile["base_url"]:
+            raise ValueError("API 地址不能为空。")
+        settings["provider_profiles"] = {**profiles, clean_id: profile}
+        self._write_global_settings(sync_legacy_model_roles(settings))
+        return profile
+
+    def delete_provider_profile(self, profile_id: str) -> dict[str, Any]:
+        clean_id = str(profile_id or "").strip()
+        if clean_id in BUILTIN_PROVIDER_PROFILES:
+            raise ValueError("内置接入商不能删除，可以清除 Key 或停用其模型。")
+        settings = self._read_global_settings()
+        profiles = settings.get("provider_profiles") if isinstance(settings.get("provider_profiles"), dict) else {}
+        if clean_id not in profiles:
+            raise ValueError("接入商不存在。")
+        models = settings.get("model_profiles") if isinstance(settings.get("model_profiles"), dict) else {}
+        removed_refs = {
+            ref
+            for ref, model in models.items()
+            if isinstance(model, dict) and str(model.get("provider_profile_id") or "") == clean_id
+        }
+        settings["provider_profiles"] = {key: value for key, value in profiles.items() if key != clean_id}
+        settings["model_profiles"] = {key: value for key, value in models.items() if key not in removed_refs}
+        if str(settings.get("primary_model_ref") or "") in removed_refs:
+            settings["primary_model_ref"] = ""
+        assignments = settings.get("feature_assignments") if isinstance(settings.get("feature_assignments"), dict) else {}
+        for feature_id, assignment in assignments.items():
+            if isinstance(assignment, dict) and str(assignment.get("model_ref") or "") in removed_refs:
+                assignments[feature_id] = {"mode": "inherit", "model_ref": ""}
+        settings["feature_assignments"] = assignments
+        self._write_global_settings(sync_legacy_model_roles(settings))
+        return {"profile_id": clean_id, "removed_models": len(removed_refs)}
+
+    def set_provider_profile_secret(self, profile_id: str, value: str) -> dict[str, Any]:
+        settings = self._read_global_settings()
+        profiles = settings.get("provider_profiles") if isinstance(settings.get("provider_profiles"), dict) else {}
+        profile = profiles.get(profile_id) if isinstance(profiles.get(profile_id), dict) else None
+        if not profile:
+            raise ValueError("接入商不存在。")
+        secret_name = self._secret_name_from_ref(str(profile.get("api_key_ref") or ""))
+        if not secret_name:
+            raise ValueError("接入商没有有效的密钥引用。")
+        return self.set_global_secret(secret_name, value)
+
+    def clear_provider_profile_secret(self, profile_id: str) -> dict[str, Any]:
+        settings = self._read_global_settings()
+        profiles = settings.get("provider_profiles") if isinstance(settings.get("provider_profiles"), dict) else {}
+        profile = profiles.get(profile_id) if isinstance(profiles.get(profile_id), dict) else None
+        if not profile:
+            raise ValueError("接入商不存在。")
+        secret_name = self._secret_name_from_ref(str(profile.get("api_key_ref") or ""))
+        secrets = self._read_global_secrets()
+        existed = bool(secret_name and secret_name in secrets)
+        if secret_name:
+            secrets.pop(secret_name, None)
+            self._write_global_secrets(secrets)
+        return {"profile_id": profile_id, "cleared": existed}
+
+    def refresh_provider_models(self, profile_id: str) -> dict[str, Any]:
+        settings = self._read_global_settings()
+        profiles = settings.get("provider_profiles") if isinstance(settings.get("provider_profiles"), dict) else {}
+        profile = profiles.get(profile_id) if isinstance(profiles.get(profile_id), dict) else None
+        if not profile:
+            raise ValueError("接入商不存在。")
+        secret_name = self._secret_name_from_ref(str(profile.get("api_key_ref") or ""))
+        api_key = str(self._read_global_secrets().get(secret_name) or "") if secret_name else ""
+        adapter = get_provider_adapter(str(profile.get("adapter") or ""))
+        if adapter and adapter.requires_secret and not api_key:
+            raise ValueError("请先保存该接入商的 API Key。")
+        models = fetch_model_catalog(
+            provider_profile_id=profile_id,
+            base_url=str(profile.get("base_url") or ""),
+            api_key=api_key,
+            timeout_seconds=min(60.0, float(profile.get("timeout_seconds") or 30.0)),
+        )
+        current_models = settings.get("model_profiles") if isinstance(settings.get("model_profiles"), dict) else {}
+        merged_models = dict(current_models)
+        for item in models:
+            model_ref = make_model_ref(profile_id, str(item.get("model_id") or ""))
+            existing = current_models.get(model_ref) if isinstance(current_models.get(model_ref), dict) else {}
+            merged_models[model_ref] = normalize_model_profile(
+                model_ref,
+                {**item, **({"enabled": existing.get("enabled")} if "enabled" in existing else {})},
+            )
+        settings["model_profiles"] = merged_models
+        self._write_global_settings(sync_legacy_model_roles(settings))
+        cache_entry = write_catalog_cache(self._model_catalog_cache_path(), profile_id, models)
+        return {
+            "profile_id": profile_id,
+            "model_count": len(models),
+            "refreshed_at": cache_entry.get("refreshed_at"),
+        }
+
+    def add_manual_model(self, profile_id: str, model_id: str, *, display_name: str = "") -> dict[str, Any]:
+        settings = self._read_global_settings()
+        profiles = settings.get("provider_profiles") if isinstance(settings.get("provider_profiles"), dict) else {}
+        if profile_id not in profiles:
+            raise ValueError("接入商不存在。")
+        clean_model_id = str(model_id or "").strip()
+        if not clean_model_id:
+            raise ValueError("模型 ID 不能为空。")
+        model_ref = make_model_ref(profile_id, clean_model_id)
+        model = normalize_model_profile(
+            model_ref,
+            {
+                "display_name": str(display_name or clean_model_id).strip(),
+                "source": "manual",
+                "enabled": True,
+            },
+        )
+        models = settings.get("model_profiles") if isinstance(settings.get("model_profiles"), dict) else {}
+        settings["model_profiles"] = {**models, model_ref: model}
+        self._write_global_settings(sync_legacy_model_roles(settings))
+        return model
+
+    def set_model_enabled(self, model_ref: str, enabled: bool) -> dict[str, Any]:
+        settings = self._read_global_settings()
+        models = settings.get("model_profiles") if isinstance(settings.get("model_profiles"), dict) else {}
+        if model_ref not in models:
+            raise ValueError("模型不存在。")
+        model = normalize_model_profile(model_ref, {**models[model_ref], "enabled": bool(enabled)})
+        settings["model_profiles"] = {**models, model_ref: model}
+        self._write_global_settings(sync_legacy_model_roles(settings))
+        return model
+
+    def update_model_assignments(
+        self,
+        *,
+        primary_model_ref: str,
+        feature_assignments: dict[str, dict[str, str]],
+    ) -> dict[str, Any]:
+        settings = self._read_global_settings()
+        models = settings.get("model_profiles") if isinstance(settings.get("model_profiles"), dict) else {}
+        primary = str(primary_model_ref or "").strip()
+        if primary not in models or not bool(models[primary].get("enabled", True)):
+            raise ValueError("请选择一个已启用的主模型。")
+        normalized_assignments: dict[str, dict[str, str]] = {}
+        for feature_id in FEATURE_IDS:
+            item = feature_assignments.get(feature_id) if isinstance(feature_assignments.get(feature_id), dict) else {}
+            mode = "model" if str(item.get("mode") or "") == "model" else "inherit"
+            model_ref = str(item.get("model_ref") or "").strip()
+            if mode == "model" and (model_ref not in models or not bool(models[model_ref].get("enabled", True))):
+                raise ValueError(f"功能 {feature_id} 指向了不存在或已停用的模型。")
+            normalized_assignments[feature_id] = {
+                "mode": mode,
+                "model_ref": model_ref if mode == "model" else "",
+            }
+        settings["primary_model_ref"] = primary
+        settings["feature_assignments"] = normalized_assignments
+        settings = sync_legacy_model_roles(settings)
+        self._write_global_settings(settings)
+        return {
+            "primary_model_ref": primary,
+            "feature_assignments": normalized_assignments,
+        }
 
     def set_global_secret(self, name: str, value: str) -> dict[str, Any]:
         secret_name = validate_secret_name(name)
@@ -695,6 +945,9 @@ class WorkbenchApplicationService:
     def delete_chapter_drafts(self, project_id: str, chapter_id: str) -> dict[str, Any]:
         return DraftGenerationService(self._open_store(project_id)).delete_chapter_drafts(chapter_id)
 
+    def delete_confirmed_chapter(self, project_id: str, chapter_id: str) -> dict[str, Any]:
+        return DraftGenerationService(self._open_store(project_id)).delete_confirmed_chapter(chapter_id)
+
     def update_draft_content(self, project_id: str, draft_id: str, *, text: str) -> dict[str, Any]:
         return DraftGenerationService(self._open_store(project_id)).update_draft_content(draft_id, text=text)
 
@@ -825,13 +1078,18 @@ class WorkbenchApplicationService:
             include_context_text=True,
         ).to_dict()
         provider_prompt = render_ai_refinement_prompt(render, draft=draft, review=review, instruction=instruction)
-        request_role = provider_request_role_or_writer_fallback(store, "reviser")
+        request_role = provider_request_role_or_writer_fallback(
+            store,
+            "reviser",
+            feature_id="ai_refinement",
+        )
         safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
         try:
             response = generate_with_provider(
                 store,
                 ProviderRequest(
                     role=request_role,
+                    feature_id="ai_refinement",
                     prompt=provider_prompt,
                     system_prompt=system_prompt,
                     temperature=temperature,
@@ -1377,6 +1635,9 @@ class WorkbenchApplicationService:
     def _global_secrets_path(self) -> Path:
         return self.registry.projects_root / GLOBAL_SECRETS_FILENAME
 
+    def _model_catalog_cache_path(self) -> Path:
+        return self.registry.projects_root / MODEL_CATALOG_CACHE_FILENAME
+
     def _read_global_settings(self) -> dict[str, Any]:
         self.registry.initialize()
         path = self._global_settings_path()
@@ -1388,7 +1649,16 @@ class WorkbenchApplicationService:
         value = json.loads(text)
         if not isinstance(value, dict):
             return default_global_settings()
-        return deep_merge(default_global_settings(), value)
+        migrated, changed = migrate_global_model_settings(value)
+        if changed:
+            backup_dir = self.registry.projects_root / "migration_backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            backup_name = f"global_settings-v1-{utc_stamp().replace(':', '').replace('+', '_')}.json"
+            atomic_write_json_file(backup_dir / backup_name, value)
+            self._write_global_settings(migrated)
+        merged = deep_merge(default_global_settings(), migrated)
+        normalized, _ = migrate_global_model_settings(merged)
+        return normalized
 
     def _write_global_settings(self, settings: dict[str, Any]) -> None:
         self.registry.initialize()
@@ -1416,17 +1686,40 @@ class WorkbenchApplicationService:
 
     def _runtime_store(self, project_id: str) -> RuntimeModelSettingsStore | ProjectStore:
         store = self._sync_project_generation_settings_for_runtime(project_id)
-        global_roles = self._global_model_roles()
+        global_settings = self._read_global_settings()
+        global_roles = (
+            global_settings.get("model_roles")
+            if isinstance(global_settings.get("model_roles"), dict)
+            else {}
+        )
         config = store.read_config()
         settings, _ = self._effective_project_generation_settings(store, config=config)
-        if model_roles_have_config(global_roles):
+        if str(global_settings.get("primary_model_ref") or "") or model_roles_have_config(global_roles):
             runtime_roles = merged_writer_sampling_settings(global_roles, settings)
             runtime_secrets = self._read_global_secrets()
+            runtime_model_settings = {**global_settings, "model_roles": runtime_roles}
         else:
             legacy_roles = config.get("model_roles") if isinstance(config.get("model_roles"), dict) else {}
             runtime_roles = merged_writer_sampling_settings(legacy_roles, settings)
             runtime_secrets = store.read_secrets()
-        return RuntimeModelSettingsStore(store, model_roles=runtime_roles, secrets=runtime_secrets)
+            runtime_model_settings = {"model_roles": runtime_roles}
+        return RuntimeModelSettingsStore(store, model_settings=runtime_model_settings, secrets=runtime_secrets)
+
+    @staticmethod
+    def _safe_provider_profile_id(value: str) -> str:
+        base = re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
+        if not base:
+            base = "custom"
+        if base in BUILTIN_PROVIDER_PROFILES:
+            return base
+        return f"{base}_{uuid4().hex[:6]}" if len(base) < 2 else base
+
+    @staticmethod
+    def _secret_name_from_ref(api_key_ref: str) -> str:
+        value = str(api_key_ref or "").strip()
+        if not value.startswith(SECRET_REF_PREFIX):
+            return ""
+        return value[len(SECRET_REF_PREFIX) :].strip()
 
     def _effective_project_generation_settings(
         self,

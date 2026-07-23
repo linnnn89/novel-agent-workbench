@@ -148,6 +148,7 @@ class RevisionRequestService:
                 self.store,
                 ProviderRequest(
                     role="reviser",
+                    feature_id="ai_refinement",
                     prompt=f"Create mock revision draft candidate. source_draft_chars={len(source_content)}",
                     max_tokens=64,
                     metadata={

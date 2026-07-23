@@ -121,6 +121,7 @@ class DraftReviewService:
                     self.store,
                     ProviderRequest(
                         role="scorer",
+                        feature_id="ai_review",
                         prompt=f"Review draft metadata only. draft_chars={len(content)}",
                         max_tokens=64,
                         metadata={
@@ -260,13 +261,18 @@ class DraftReviewService:
                 draft_sanitized["content"],
                 review_prompt=task_prompt,
             )
-            request_role = provider_request_role_or_writer_fallback(self.store, "scorer")
+            request_role = provider_request_role_or_writer_fallback(
+                self.store,
+                "scorer",
+                feature_id="ai_review",
+            )
             safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
             try:
                 response = generate_with_provider(
                     self.store,
                     ProviderRequest(
                         role=request_role,
+                        feature_id="ai_review",
                         prompt=provider_prompt,
                         system_prompt=review_system_prompt,
                         max_tokens=2048,

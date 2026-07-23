@@ -248,3 +248,216 @@
 ### USER_DECISION_REQUIRED
 
 - 本阶段无。
+
+## 2026-07-23：同步远端 UI 与桌面工作流更新
+
+### 目标
+
+- 将本地 `main` 从 `9e2e113` 安全快进到 GitHub `origin/main` 的 `8b9df7b`。
+- 保留本机已有的未提交功能修改和新增测试。
+
+### 同步与冲突处理
+
+- 同步前将 4 个已修改文件和 1 个新增测试保存为 `pre-sync-local-work-2026-07-23` stash，并在重新应用后保留该 stash 作为可恢复备份。
+- `desktop_app.py` 的记忆银行窗口外观和底部按钮布局出现冲突；保留远端的 `_secondary_window` 统一样式和 `wrapped_row_positions()` 自适应换行布局。
+- 本地旧测试中对固定窗口尺寸及旧两行按钮容器的断言，已调整为检查新的统一窗口和自适应布局。
+
+### 验证
+
+- 针对性 `unittest`：16 项全部通过。
+- 完整 `unittest discover -s tests`：20 项全部通过。
+- 未安装或升级依赖，未调用模型 API，未重新打包 EXE，未启动桌面 GUI 做人工视觉验收。
+
+### 反证自审与限制
+
+- 自动化测试可以确认合并后的逻辑与布局辅助函数，但不能代替 Windows 缩放比例、字体和真实窗口拉伸下的视觉检查。
+- 本机原有未提交修改已重新应用，仍不是远端 `main` 的一部分；后续提交前应按原功能目标独立复核。
+
+### USER_DECISION_REQUIRED
+
+- 本阶段无。
+
+## 2026-07-23：同步后重建 Windows EXE
+
+### 目标与构建
+
+- 将同步并合并本地功能修改后的当前源码重建为 `dist/NovelAgentWorkbench/NovelAgentWorkbench.exe`。
+- 使用项目现有 Python 3.13.7、PyInstaller 6.20.0 与 `scripts/build_windows_exe.ps1 -SkipInstall`；未安装、升级或下载依赖。
+- 首次在沙盒内执行时，创建 `build/pyinstaller_spec` 被权限系统拒绝；经审批后以相同命令重试，PyInstaller 构建和最终发布成功。
+
+### 产物校验
+
+- EXE 修改时间：`2026-07-23 10:55:25`（北京时间）。
+- EXE 大小：`2,622,077` bytes。
+- EXE SHA-256：`DBFBCB228F0C531A1DCF8E58F0213F6D7D6D05600256B947FCBCE2C87925F657`。
+- `_internal` 已同步重建，PyInstaller 中间 `build/` 目录已按脚本清理。
+- `用户数据/workspace_projects` 仍存在；核对到 5 个作品目录和 4,567 个文件，`registry.json` 修改时间仍为 `2026-06-04 22:44:56`。
+
+### 反证自审与限制
+
+- 已验证构建成功、产物存在、依赖目录完整和用户数据保留。
+- 本轮未启动新 EXE 进行 GUI 冒烟或人工视觉验收，避免未经单独授权操作宿主机图形窗口。
+
+### USER_DECISION_REQUIRED
+
+- 本阶段无。
+
+## 2026-07-23：修复模型服务保存按钮裁切并开放全部窗口缩放
+
+### 问题与根因
+
+- 用户截图显示“模型服务”窗口在“生成等待上限（秒）”及说明文字之后被底部边界裁切，“保存设置”和“取消”按钮不可见。
+- 保存逻辑仍在；根因是窗口固定为 `700x540` 且禁止调整大小，在当前 Windows DPI/字体缩放下，实际内容高度超过可视区域。
+
+### 关键变更
+
+- 将“模型服务”默认尺寸调整为 `700x640`、最小尺寸调整为 `640x600`，确保底部操作区具备足够空间。
+- 主窗口和统一 `_secondary_window()` 工厂现在显式启用横向、纵向调整。
+- 3 个原先直接创建的记忆银行生成进度窗口改为使用统一窗口工厂，因此全部普通窗口和进度窗口均可调整大小。
+- 保留各窗口原有合理最小尺寸，避免缩小时关键操作区被无限压缩。
+
+### 验证与构建
+
+- 新增“模型服务底栏可见”和“所有窗口统一可缩放”回归检查。
+- 针对性测试 16 项通过；完整 `unittest discover -s tests` 22 项全部通过。
+- 使用现有 Python 3.13.7、PyInstaller 6.20.0 和 `-SkipInstall` 成功重建 EXE；未安装或升级依赖。
+- 新 EXE 修改时间：`2026-07-23 11:14:39`（北京时间）；大小：`2,621,976` bytes。
+- 新 EXE SHA-256：`1966DF945593AF5071DB1904B0286B5E242896195A10B135332BAE7234D3CFC0`。
+- `用户数据/workspace_projects` 中的 5 个作品目录和 4,567 个文件均保留；PyInstaller 中间 `build/` 已清理。
+
+### 反证自审与限制
+
+- 源码检查、自动化测试和 PyInstaller 构建均通过；尚未在用户当前 DPI/字体环境中启动新 EXE 做人工拖拽和视觉验收。
+- 即使窗口可缩放，最小尺寸仍会限制继续缩小，这是为了避免底栏和表单再次被裁切，不属于固定窗口限制。
+
+### USER_DECISION_REQUIRED
+
+- 本阶段无。
+
+## 2026-07-23：模型设置 HERMES 式重构规划
+
+### 目标与调查
+
+- 仅制定设计与实施计划，不修改模型配置、Provider 调用链或 EXE。
+- 结合用户提供的三张 HERMES 参考图，拆解为“API 提供商与 Key”“按 Provider 分组的模型目录”“按功能分配模型”三层体验。
+- 只读核对当前 `global_settings.json`、全局密钥引用、Provider 注册表、`writer/scorer/reviser` 角色、记忆银行调用和现有测试。
+- 核对 OpenRouter、DeepSeek、Chutes 官方资料，确认模型目录应采用用户主动刷新、缓存和手工输入并存的方案，不应永久硬编码模型名单。
+
+### 产物
+
+- 新增 `docs/model-settings-hermes-redesign-plan.md`。
+- 计划包含信息架构、页面交互、schema v2、旧配置无损迁移、Provider 档案、模型目录缓存、功能分配解析、模块拆分、测试矩阵、人工验收、八阶段实施顺序和五项 `USER_DECISION_REQUIRED`。
+- 建议下一轮先实现数据层、迁移、模型目录与功能解析器，验收后再编写 UI，降低“界面正确但运行时仍走旧模型”的风险。
+
+### 验证与限制
+
+- Markdown 标题结构和 `git diff --check` 通过。
+- 本轮未生成 UI 概念图、未修改业务代码、未运行测试、未联网调用 Provider、未重建 EXE。
+
+### USER_DECISION_REQUIRED
+
+- 首版功能是否包含记忆总结和记忆压缩的独立模型分配。
+- 首版是否只管理全局模型，项目专属覆盖留到后续。
+- Provider 多档案、模型刷新方式和主模型继承规则是否采用计划中的推荐值。
+
+## 2026-07-23：实施 HERMES 式模型设置与重建 Windows EXE
+
+### 实施范围
+
+- 将软件级模型配置升级为 schema v2，拆分为接入商档案、模型目录、主模型和功能分配四层。
+- 内置硅基流动、Chutes、OpenRouter；支持持续新增自定义 OpenAI Chat Completions 兼容接入商。
+- 新模型设置窗口采用三页结构：`API 提供商`、`模型目录`、`功能分配`，底部保存操作固定可见，窗口可调整大小。
+- 功能分配覆盖正文生成、AI 审稿、AI 精修、记忆生成、记忆压缩；未单独指定时继承主模型。
+
+### 配置、迁移与运行时
+
+- 新增 `model_settings.py`，实现 Provider/Model 引用、功能解析、旧 `writer/scorer/reviser` 配置迁移和兼容影子同步。
+- v1 首次迁移会在 `migration_backups/` 备份原 `global_settings.json`；不会复制、清空或改名密钥文件。
+- 同一接入商若旧配置使用不同 Key 引用，会迁移为不同 Provider 档案，不会错误合并。
+- 新增 `model_catalog.py`，仅在用户点击“刷新模型”时请求 `{base_url}/models`；结果标准化并缓存到 `model_catalog_cache.json`，也支持手工添加模型。
+- `ProviderRequest` 新增可选 `feature_id`，运行时按具体功能解析模型，同时保持原位置参数顺序兼容。
+- 新增硅基流动 Provider 适配器；三家均复用既有 OpenAI 兼容 Chat Completions 客户端。
+- 官方接口核对结果：硅基流动 `https://api.siliconflow.cn/v1`、Chutes `https://llm.chutes.ai/v1`、OpenRouter `https://openrouter.ai/api/v1`。
+
+### UI 与交互
+
+- Provider 页支持保存名称、适配器、API 地址、Key 和等待上限；Key 只显示掩码，留空保持原值，可单独清除。
+- 模型页支持按 Provider 查看、搜索、显式刷新、手工添加和启用/停用。
+- 功能页支持设置主模型，以及为五类功能选择“使用主模型”或“单独指定”。
+- 自定义接入商可删除；删除时同步移除其模型和失效分配，但不会自动删除可能仍需恢复的密钥值。
+- 保留原模型服务入口，打开后改为新的三页式窗口。
+
+### 验证与反证检查
+
+- 新增迁移、三家内置档案、不同 Key 分档、目录标准化、缓存、手工模型、功能解析、密钥不外泄和 UI 结构测试。
+- 完整 `unittest discover -s tests -v`：31 项全部通过。
+- `git diff --check` 通过，仅有仓库既有的 LF/CRLF 提示。
+- 真实 Windows Tk 构造测试首次发现 `Treeview width` 无效参数，改为设置 `#0` 树列宽；修复后窗口构造成功，三家内置接入商和固定保存按钮均存在。
+- 未使用真实 Key，未调用三家真实 Provider API，模型刷新网络行为仅通过 mock 测试。
+- 反证自审重点：删除主模型/Provider 后旧三角色影子不会继续指向已删除模型；`ProviderRequest` 原有位置参数调用不会因新增字段错位。
+
+### EXE 构建与用户数据
+
+- 使用现有 Python 3.13.7、PyInstaller 6.20.0 和 `scripts/build_windows_exe.ps1 -SkipInstall` 重建；未安装或升级依赖。
+- 新 EXE：`dist/NovelAgentWorkbench/NovelAgentWorkbench.exe`。
+- 修改时间：`2026-07-23 14:11:44`（北京时间）；大小：`2,654,107` bytes。
+- SHA-256：`3495BD54D1DED8AE03B6418A09D613DFA9B0B130696F378C987B75B76E6BFE2D`。
+- PyInstaller 归档已确认包含 `model_settings`、`model_catalog`、`model_settings_ui`。
+- 构建前后 `用户数据/workspace_projects` 均为 5 个作品目录、5,030 个文件，用户数据数量未变化。
+
+### USER_DECISION_REQUIRED
+
+- 本阶段无。项目专属模型覆盖暂未加入，当前为软件级全局模型设置；后续如需要可在 schema v2 上增加项目覆盖层。
+
+## 2026-07-23：功能分配模型下拉框支持输入检索
+
+### 问题与修改
+
+- 原主模型和各功能模型下拉框使用只读 `Combobox`，只能滚动点选，模型数量较多时定位困难。
+- 改为可编辑的检索式下拉框；输入内容后实时按显示名称和模型 ID 做不区分大小写的包含匹配。
+- 支持多词交集检索，例如输入 `deep flash` 只显示同时包含 `deep` 和 `flash` 的模型。
+- 输入时自动展开匹配结果，状态栏显示匹配数量；用户仍需从结果中选择一个完整模型，避免把检索词误存为模型引用。
+- 主模型以及正文生成、AI 审稿、AI 精修、记忆生成、记忆压缩的独立模型框均使用同一检索逻辑。
+
+### 验证
+
+- 新增大小写、单词包含、多词交集和空查询回归测试。
+- 真实 Windows Tk 控件模拟输入 `deep`：两个模型中只保留一个匹配项，控件状态确认为可编辑。
+- 完整 `unittest discover -s tests -v`：32 项全部通过。
+- `git diff --check` 通过，仅有仓库既有的 LF/CRLF 提示。
+
+### EXE 构建
+
+- 使用现有 Python 3.13.7、PyInstaller 6.20.0 和 `scripts/build_windows_exe.ps1 -SkipInstall` 重建；未安装或升级依赖。
+- 新 EXE 修改时间：`2026-07-23 14:21:42`（北京时间）；大小：`2,655,985` bytes。
+- SHA-256：`06597C5890763C9E3D5375452EE7F7924FBE87BD814A13B5866EF22F20F06666`。
+- PyInstaller 归档确认包含更新后的 `novel_agent_workbench.model_settings_ui`。
+- 构建前后 `用户数据/workspace_projects` 均为 6 个一级目录、5,032 个文件，数量未变化。
+
+### USER_DECISION_REQUIRED
+
+- 本阶段无。
+
+## 2026-07-23：修复模型检索逐字输入时焦点跳转
+
+### 问题与修复
+
+- 实时筛选后自动调用 Tk 下拉展开命令，Windows 会把键盘焦点转移到弹出的列表，导致用户每输入一个字母都必须重新点击输入框。
+- 现在逐字符输入只更新候选值和匹配数量，不再自动展开列表，输入焦点持续留在编辑框中。
+- 输入完成后可按 Enter 主动展开筛选结果，也可使用方向下键或点击右侧箭头；模型选择和保存规则不变。
+- 界面提示同步改为“可继续输入，完成后按 Enter 或点击箭头选择”。
+
+### 验证与构建
+
+- 真实 Windows Tk 控件连续模拟 `d → de → dee → deep`：最终匹配 1 个模型、输入文本保持 `deep`、自动展开调用次数为 0。
+- 模型设置定向测试 10 项通过；完整测试 32 项全部通过。
+- `git diff --check` 通过，仅有仓库既有的 LF/CRLF 提示。
+- 使用现有 Python 3.13.7、PyInstaller 6.20.0 和 `-SkipInstall` 重建 EXE；未安装或升级依赖。
+- 新 EXE 修改时间：`2026-07-23 14:26:44`（北京时间）；大小：`2,656,134` bytes。
+- SHA-256：`8D36F48C183A6844E34D91189BDA9760F401C0813D948603A0B2AD4256D09583`。
+- PyInstaller 归档确认包含更新后的 `novel_agent_workbench.model_settings_ui`。
+- 构建前后 `用户数据/workspace_projects` 均为 6 个一级目录、5,032 个文件，数量未变化。
+
+### USER_DECISION_REQUIRED
+
+- 本阶段无。

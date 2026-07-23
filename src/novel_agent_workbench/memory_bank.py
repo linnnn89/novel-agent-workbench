@@ -603,7 +603,11 @@ def build_memory_generation_provider_request(
     selected_chapters = normalize_memory_generation_chapters(chapters)
     target_tokens = normalize_memory_target_tokens(target_token_budget)
     source_ids = memory_generation_source_chapter_ids(selected_chapters)
-    role = provider_request_role_or_writer_fallback(store, "writer")
+    role = provider_request_role_or_writer_fallback(
+        store,
+        "writer",
+        feature_id="memory_generation",
+    )
     metadata = {
         "memory_bank_generation": True,
         "source_chapter_count": len(selected_chapters),
@@ -613,6 +617,7 @@ def build_memory_generation_provider_request(
     }
     return ProviderRequest(
         role=role,
+        feature_id="memory_generation",
         system_prompt=memory_generation_system_prompt(),
         prompt=format_memory_update_prompt(
             current_memory=current_memory,
@@ -641,7 +646,11 @@ def build_memory_compression_provider_request(
     if not existing_memory:
         raise MemoryBankError("Current Memory Bank text is empty.")
     target_tokens = normalize_memory_target_tokens(target_token_budget)
-    role = provider_request_role_or_writer_fallback(store, "writer")
+    role = provider_request_role_or_writer_fallback(
+        store,
+        "writer",
+        feature_id="memory_compression",
+    )
     metadata = {
         "memory_bank_compression": True,
         "target_token_budget": target_tokens,
@@ -649,6 +658,7 @@ def build_memory_compression_provider_request(
     }
     return ProviderRequest(
         role=role,
+        feature_id="memory_compression",
         system_prompt=memory_compression_system_prompt(),
         prompt=format_memory_compression_prompt(current_memory=existing_memory, target_tokens=target_tokens),
         temperature=DEFAULT_MEMORY_GENERATION_TEMPERATURE,
