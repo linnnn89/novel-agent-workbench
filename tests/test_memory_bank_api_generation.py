@@ -87,6 +87,9 @@ class MemoryBankApiGenerationTests(unittest.TestCase):
 
         self.assertIn("记忆银行生成进度", source)
         self.assertIn("记忆银行缩写进度", source)
+        self.assertIn("self._secondary_window", source)
+        self.assertIn("button_row", source)
+        self.assertIn("wrapped_row_positions", source)
         self.assertIn("ttk.Progressbar(progress, mode=\"indeterminate\")", source)
         self.assertIn("def stream_callback(chunk: str)", source)
         self.assertIn("stream_callback=stream_callback", source)

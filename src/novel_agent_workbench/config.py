@@ -3,9 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from .model_settings import MODEL_SETTINGS_SCHEMA_VERSION, default_model_settings_fields
 
 CURRENT_CONFIG_SCHEMA_VERSION = 4
-GLOBAL_SETTINGS_SCHEMA_VERSION = 1
+GLOBAL_SETTINGS_SCHEMA_VERSION = MODEL_SETTINGS_SCHEMA_VERSION
 GENERATION_SETTINGS_SCOPE_GLOBAL = "global_fallback"
 GENERATION_SETTINGS_SCOPE_PROJECT = "project_override"
 
@@ -193,6 +194,7 @@ def default_global_settings() -> dict[str, Any]:
             "scorer": default_model_role("scorer"),
             "reviser": default_model_role("reviser"),
         },
+        **default_model_settings_fields(),
     }
 
 

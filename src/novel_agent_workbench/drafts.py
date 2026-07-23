@@ -61,6 +61,7 @@ class DraftGenerationRequest:
         }
         return ProviderRequest(
             role="writer",
+            feature_id="draft_generation",
             prompt=self.prompt,
             system_prompt=self.system_prompt,
             temperature=self.temperature,
@@ -531,6 +532,114 @@ class DraftGenerationService:
                 "retired_paths": retired_paths,
                 "checkpoint": checkpoint,
                 "confirmed_chapter_retained": bool(confirmed_entries),
+            }
+
+    def delete_confirmed_chapter(self, chapter_id: str) -> dict[str, Any]:
+        validate_chapter_id(chapter_id)
+        self.store.initialize()
+        with self.store.lock():
+            confirmed_entries = self._read_confirmed_index()
+            target_entry = next(
+                (item for item in confirmed_entries if str(item.get("chapter_id") or "") == chapter_id),
+                None,
+            )
+            if target_entry is None:
+                raise DraftGenerationError(f"Confirmed chapter not found: {chapter_id}")
+            checkpoint = self.store.create_checkpoint(label=f"pre_delete_{chapter_id}_confirmed")
+            kept_entries = [
+                item for item in confirmed_entries if str(item.get("chapter_id") or "") != chapter_id
+            ]
+            self.store.write_json(self.confirmed_index_path, {"schema_version": 1, "chapters": kept_entries})
+
+            retired_paths: list[str] = []
+            retired = retire_indexed_artifact(self.store, target_entry.get("path"))
+            if retired:
+                retired_paths.append(retired)
+            retired_paths.extend(
+                retire_orphan_chapter_artifacts(
+                    self.store,
+                    self.confirmed_dir,
+                    f"{safe_filename(chapter_id)}.json",
+                    set(),
+                )
+            )
+
+            deleted_at = utc_stamp()
+            source_draft_id = str(target_entry.get("source_draft_id") or "")
+            draft_index = self.store.read_json(self.index_path, default={"schema_version": 1, "drafts": []})
+            draft_entries = (
+                draft_index.get("drafts")
+                if isinstance(draft_index, dict) and isinstance(draft_index.get("drafts"), list)
+                else []
+            )
+            kept_drafts: list[dict[str, Any]] = []
+            deleted_draft_ids: set[str] = set()
+            for item in draft_entries:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("chapter_id") or "") != chapter_id:
+                    kept_drafts.append(item)
+                    continue
+                draft_id = str(item.get("draft_id") or "")
+                if draft_id:
+                    deleted_draft_ids.add(draft_id)
+                retired = retire_indexed_artifact(self.store, item.get("path"))
+                if retired:
+                    retired_paths.append(retired)
+            retired_paths.extend(
+                retire_orphan_chapter_artifacts(
+                    self.store,
+                    self.drafts_dir,
+                    f"{safe_filename(chapter_id)}__*.json",
+                    set(),
+                )
+            )
+            self.store.write_json(self.index_path, {"schema_version": 1, "drafts": kept_drafts})
+
+            removed_reviews = self._delete_related_index_entries(
+                index_path=self.store.data_dir / "reviews_index.json",
+                list_key="reviews",
+                chapter_id=chapter_id,
+                draft_ids=deleted_draft_ids,
+                retained_draft_ids=set(),
+                retired_paths=retired_paths,
+            )
+            removed_revision_requests = self._delete_related_index_entries(
+                index_path=self.store.data_dir / "revision_requests_index.json",
+                list_key="revision_requests",
+                chapter_id=chapter_id,
+                draft_ids=deleted_draft_ids,
+                retained_draft_ids=set(),
+                retired_paths=retired_paths,
+            )
+
+            workflow = ChapterWorkflowService(self.store)
+            workflow.remove_chapter(chapter_id)
+
+            self._append_commit_log(
+                {
+                    "commit_id": f"{deleted_at}_{uuid4().hex[:12]}",
+                    "timestamp": deleted_at,
+                    "draft_id": source_draft_id,
+                    "chapter_id": chapter_id,
+                    "status": "confirmed_deleted",
+                    "checkpoint_id": checkpoint.get("checkpoint_id"),
+                    "retired_path_count": len(retired_paths),
+                    "deleted_draft_count": len(deleted_draft_ids),
+                    "removed_review_count": len(removed_reviews),
+                    "removed_revision_request_count": len(removed_revision_requests),
+                }
+            )
+            return {
+                "chapter_id": chapter_id,
+                "deleted": True,
+                "source_draft_id": source_draft_id,
+                "deleted_draft_ids": sorted(deleted_draft_ids),
+                "removed_reviews": removed_reviews,
+                "removed_revision_requests": removed_revision_requests,
+                "retired_paths": retired_paths,
+                "checkpoint": checkpoint,
+                "remaining_confirmed_count": len(kept_entries),
             }
 
     def commit_draft(self, draft_id: str, *, replace_existing: bool = False) -> DraftCommitResult:

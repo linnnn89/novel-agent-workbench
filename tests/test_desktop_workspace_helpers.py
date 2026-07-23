@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import unittest
 
 from novel_agent_workbench.desktop_app import (
@@ -7,6 +8,7 @@ from novel_agent_workbench.desktop_app import (
     INSPECTOR_MIN_WIDTH,
     SAVED_SECRET_MASK,
     SIDEBAR_MIN_WIDTH,
+    WorkbenchDesktopApp,
     format_provider_roles_compact,
     model_connection_form_state,
     parse_tree_node_id,
@@ -57,6 +59,21 @@ class DesktopWorkspaceHelperTests(unittest.TestCase):
 
     def test_inspector_is_narrower_than_the_project_sidebar(self) -> None:
         self.assertLess(INSPECTOR_MIN_WIDTH, SIDEBAR_MIN_WIDTH)
+
+    def test_model_connection_window_keeps_footer_visible(self) -> None:
+        source = inspect.getsource(WorkbenchDesktopApp.configure_model_connection)
+
+        self.assertIn('geometry="700x640"', source)
+        self.assertIn("minsize=(640, 600)", source)
+        self.assertIn('text="保存设置"', source)
+
+    def test_all_windows_are_resizable_through_the_shared_factory(self) -> None:
+        app_source = inspect.getsource(WorkbenchDesktopApp)
+        factory_source = inspect.getsource(WorkbenchDesktopApp._secondary_window)
+
+        self.assertEqual(app_source.count("tk.Toplevel("), 1)
+        self.assertIn("window.resizable(True, True)", factory_source)
+        self.assertIn("self.resizable(True, True)", app_source)
 
 
 if __name__ == "__main__":

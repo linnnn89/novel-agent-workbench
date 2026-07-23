@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from .config import default_model_role
+from .model_settings import FEATURE_IDS, resolve_model_role_mapping
 from .storage import ProjectStore, utc_stamp
 
 
@@ -18,6 +19,7 @@ MODEL_ROLES = {"writer", "scorer", "reviser"}
 SECRET_REF_PREFIX = "project_secret."
 MOCK_PROVIDER_ID = "mock"
 CHUTES_PROVIDER_ID = "chutes_openai"
+SILICONFLOW_PROVIDER_ID = "siliconflow"
 DEEPSEEK_PROVIDER_ID = "deepseek"
 OPENROUTER_PROVIDER_ID = "openrouter"
 LOCAL_OPENAI_COMPATIBLE_PROVIDER_ID = "local_openai_compatible"
@@ -27,6 +29,7 @@ DISABLED_ADAPTER_IDS = (
     LOCAL_OPENAI_COMPATIBLE_PROVIDER_ID,
     DEEPSEEK_PROVIDER_ID,
     CHUTES_PROVIDER_ID,
+    SILICONFLOW_PROVIDER_ID,
     OPENROUTER_PROVIDER_ID,
 )
 REAL_NETWORK_PROVIDER_IDS = {
@@ -34,6 +37,7 @@ REAL_NETWORK_PROVIDER_IDS = {
     LOCAL_OPENAI_COMPATIBLE_PROVIDER_ID,
     DEEPSEEK_PROVIDER_ID,
     CHUTES_PROVIDER_ID,
+    SILICONFLOW_PROVIDER_ID,
     OPENROUTER_PROVIDER_ID,
 }
 DEFAULT_PROVIDER_TIMEOUT_SECONDS = 300.0
@@ -197,9 +201,12 @@ class ProviderRequest:
     metadata: dict[str, Any] = field(default_factory=dict)
     stream_callback: Callable[[str], None] | None = field(default=None, repr=False, compare=False)
     reasoning_callback: Callable[[str], None] | None = field(default=None, repr=False, compare=False)
+    feature_id: str = ""
 
     def __post_init__(self) -> None:
         validate_role(self.role)
+        if self.feature_id and self.feature_id not in FEATURE_IDS:
+            raise ProviderError(f"Unknown model feature: {self.feature_id!r}.", error_type="invalid_request")
         if not isinstance(self.prompt, str) or not self.prompt.strip():
             raise ProviderError("Provider prompt cannot be empty.", error_type="invalid_request")
         if self.system_prompt is not None and not isinstance(self.system_prompt, str):
@@ -404,6 +411,13 @@ PROVIDER_ADAPTER_REGISTRY: dict[str, ProviderAdapterInfo] = {
         requires_secret=True,
         description="Chutes OpenAI-compatible adapter.",
     ),
+    SILICONFLOW_PROVIDER_ID: ProviderAdapterInfo(
+        adapter_id=SILICONFLOW_PROVIDER_ID,
+        enabled=True,
+        network_allowed=True,
+        requires_secret=True,
+        description="SiliconFlow OpenAI-compatible adapter.",
+    ),
     OPENROUTER_PROVIDER_ID: ProviderAdapterInfo(
         adapter_id=OPENROUTER_PROVIDER_ID,
         enabled=True,
@@ -421,12 +435,31 @@ def get_model_role_config(store: ProjectStore, role: str) -> ModelRoleConfig:
     return ModelRoleConfig.from_mapping(role, roles.get(role))
 
 
-def provider_request_role_or_writer_fallback(store: ProjectStore, preferred_role: str) -> str:
+def get_effective_model_role_config(
+    store: ProjectStore,
+    role: str,
+    *,
+    feature_id: str = "",
+) -> ModelRoleConfig:
+    validate_role(role)
+    config = store.read_config()
+    resolved = resolve_model_role_mapping(config, role=role, feature_id=feature_id)
+    if resolved:
+        return ModelRoleConfig.from_mapping(role, resolved)
+    return get_model_role_config(store, role)
+
+
+def provider_request_role_or_writer_fallback(
+    store: ProjectStore,
+    preferred_role: str,
+    *,
+    feature_id: str = "",
+) -> str:
     validate_role(preferred_role)
-    preferred = get_model_role_config(store, preferred_role)
+    preferred = get_effective_model_role_config(store, preferred_role, feature_id=feature_id)
     if preferred.provider and preferred.model:
         return preferred_role
-    writer = get_model_role_config(store, "writer")
+    writer = get_effective_model_role_config(store, "writer", feature_id=feature_id)
     if writer.provider and writer.model:
         return "writer"
     return preferred_role
@@ -617,8 +650,8 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
     )
 
 
-def create_provider_client(store: ProjectStore, role: str) -> ProviderClient:
-    role_config = get_model_role_config(store, role)
+def create_provider_client(store: ProjectStore, role: str, *, feature_id: str = "") -> ProviderClient:
+    role_config = get_effective_model_role_config(store, role, feature_id=feature_id)
     if not role_config.provider:
         raise ProviderError("Model role has no provider configured.", error_type="missing_provider")
     adapter = get_provider_adapter(role_config.provider)
@@ -678,7 +711,7 @@ def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> Pro
     call_id = str(uuid4())
     client: ProviderClient | None = None
     try:
-        client = create_provider_client(store, request.role)
+        client = create_provider_client(store, request.role, feature_id=request.feature_id)
         response = client.generate(request)
         append_provider_call_log(
             store,
@@ -693,7 +726,11 @@ def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> Pro
         )
         return response
     except ProviderError as exc:
-        role_config = client.role_config if client else get_model_role_config(store, request.role)
+        role_config = (
+            client.role_config
+            if client
+            else get_effective_model_role_config(store, request.role, feature_id=request.feature_id)
+        )
         append_provider_call_log(
             store,
             provider_call_log_entry(
