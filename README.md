@@ -6,41 +6,40 @@
 
 ## 中文说明
 
-Novel Agent Workbench（小说创作工作台）是给网文作者、长篇小说作者和系列故事创作者用的本地 AI 写作工作台。
+Novel Agent Workbench（小说创作工作台）是一个面向网文作者、长篇小说作者和系列故事创作者的本地优先 AI 创作工具。
 
-一句话：它不是单纯“让 AI 写一段”，而是帮你把大纲、人物、世界观、记忆库、章节草稿、AI 审稿、重写候选和确认稿流程都放进一个可恢复的本地桌面工具里。数据优先保存在本机，草稿不会自动覆盖正文，Windows 上可以一键构建运行。
+如果你的故事会持续几十章、需要反复修改，或者不想每次打开聊天框都重新解释人物和世界观，这个项目就是为这种创作过程准备的：它把大纲、人物、世界观、章节计划、长期记忆、草稿、审稿和确认稿放在同一个可恢复的桌面工作台里。
 
-本项目适合用于：
+它不是替你“一键写完一本书”的自动写作服务，而是把 AI 放进一个作者仍然掌握节奏和决定权的工作流中。草稿先作为候选保存，审稿和重写是独立步骤，只有你明确确认后，内容才会进入已确认章节。
 
-- 长篇小说、网文、系列故事的本地创作管理。
-- 角色设定、世界观设定、章节规划和记忆库管理。
-- AI 草稿生成、AI 审稿、修改建议、重写候选和人工确认稿流程。
-- 多模型 Provider 配置、连接测试、调用审计和安全发布前检查。
-- Windows 本地桌面工具打包与个人工作流实验。
+### 适合谁
 
-### 中文搜索关键词
+- 正在写网文、长篇小说或系列故事，希望持续管理几十章内容的作者。
+- 需要同时维护人物关系、世界观、章节目标和长期记忆的创作者。
+- 想在本机保存项目资料，并自行选择 DeepSeek、OpenRouter、Chutes、硅基流动或其他兼容服务的用户。
+- 希望把自己的写作流程、模型配置和桌面工具一起掌握在手里的开发者。
 
-小说创作工作台，AI 小说写作，AI 网文写作，长篇小说创作工具，本地小说写作软件，角色设定，世界观设定，章节规划，记忆库，AI 审稿，章节重写，重新生成章节，审稿精修，小说草稿管理，网文创作助手。
+### 你可以用它完成什么
 
-### 快速看点
+- 从总纲、节拍表、世界观和人物设定开始，建立一个可持续更新的小说项目。
+- 生成章节草稿，查看 AI 审稿意见，发起精修或重新生成，并比较不同候选版本。
+- 用 Memory Bank 保存跨章节的重要事实、关系和风格提醒，减少长篇创作中的上下文断裂。
+- 在“模型设置”中管理 API 提供商、刷新或手工维护模型目录，并分别指定正文生成、AI 审稿、AI 精修、记忆生成和记忆压缩使用的模型。
+- 在 Windows 上直接构建和运行本地桌面版，不依赖在线编辑器或托管项目空间。
 
-- **给中国网文/长篇作者的真实工作流**：不是聊天框玩具，而是围绕大纲、人物、世界观、章节和记忆库组织长篇创作。
-- **本地保存，不怕混乱**：项目、草稿、确认稿、密钥和运行数据分开管理，默认不把私人正文上传到 GitHub。
-- **草稿不会自动覆盖正文**：AI 生成、AI 审稿、人工重写、候选比较、确认稿提交都是显式步骤，适合认真写长篇。
-- **三栏桌面创作工作台**：左侧管理作品与章节，中间专注正文，右侧提供精简的本章目标与上下文；重新生成、审稿精修、AI 审稿和确认稿件均有主界面快捷按钮。
-- **Windows 一键构建**：双击 `BUILD_NovelAgentWorkbench.bat` 即可生成本地桌面 EXE，非程序员也能按步骤启动。
-- **可接多种模型**：支持 OpenAI-compatible Provider、DeepSeek、Chutes、本地 OpenAI-compatible endpoint 和 mock Provider。
-- **二次开发边界清楚**：UI、应用服务层、Provider 适配层、存储层和测试入口都在 README 里标出，方便继续改造成自己的写作工具。
+### 最新能力
 
-### 推荐 GitHub 搜索卡片文案
+- **本地优先**：项目、草稿、确认稿、记忆和运行配置默认保存在本机；私人正文不会因为使用这个仓库而自动上传。
+- **可恢复的创作流程**：生成、审稿、重写和确认分开进行，避免 AI 输出意外覆盖正在使用的正文。
+- **新的模型设置中心**：内置硅基流动、Chutes、OpenRouter，支持自定义 OpenAI 兼容 Provider；模型目录可主动刷新、本地缓存，也可以手工添加模型。
+- **面向 DeepSeek 的前缀稳定化**：低频项目资料保持稳定顺序，动态指令放在请求末端，并保留缓存命中/未命中统计，便于长会话观察实际效果。
+- **适配长篇写作的桌面界面**：三栏工作区、紧凑上下文检查器、可调整大小的模型设置窗口，以及窄窗口下仍会自动换行的关键操作按钮。
 
-如果要让中国用户在 GitHub 搜索页一眼看懂，建议把仓库 About description 改成：
+这是一个仍在持续完善的本地开源桌面项目，适合愿意自己配置模型服务、保留本地数据并参与迭代的作者和开发者。它不是托管式在线写作平台，也不会在后台自动调用模型、自动发布内容或自动把草稿变成定稿。
 
-```text
-给网文/长篇作者用的本地 AI 小说写作工作台：管大纲、人物世界观、记忆库、章节草稿、AI审稿和重写，数据本地保存，Windows 一键运行。
-```
+### 本地运行与开发者说明
 
-这条比 “Autonomous novel writing powered by dual-agent AI system” 更适合中文用户，因为它直接回答：谁用、解决什么、有什么核心优点、能不能马上运行。
+下面开始是本地安装、实现边界和开发入口，主要供实际使用者与贡献者查阅；项目首页的产品定位和适用场景以上面的介绍为准。
 
 ### 核心设计原则
 
@@ -57,10 +56,13 @@ Novel Agent Workbench（小说创作工作台）是给网文作者、长篇小�
 - 项目级配置和本地密钥分离。
 - 角色、世界观、章节规划和 Memory Bank 的结构化管理。
 - 草稿生成、审稿、修订请求、重写候选、候选比较和确认稿提交。
+- Memory Bank 总结与压缩，支持流式进度和手动保存门槛。
 - 上下文包预览、最终提示词渲染 dry-run、Provider 执行 gate、runbook、authorization 和 preflight。
-- OpenAI-compatible Provider、DeepSeek、Chutes、本地 OpenAI-compatible endpoint 和 mock Provider 适配框架。
+- Model Settings v2：Provider 档案、模型目录刷新与缓存、手工模型，以及正文、审稿、精修和记忆功能的模型分配。
+- OpenAI-compatible Provider、DeepSeek、硅基流动、Chutes、OpenRouter、本地 OpenAI-compatible endpoint 和 mock Provider 适配框架。
+- 面向 DeepSeek 的稳定请求前缀排序和缓存命中/未命中统计保留。
 - Provider 调用审计、smoke test、安全检查、prepublish-check 和 project-health。
-- Windows Tkinter 桌面启动器和 PyInstaller 打包脚本。
+- Windows Tkinter 桌面启动器、可调整大小的设置窗口和 PyInstaller 打包脚本。
 
 ### 当前实现状态
 
@@ -73,6 +75,8 @@ Novel Agent Workbench（小说创作工作台）是给网文作者、长篇小�
 - Smoke-test drafts 仅保留为证据，不允许提升为确认稿。
 - 上传发布前由 `.gitignore`、`prepublish-check` 和 `project-health` 共同保护。
 - 桌面启动器保持 local-first，不应在启动时或隐藏后台流程中调用模型。
+- 模型设置中心已经支持 Provider 档案、模型目录缓存、手工模型和按功能分配模型；旧版角色配置会迁移到新结构。
+- 针对 DeepSeek 的生成请求已经采用稳定资料优先、动态内容靠后的顺序，并保留服务端缓存统计；项目不承诺固定缓存命中率，实际结果取决于模型、缓存生命周期和请求内容。
 - 最新桌面界面采用统一的冷灰/白色卡片、靛蓝主操作和绿色确认操作；右侧检查器保持紧凑，低频模型配置收纳在顶栏“模型设置”。
 
 ### 桌面界面与主要操作
@@ -107,13 +111,13 @@ Codex 开发、测试、打包和文档更新与产品真实调用不同。在�
 ### 验证命令
 
 ```powershell
-py -3.10 -m unittest discover -s tests
+.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
 最近记录的结果：
 
 ```text
-Ran 18 tests
+Ran 32 tests
 OK
 ```
 
@@ -165,7 +169,7 @@ BUILD_NovelAgentWorkbench.bat --no-pause
 
 ```powershell
 $env:PYTHONPATH="<repo-root>\src"
-py -3.10 -m novel_agent_workbench.cli --projects-root <repo-root>\workspace_projects smoke demo_project --title "Demo Novel" --chapter-id chapter_001 --chapter-title "Opening" --prompt "Write a short mock opening." --commit
+.venv\Scripts\python.exe -m novel_agent_workbench.cli --projects-root <repo-root>\workspace_projects smoke demo_project --title "Demo Novel" --chapter-id chapter_001 --chapter-title "Opening" --prompt "Write a short mock opening." --commit
 ```
 
 ### 二次开发入口
@@ -186,7 +190,7 @@ codex_docs/                                       架构说明、接口契约和
 
 ```cmd
 SETUP_ENV.bat
-py -3.10 -m unittest discover -s tests
+.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
 如果新增真实模型调用能力，请保持显式用户触发、metadata-only 审计、密钥不落日志、草稿不自动确认这四条边界。
@@ -219,31 +223,40 @@ AGPL-3.0 是强 copyleft 许可证，尤其适合 WebUI 或可能作为网络服
 
 ## English
 
-Novel Agent Workbench is a local AI writing workbench for web-novel authors, long-form novelists, and serial-fiction creators.
+Novel Agent Workbench is a local-first AI writing workspace for web-novel authors, long-form novelists, and serial-fiction creators.
 
-In plain terms: it is not just a chat box that writes one passage. It helps organize outlines, characters, world-building notes, a Memory Bank, chapter drafts, AI review, rewrite candidates, and confirmed-chapter workflows in a recoverable local desktop app. Project data stays local by default, drafts do not overwrite confirmed text automatically, and Windows users can build and run it with one BAT file.
+If your story runs for dozens of chapters, changes through repeated revision, or should not depend on re-explaining every character and world-building detail in a new chat, this project is designed for that process. It brings outlines, characters, world-building, chapter plans, long-term memory, drafts, reviews, and confirmed chapters into one recoverable desktop workspace.
 
-This project is useful for:
+It is not an automatic “write a whole book for me” service. Instead, it puts AI inside a workflow where the author keeps control: drafts remain candidates, review and rewriting are separate actions, and only an explicit confirmation promotes text to a confirmed chapter.
 
-- Managing long-form novels, web novels, and serial fiction projects locally.
-- Organizing characters, world-building notes, chapter plans, and a Memory Bank.
-- Generating AI drafts, running AI reviews, recording revision requests, comparing rewrite candidates, and promoting only approved drafts to confirmed chapters.
-- Configuring multiple model providers with connection tests, audit metadata, and pre-publication safety checks.
-- Experimenting with a Windows local desktop writing workflow.
+### Who it is for
 
-### Chinese search keywords
+- Authors writing web novels, long-form fiction, or serial stories across many chapters.
+- Creators who need characters, world-building, chapter goals, and long-term story memory to stay connected.
+- Users who want local project data and the freedom to choose DeepSeek, OpenRouter, Chutes, SiliconFlow, or another compatible service.
+- Developers who want to own and adapt both their writing workflow and their model configuration.
 
-小说创作工作台，AI 小说写作，AI 网文写作，长篇小说创作工具，本地小说写作软件，角色设定，世界观设定，章节规划，记忆库，AI 审稿，章节重写，重新生成章节，审稿精修，小说草稿管理，网文创作助手。
+### What you can do with it
 
-### Highlights
+- Start from outlines, beat sheets, world-building, and character notes, then keep the project evolving chapter by chapter.
+- Generate drafts, review them with AI, request refinement or regeneration, and compare candidate versions before confirming one.
+- Use the Memory Bank for cross-chapter facts, relationships, and style reminders so long-form context does not disappear between sessions.
+- Manage providers in Model Settings, refresh or manually maintain model catalogs, and assign different models to drafting, review, refinement, memory generation, and memory compression.
+- Build and run a local Windows desktop version without relying on a hosted editor or hosted project storage.
 
-- **Built for real long-form writing workflows**: outlines, characters, world-building, chapters, and Memory Bank are treated as first-class project data.
-- **Local-first and less chaotic**: runtime projects, drafts, confirmed chapters, secrets, and build outputs are separated and kept out of GitHub by default.
-- **Drafts do not overwrite confirmed text automatically**: AI generation, AI review, manual rewrite, candidate comparison, and confirmed-chapter promotion are explicit steps.
-- **Three-column desktop writing workspace**: projects and chapters on the left, manuscript editing in the center, and a compact goals/context inspector on the right, with direct actions for regeneration, review-driven refinement, AI review, and confirmation.
-- **One-click Windows build**: double-click `BUILD_NovelAgentWorkbench.bat` to produce a local desktop EXE.
-- **Multiple model backends**: OpenAI-compatible providers, DeepSeek, Chutes, local OpenAI-compatible endpoints, and a deterministic mock provider.
-- **Clear extension points**: README points developers to the UI, application-service layer, provider adapters, storage layer, and tests.
+### Latest capabilities
+
+- **Local-first by default**: projects, drafts, confirmed chapters, memory, and runtime configuration stay on the local machine; private manuscript text is not uploaded by this repository automatically.
+- **Recoverable writing workflow**: generation, review, rewriting, and confirmation are separate steps, so an AI response does not silently replace the text you are working on.
+- **Model Settings v2**: built-in SiliconFlow, Chutes, and OpenRouter profiles, custom OpenAI-compatible providers, refreshable and locally cached model catalogs, manual model entries, and per-feature model assignment.
+- **DeepSeek prefix stability work**: low-change project context is kept in a stable order, dynamic instructions are placed near the end, and cache hit/miss usage is preserved for observing real service behavior.
+- **Desktop workflow for long-form writing**: a three-column workspace, compact context inspector, resizable model settings, and responsive action buttons that remain available in narrow windows.
+
+This is an actively evolving open-source desktop project for authors and developers who are comfortable configuring their own model services, keeping data local, and shaping the tool over time. It is not a hosted writing platform, and it does not silently call models, publish content, or turn drafts into final chapters in the background.
+
+### Local use and contributor notes
+
+The sections below cover local installation, implementation boundaries, and development entry points for users and contributors. The visitor-facing product positioning is the introduction above.
 
 ### Core design principles
 
@@ -260,10 +273,13 @@ This project is useful for:
 - Project-level configuration with local secret separation.
 - Structured management for characters, world-building notes, chapter plans, and Memory Bank entries.
 - Draft generation, review, revision requests, rewrite candidates, candidate comparison, and confirmed-chapter commit gates.
+- Streaming Memory Bank generation and compression with an explicit manual save gate.
 - Context package preview, final prompt render dry-run, Provider execution gate, runbook, authorization, and preflight checks.
-- Adapter framework for OpenAI-compatible providers, DeepSeek, Chutes, local OpenAI-compatible endpoints, and a deterministic mock provider.
+- Model Settings v2 with provider profiles, refreshable and cached model catalogs, manual models, and per-feature assignments.
+- Adapter framework for OpenAI-compatible providers, DeepSeek, SiliconFlow, Chutes, OpenRouter, local OpenAI-compatible endpoints, and a deterministic mock provider.
+- DeepSeek-oriented stable prefix ordering with preserved cache hit/miss usage counters.
 - Provider call audit, smoke tests, safety checks, prepublish checks, and project health summaries.
-- Windows Tkinter desktop launcher and PyInstaller build script.
+- Windows Tkinter desktop launcher, resizable settings windows, and PyInstaller build script.
 
 ### Current status
 
@@ -276,6 +292,8 @@ This README no longer lists every internal MVP item line by line. For detailed d
 - Smoke-test drafts are retained as evidence only and must not be promoted to confirmed chapters.
 - Upload readiness is guarded by `.gitignore`, `prepublish-check`, and `project-health`.
 - The desktop launcher is local-first and should not call models on startup or through hidden background flows.
+- Model Settings now supports provider profiles, cached and manual model catalogs, per-feature model assignment, and migration from the previous role-based configuration.
+- DeepSeek-oriented generation requests keep stable project context ahead of dynamic content and preserve server-reported cache usage; no fixed hit-rate guarantee is implied.
 - The latest desktop UI uses a consistent cool-gray/white surface system, indigo primary actions, green confirmation actions, a compact inspector, and a low-frequency model configuration entry in the top bar.
 
 ### Desktop UI and primary actions
@@ -310,13 +328,13 @@ Codex development, testing, packaging, and documentation updates are different f
 ### Verification command
 
 ```powershell
-py -3.10 -m unittest discover -s tests
+.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
 Latest recorded result:
 
 ```text
-Ran 18 tests
+Ran 32 tests
 OK
 ```
 
@@ -368,7 +386,7 @@ Note: the repository does not upload `.venv/`, runtime projects, local secrets, 
 
 ```powershell
 $env:PYTHONPATH="<repo-root>\src"
-py -3.10 -m novel_agent_workbench.cli --projects-root <repo-root>\workspace_projects smoke demo_project --title "Demo Novel" --chapter-id chapter_001 --chapter-title "Opening" --prompt "Write a short mock opening." --commit
+.venv\Scripts\python.exe -m novel_agent_workbench.cli --projects-root <repo-root>\workspace_projects smoke demo_project --title "Demo Novel" --chapter-id chapter_001 --chapter-title "Opening" --prompt "Write a short mock opening." --commit
 ```
 
 ### Developer Entry Points
@@ -389,7 +407,7 @@ Recommended first checks:
 
 ```cmd
 SETUP_ENV.bat
-py -3.10 -m unittest discover -s tests
+.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
 When adding real model-provider features, keep four boundaries intact: explicit user-triggered actions, metadata-only audit records, no plaintext secrets in logs, and no automatic draft-to-confirmed promotion.
