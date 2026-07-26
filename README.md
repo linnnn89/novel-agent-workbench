@@ -34,10 +34,12 @@ It is designed for human-led writing workflows. It does not silently replace con
 |---|---|
 | Local-first projects / 本地优先 | Projects, drafts, confirmed chapters, settings, and runtime data stay on the local machine by default / 项目、草稿、确认稿、配置和运行数据默认保存在本机 |
 | Draft → review → confirm / 草稿到确认稿 | Generated or rewritten text remains a candidate until the user explicitly promotes it / 生成或重写内容必须经过显式确认才会成为正文 |
-| Memory Bank and context assembly / 记忆库与上下文装配 | Build metadata-first context packages and prompt previews without exposing text by default / 默认以元数据构建上下文包和 Prompt 预览，避免泄露正文 |
+| Memory Bank and context assembly / 记忆库与上下文装配 | Build metadata-first context packages, stream Memory Bank generation/compression progress, and require an explicit save gate / 默认以元数据构建上下文包，支持记忆生成/压缩进度，并要求显式保存 |
 | AI review and revision / AI 审稿与修订 | Record review requests, compare rewrite candidates, and preserve decision gates / 记录审稿请求、比较重写候选并保留决策 gate |
+| Model Settings v2 / 模型设置 v2 | Manage provider profiles, refreshable and cached model catalogs, manual models, and per-feature assignments / 管理 Provider 档案、可刷新与缓存的模型目录、手工模型和按功能分配 |
+| DeepSeek prefix stability / DeepSeek 前缀稳定化 | Keep low-change context ahead of dynamic instructions and expose cache hit/miss usage; actual hit rate depends on service behavior / 稳定低频上下文并把动态指令放在末尾，保留命中/未命中统计；实际命中率取决于服务行为 |
 | Provider safety boundary / Provider 安全边界 | Mock and dry-run paths are available; real network execution requires explicit user action and preflight gates / 提供 mock 与 dry-run，真实网络调用必须由用户显式触发并通过 preflight |
-| Windows desktop workflow / Windows 桌面流程 | Build a local EXE with the included BAT and PowerShell scripts / 使用仓库内 BAT 与 PowerShell 脚本构建本地 EXE |
+| Responsive Windows desktop workflow / 响应式 Windows 桌面流程 | Build a local EXE with the included scripts; settings windows resize and key actions remain available in narrow layouts / 使用仓库内脚本构建本地 EXE；设置窗口可调整大小，窄窗口下关键操作仍保持可见 |
 
 ## Workflow / 工作流
 
@@ -209,6 +211,10 @@ Never commit the following to the public repository:
 The repository is an actively developed multi-stage MVP. The implemented path spans local project storage, model settings, draft generation, review and revision workflows, Memory Bank/context assembly, corpus profiling, manual rewrite, provider gates, audit, and Windows desktop packaging.
 
 仓库目前是持续开发中的多阶段 MVP，已经覆盖本地项目存储、模型设置、草稿生成、审稿与修订、Memory Bank/上下文装配、语料分析、人工重写、Provider gate、审计和 Windows 桌面打包。
+
+Recent work also includes Model Settings v2, provider/model catalog caching, per-feature model assignments, and DeepSeek-oriented stable-prefix request ordering. The cache work exposes service-reported hit/miss usage for observation; it does not promise a fixed hit rate.
+
+近期还加入了 Model Settings v2、Provider/模型目录缓存、按功能分配模型以及面向 DeepSeek 的稳定前缀请求排序。缓存优化会展示服务端返回的命中/未命中统计，不能承诺固定命中率。
 
 The public README intentionally summarizes the architecture rather than listing every internal development log. Historical implementation notes remain in [`codex_logs/`](codex_logs/) and the commit history.
 
