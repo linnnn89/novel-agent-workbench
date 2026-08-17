@@ -106,10 +106,11 @@ function closeDrawer() {
   $("drawer").hidden = true;
 }
 
-function openDrawer({ kicker, title, content }) {
+function openDrawer({ kicker, title, content, wide }) {
   $("drawerKicker").textContent = kicker || "";
   $("drawerTitle").textContent = title || "";
   $("drawerBody").innerHTML = "";
+  $("drawer").classList.toggle("wide", Boolean(wide));
   if (typeof content === "string") {
     $("drawerBody").textContent = content;
   } else {
@@ -233,6 +234,7 @@ async function refreshWorkspace(keepSelection = true) {
 }
 
 async function selectProject(projectId) {
+  if (window.ThinkTrace && ThinkTrace.isIdle()) ThinkTrace.dispose();
   state.projectId = projectId;
   $("projectChip").textContent = currentProject()?.title || "未选择作品";
   renderTree();
@@ -402,6 +404,7 @@ async function generateChapter() {
             await call("generate_draft", state.projectId, chapter.value.trim(), title.value.trim(), prompt.value);
           } catch (error) {
             setBusy(false);
+            ThinkTrace.finish(false);
             toast(error.message);
           }
         },
@@ -415,24 +418,12 @@ function beginStream(chapterId, title) {
   state.chapterId = chapterId;
   state.draftId = "";
   $("draftTitle").textContent = `${chapterId} · ${title}`;
-  $("draftHint").textContent = "正在生成草稿 · 返回文字会实时写入稿纸";
+  $("draftHint").textContent = "请求已发出，正在等待模型接入…";
   $("editor").value = "";
   $("countPill").textContent = "字数 0";
   $("savePill").textContent = "正在生成…";
-  const think = $("thinkBody");
-  if (think) think.textContent = "";
-  if ($("thinkPanel")) $("thinkPanel").hidden = true;
-  setBusy(true, "模型正在书写…");
-}
-
-function appendThinking(text) {
-  if (!text) return;
-  const panel = $("thinkPanel");
-  const body = $("thinkBody");
-  if (!panel || !body) return;
-  panel.hidden = false;
-  body.textContent += text;
-  body.parentElement.scrollTo({ top: body.parentElement.scrollHeight, behavior: "smooth" });
+  ThinkTrace.start();
+  setBusy(true, "请求已发出，正在等待模型接入…");
 }
 
 function appendEditor(text) {
@@ -446,6 +437,7 @@ function appendEditor(text) {
 
 async function finishDraft(payload) {
   setBusy(false);
+  ThinkTrace.finish(payload?.ok !== false);
   if (!payload?.ok) {
     $("savePill").textContent = "生成失败";
     toast(payload?.error || "生成失败");
@@ -473,6 +465,7 @@ async function rewriteDraft() {
         await call("rewrite_draft", state.projectId, state.draftId, instruction);
       } catch (error) {
         setBusy(false);
+        ThinkTrace.finish(false);
         toast(error.message);
       }
     },
@@ -491,6 +484,7 @@ async function refineDraft() {
         await call("refine_draft", state.projectId, state.draftId, instruction);
       } catch (error) {
         setBusy(false);
+        ThinkTrace.finish(false);
         toast(error.message);
       }
     },
@@ -510,7 +504,8 @@ async function reviewDraft() {
     box.className = "review-stream";
     box.textContent = "";
     openDrawer({ kicker: "AI 审稿", title: "正在阅读这一稿", content: box });
-    setBusy(true, "正在审稿…");
+    ThinkTrace.start();
+    setBusy(true, "请求已发出，正在等待模型接入…");
     state.reviewBox = box;
   } catch (error) {
     toast(error.message);
@@ -519,6 +514,7 @@ async function reviewDraft() {
 
 function finishReview(payload) {
   setBusy(false);
+  ThinkTrace.finish(payload?.ok !== false);
   if (!payload?.ok) {
     toast(payload?.error || "审稿失败");
     return;
@@ -717,6 +713,7 @@ function menuItemsFor(target) {
     { label: "大纲与章节", onClick: () => openPlanningStudio("outline") },
     { label: "世界观与人物", onClick: () => openPlanningStudio("world") },
     { label: "项目专属设置", onClick: () => openGenSettings("project") },
+    { label: "记录与诊断", onClick: () => openRecordsStudio("connection") },
     { label: "模型服务", onClick: () => openModelStudio() },
     { label: "打开作品文件夹", onClick: () => call("open_folder", "project", projectId) },
     "-",
@@ -877,6 +874,10 @@ async function showProjectHealth() {
   });
 }
 
+async function showRecentModelCalls() {
+  await openRecordsStudio("calls");
+}
+
 async function showAbout() {
   const data = await call("about");
   openDrawer({ kicker: "帮助", title: data.title, content: data.text });
@@ -930,11 +931,13 @@ function bindEvents() {
   $("focusBtn").addEventListener("click", () => toggleFocus().catch((error) => toast(error.message)));
   $("genBtn").addEventListener("click", () => openGenSettings("global").catch((error) => toast(error.message)));
   $("healthBtn").addEventListener("click", () => showProjectHealth().catch((error) => toast(error.message)));
+  $("recordsBtn").addEventListener("click", () => openRecordsStudio("connection").catch((error) => toast(error.message)));
   $("aboutBtn").addEventListener("click", () => showAbout().catch((error) => toast(error.message)));
   $("trashBtn").addEventListener("click", () => emptyTrash().catch((error) => toast(error.message)));
   $("thinkClose").addEventListener("click", () => {
     $("thinkPanel").hidden = true;
   });
+  ThinkTrace.bind();
   $("modelBtn").addEventListener("click", () => openModelStudio().catch((error) => toast(error.message)));
   $("outlineBtn").addEventListener("click", () => openPlanningStudio("outline").catch((error) => toast(error.message)));
   $("worldBtn").addEventListener("click", () => openPlanningStudio("world").catch((error) => toast(error.message)));
@@ -1013,6 +1016,10 @@ function bindEvents() {
       toggleFocus();
     }
     if (event.key === "Escape") {
+      if (window.ThinkTrace && ThinkTrace.isOpen()) {
+        ThinkTrace.close();
+        return;
+      }
       hideTreeMenu();
       closeModal();
       closeDrawer();
@@ -1022,8 +1029,8 @@ function bindEvents() {
 }
 
 window.__workbenchPush = function workbenchPush(event, payload) {
+  if (window.ThinkTrace && ThinkTrace.handle(event, payload)) return;
   if (event === "draft_chunk") appendEditor(payload?.text || "");
-  if (event === "reason_chunk") appendThinking(payload?.text || "");
   if (event === "review_chunk" && state.reviewBox) {
     state.reviewBox.textContent += payload?.text || "";
     $("drawerBody").scrollTo({ top: $("drawerBody").scrollHeight, behavior: "smooth" });

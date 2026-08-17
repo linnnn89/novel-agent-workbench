@@ -1120,6 +1120,31 @@ def parse_openai_compatible_json_response(response_body: bytes) -> dict[str, Any
     return data
 
 
+def extract_stream_reasoning(delta: object, message: object = None) -> str:
+    """Collect thinking text from common OpenAI-compatible stream shapes."""
+    parts: list[str] = []
+    for source in (delta, message):
+        if not isinstance(source, dict):
+            continue
+        for key in ("reasoning_content", "reasoning", "reasoning_text", "thinking", "thought"):
+            value = source.get(key)
+            if isinstance(value, str) and value:
+                parts.append(value)
+            elif isinstance(value, dict):
+                text = value.get("text") or value.get("content") or value.get("reasoning_content")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+        details = source.get("reasoning_details")
+        if isinstance(details, list):
+            for item in details:
+                if not isinstance(item, dict):
+                    continue
+                text = item.get("text") or item.get("content") or item.get("reasoning")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+    return "".join(parts)
+
+
 def read_openai_compatible_stream_response(
     response: Any,
     *,
@@ -1162,11 +1187,9 @@ def read_openai_compatible_stream_response(
         content = delta.get("content") if isinstance(delta, dict) else ""
         if content is None:
             content = message.get("content") if isinstance(message, dict) else ""
-        reasoning_content = delta.get("reasoning_content") if isinstance(delta, dict) else ""
-        if reasoning_content is None:
-            reasoning_content = message.get("reasoning_content") if isinstance(message, dict) else ""
+        reasoning_content = extract_stream_reasoning(delta, message)
         if reasoning_content and reasoning_callback is not None:
-            reasoning_callback(str(reasoning_content))
+            reasoning_callback(reasoning_content)
         if content:
             text = str(content)
             content_parts.append(text)

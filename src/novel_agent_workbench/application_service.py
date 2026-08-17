@@ -84,6 +84,7 @@ from .providers import (
     provider_real_test,
     provider_request_role_or_writer_fallback,
     provider_status,
+    read_provider_call_log,
     set_model_role_config,
     set_project_secret,
     validate_model_role_config,
@@ -1102,6 +1103,7 @@ class WorkbenchApplicationService:
                     repetition_penalty=repetition_penalty,
                     stream=stream,
                     stream_callback=safe_stream_callback,
+                    reasoning_callback=reasoning_callback,
                     metadata={
                         "ai_review_refinement": True,
                         "chapter_id": chapter_id,
@@ -1457,6 +1459,21 @@ class WorkbenchApplicationService:
             target_token_budget=target_token_budget,
         )
 
+    def preview_memory_compression_request(
+        self,
+        project_id: str,
+        *,
+        current_memory: str,
+        target_token_budget: int | None = None,
+    ) -> dict[str, Any]:
+        return MemoryBankService(self._runtime_store(project_id)).preview_memory_compression_request(
+            current_memory=current_memory,
+            target_token_budget=target_token_budget,
+        )
+
+    def provider_call_log(self, project_id: str) -> dict[str, Any]:
+        return read_provider_call_log(self._open_store(project_id))
+
     def memory_auto_summary_candidate(
         self,
         project_id: str,
@@ -1486,7 +1503,7 @@ class WorkbenchApplicationService:
             chapters=chapters,
             target_token_budget=target_token_budget,
             stream_callback=safe_stream_callback,
-            reasoning_callback=reasoning_callback if stream_callback is None else None,
+            reasoning_callback=reasoning_callback,
         ).to_dict()
 
     def generate_memory_bank_compression_text(
@@ -1503,7 +1520,7 @@ class WorkbenchApplicationService:
             current_memory=current_memory,
             target_token_budget=target_token_budget,
             stream_callback=safe_stream_callback,
-            reasoning_callback=reasoning_callback if stream_callback is None else None,
+            reasoning_callback=reasoning_callback,
         ).to_dict()
 
     def list_confirmed_chapters(self, project_id: str) -> list[dict[str, Any]]:

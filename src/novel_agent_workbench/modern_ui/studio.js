@@ -23,6 +23,13 @@ function closeStudio() {
   $("studio").hidden = true;
   studio.mode = "";
   studio.memoryBox = null;
+  studio.memoryEditor = null;
+  studio.memoryTarget = null;
+  studio.memoryEnabled = null;
+  studio.memoryLive = null;
+  studio.memoryBusy = false;
+  studio.memoryLiveText = "";
+  if (window.ThinkTrace && ThinkTrace.isIdle()) ThinkTrace.close();
 }
 
 function setStudioStatus(text) {
@@ -368,6 +375,12 @@ function renderAssignPage() {
 async function openMemoryStudio() {
   if (!requireProject()) return;
   studio.mode = "memory";
+  studio.memoryEditor = null;
+  studio.memoryTarget = null;
+  studio.memoryEnabled = null;
+  studio.memoryLive = null;
+  studio.memoryBusy = false;
+  studio.memoryLiveText = "";
   openStudioShell({ kicker: currentProject()?.title || state.projectId, title: "记忆库" });
   $("studioTabs").innerHTML = "";
   studio.memory = await call("memory_state", state.projectId);
@@ -437,8 +450,13 @@ function renderMemoryStudio() {
   studio.memoryEditor = editor;
   studio.memoryTarget = target;
   studio.memoryEnabled = enabled;
-  const live = el("div", "studio-note", data.token_advice || "");
-  const actions = el("div", "side-actions");
+  const advice = el("div", "studio-note", data.token_advice || "");
+  const live = el("pre", "studio-live");
+  live.textContent = studio.memoryLiveText || "";
+  live.hidden = !studio.memoryLiveText && !studio.memoryBusy;
+  studio.memoryLive = live;
+  const actions = el("div", "side-actions wrap");
+  const inspect = el("div", "side-actions wrap");
   const save = el("button", "btn primary", "保存记忆");
   save.type = "button";
   save.addEventListener("click", () => saveMemoryStudio());
@@ -448,14 +466,35 @@ function renderMemoryStudio() {
   const compress = el("button", "btn quiet", "压缩当前记忆");
   compress.type = "button";
   compress.addEventListener("click", () => runMemoryJob("compress_memory", "正在压缩记忆正文…"));
+  const reload = el("button", "btn quiet", "从磁盘重新加载");
+  reload.type = "button";
+  reload.addEventListener("click", () => reloadMemoryStudio());
+  const saved = el("button", "btn quiet", "查看已保存记忆");
+  saved.type = "button";
+  saved.addEventListener("click", () => showSavedMemory());
+  const promptPreview = el("button", "btn quiet", "查看更新提示词");
+  promptPreview.type = "button";
+  promptPreview.addEventListener("click", () => previewMemory("generate", "prompt"));
+  const requestPreview = el("button", "btn quiet", "查看发送结构");
+  requestPreview.type = "button";
+  requestPreview.addEventListener("click", () => previewMemory("generate", "request"));
+  const compressPreview = el("button", "btn quiet", "查看缩写提示词");
+  compressPreview.type = "button";
+  compressPreview.addEventListener("click", () => previewMemory("compress", "prompt"));
+  const contextPreview = el("button", "btn quiet", "查看生成上下文");
+  contextPreview.type = "button";
+  contextPreview.addEventListener("click", () => showContextPreview(state.projectId));
   actions.append(save, generate, compress);
+  inspect.append(reload, saved, promptPreview, requestPreview, compressPreview, contextPreview);
   form.append(
-    el("p", "studio-note", "勾选本次要合并进记忆银行的已确认章节。生成会调用模型；保存本身不会联网。"),
+    el("p", "studio-note", "勾选本次要合并进记忆银行的已确认章节。右侧正文来自当前项目已保存记忆；生成失败不会清空它。"),
     field("记忆目标 tokens", target),
-    live,
+    advice,
     enabledRow,
     editor,
-    actions
+    live,
+    actions,
+    inspect
   );
   wrap.append(list, form);
   const body = $("studioBody");
@@ -483,19 +522,97 @@ async function saveMemoryStudio() {
   }
 }
 
+function memoryJobPayload() {
+  return {
+    project_id: state.projectId,
+    chapter_ids: [...studio.checked],
+    current_memory: studio.memoryEditor?.value || studio.memory?.memory?.text || "",
+    target_tokens: studio.memoryTarget?.value,
+  };
+}
+
+function formatSavedMemory(data) {
+  const items = data?.items || (data?.memory ? [data.memory] : []);
+  if (!items.length) return "当前项目还没有已保存的记忆条目。";
+  return items
+    .map((item, index) => {
+      const text = String(item.text || "").trim() || "（暂无正文）";
+      return [
+        `${index + 1}. ${item.title || item.memory_id || "记忆条目"}`,
+        `状态=${item.status || "-"}  字数=${item.text_chars ?? text.length}  更新=${item.updated_at || "-"}`,
+        `来源章节=${(item.source_chapter_ids || []).join("、") || "未记录"}`,
+        "",
+        text,
+      ].join("\n");
+    })
+    .join("\n\n");
+}
+
+async function reloadMemoryStudio() {
+  if (!requireProject()) return;
+  try {
+    studio.memoryEditor = null;
+    studio.memory = await call("memory_state", state.projectId);
+    studio.checked = new Set(studio.memory.recommended || []);
+    studio.memoryLiveText = "";
+    studio.memoryBusy = false;
+    renderMemoryStudio();
+    toast("已从磁盘重新加载已保存记忆。");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function showSavedMemory() {
+  try {
+    const data = await call("memory_state", state.projectId);
+    studio.memory = data;
+    openDrawer({
+      kicker: currentProject()?.title || state.projectId,
+      title: "已保存记忆",
+      content: formatSavedMemory(data),
+      wide: true,
+    });
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function previewMemory(kind, view) {
+  try {
+    const name = kind === "compress" ? "preview_memory_compression" : "preview_memory_generation";
+    const result = await call(name, memoryJobPayload());
+    openDrawer({
+      kicker: "记忆库",
+      title: view === "request" ? "API 发送结构" : kind === "compress" ? "缩写提示词" : "更新记忆提示词",
+      content: view === "request" ? result.request_text : result.prompt_text,
+      wide: true,
+    });
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 async function runMemoryJob(name, label) {
   if (!studio.memoryEditor) return;
   studio.followMemory = true;
-  studio.memoryEditor.value = "";
-  setStudioStatus(label);
+  studio.memoryBackup = studio.memoryEditor.value;
+  studio.memoryLiveText = "";
+  studio.memoryBusy = true;
+  if (studio.memoryLive) {
+    studio.memoryLive.hidden = false;
+    studio.memoryLive.textContent = "";
+  }
+  ThinkTrace.start();
+  setStudioStatus(label || "请求已发出，正在等待模型接入…");
   try {
-    await call(name, {
-      project_id: state.projectId,
-      chapter_ids: [...studio.checked],
-      current_memory: studio.memory?.memory?.text || "",
-      target_tokens: studio.memoryTarget.value,
-    });
+    await call(name, memoryJobPayload());
   } catch (error) {
+    studio.memoryBusy = false;
+    ThinkTrace.finish(false);
+    if (studio.memoryEditor && studio.memoryBackup != null) {
+      studio.memoryEditor.value = studio.memoryBackup;
+    }
     setStudioStatus("");
     toast(error.message);
   }
@@ -503,14 +620,24 @@ async function runMemoryJob(name, label) {
 
 function finishMemoryJob(payload) {
   if (studio.mode !== "memory") return;
+  studio.memoryBusy = false;
+  ThinkTrace.finish(payload?.ok !== false);
   if (!payload?.ok) {
-    setStudioStatus("记忆生成失败。");
+    if (studio.memoryEditor && studio.memoryBackup != null) {
+      studio.memoryEditor.value = studio.memoryBackup;
+    }
+    setStudioStatus("记忆生成失败。已保留当前记忆正文。");
     toast(payload?.error || "记忆生成失败");
     return;
   }
-  const text = payload.data?.text || studio.memoryEditor?.value || "";
-  if (studio.memoryEditor && text && studio.memoryEditor.value.trim() !== String(text).trim()) {
+  const text = payload.data?.text || studio.memoryLiveText || "";
+  if (studio.memoryEditor && text) {
     studio.memoryEditor.value = text;
+  }
+  studio.memoryLiveText = "";
+  if (studio.memoryLive) {
+    studio.memoryLive.textContent = "";
+    studio.memoryLive.hidden = true;
   }
   setStudioStatus("AI 已生成记忆正文，请审阅后保存。");
   toast("记忆正文已生成，尚未保存。");
@@ -684,10 +811,14 @@ function handleStudioPush(event, payload) {
     if (studio.mode === "models") renderModelStudio();
     if (state.projectId) loadOverview(state.projectId).catch(() => {});
   }
-  if (event === "memory_chunk" && studio.memoryEditor) {
-    studio.memoryEditor.value += payload?.text || "";
-    if (studio.followMemory) {
-      studio.memoryEditor.scrollTo({ top: studio.memoryEditor.scrollHeight, behavior: "smooth" });
+  if (event === "memory_chunk") {
+    studio.memoryLiveText = (studio.memoryLiveText || "") + (payload?.text || "");
+    if (studio.memoryLive) {
+      studio.memoryLive.hidden = false;
+      studio.memoryLive.textContent = studio.memoryLiveText;
+      if (studio.followMemory) {
+        studio.memoryLive.scrollTo({ top: studio.memoryLive.scrollHeight, behavior: "smooth" });
+      }
     }
   }
   if (event === "memory_done") finishMemoryJob(payload);
@@ -863,4 +994,76 @@ async function resetGenSettings() {
   studio.gen = { ...(studio.gen || {}), settings: updated };
   renderGenSettings();
   toast(studio.genScope === "project" ? "已改用全局默认。" : "已恢复出厂默认。");
+}
+
+async function openRecordsStudio(kind = "connection") {
+  const pages = [
+    ["connection", "连接检查", true],
+    ["confirmed", "已确认章节", true],
+    ["chapters", "章节列表", true],
+    ["reviews", "审稿与改写", true],
+    ["checklist", "出稿清单", true],
+    ["export", "导出设置", true],
+    ["calls", "模型调用记录", true],
+    ["guide", "使用说明", false],
+    ["run_log", "运行记录", false],
+    ["diagnostics", "开发者诊断", false],
+  ];
+  const page = pages.find((item) => item[0] === kind) || pages[0];
+  if (page[2] && !requireProject()) return;
+  studio.mode = "records";
+  studio.recordsKind = page[0];
+  openStudioShell({
+    kicker: page[2] ? currentProject()?.title || state.projectId : "帮助",
+    title: "记录与诊断",
+  });
+  $("studioTabs").innerHTML = "";
+  studio.records = await call("records_state", studio.recordsKind, state.projectId || "");
+  renderRecordsStudio();
+}
+
+function renderRecordsStudio() {
+  const data = studio.records || {};
+  const pages = data.pages || [];
+  const wrap = el("div", "studio-grid");
+  const list = el("div", "studio-list");
+  list.append(el("h3", "", "记录"));
+  const scroll = el("div", "studio-scroll");
+  pages.forEach((page) => {
+    const button = el("button", `choice${page.id === studio.recordsKind ? " active" : ""}`);
+    button.type = "button";
+    button.textContent = page.label;
+    button.addEventListener("click", () => openRecordsStudio(page.id).catch((error) => toast(error.message)));
+    scroll.append(button);
+  });
+  list.append(scroll);
+
+  const form = el("div", "studio-form");
+  form.append(el("h3", "", data.title || "记录"), el("p", "studio-note", "这里只展示本地记录。开发者诊断会扫描项目库，不会调用模型。"));
+  const body = el("pre", "studio-records");
+  body.textContent = data.details || "暂无记录。";
+  form.append(body);
+  const actions = el("div", "side-actions wrap");
+  const refresh = el("button", "btn quiet", "刷新");
+  refresh.type = "button";
+  refresh.addEventListener("click", () => openRecordsStudio(studio.recordsKind).catch((error) => toast(error.message)));
+  actions.append(refresh);
+  if (studio.recordsKind === "confirmed" || studio.recordsKind === "export") {
+    const exportBtn = el("button", "btn primary", "导出 TXT");
+    exportBtn.type = "button";
+    exportBtn.addEventListener("click", async () => {
+      try {
+        await call("export_txt", state.projectId);
+        toast("TXT 已导出。");
+      } catch (error) {
+        if (!error.cancelled) toast(error.message);
+      }
+    });
+    actions.append(exportBtn);
+  }
+  form.append(actions);
+  wrap.append(list, form);
+  const host = $("studioBody");
+  host.innerHTML = "";
+  host.append(wrap);
 }

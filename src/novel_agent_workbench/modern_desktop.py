@@ -18,10 +18,14 @@ from .desktop_app import (
     estimate_memory_text_tokens,
     format_auto_memory_summary_confirmation,
     format_context_package_preview,
+    format_diagnostic_details,
     format_draft_regeneration_prompt,
+    format_memory_generation_manual_prompt,
+    format_memory_generation_request_preview,
     format_project_summary,
     format_prompt_preview,
     format_provider_summary,
+    format_record_sections,
     format_review_details,
     parse_optional_float,
     parse_optional_int,
@@ -34,14 +38,43 @@ from .desktop_app import (
     readable_chapter_label,
     sorted_draft_versions,
     suggest_next_chapter_id,
+    visible_chapter_record_rows,
 )
 from .memory_bank import normalize_memory_target_tokens
 from .model_settings import FEATURE_DEFINITIONS
+from .storage import utc_stamp
 
 
 
 APP_TITLE = "小说创作工作台"
 MODEL_ROLE_OPTIONS = (("writer", "正文生成"), ("scorer", "AI审稿"), ("reviser", "AI精修/改写"))
+RECORD_PAGES = (
+    ("connection", "连接检查", True),
+    ("confirmed", "已确认章节", True),
+    ("chapters", "章节列表", True),
+    ("reviews", "审稿与改写", True),
+    ("checklist", "出稿清单", True),
+    ("export", "导出设置", True),
+    ("calls", "模型调用记录", True),
+    ("guide", "使用说明", False),
+    ("run_log", "运行记录", False),
+    ("diagnostics", "开发者诊断", False),
+)
+USER_GUIDE_TEXT = """基本流程
+--------
+1. 在左侧选择或新建作品。
+2. 在资料库里录入总纲、章节计划、世界观、人物设定和项目记忆库。
+3. 在创作设置里配置系统提示词、上下文数量、Temperature、Top P、Top K 等参数。
+4. 在模型设置里填写接入商、API Key，并分配正文生成、审稿、精修、记忆生成使用的模型。
+5. 点击“生成新章节”，需要时可先预览将发送给模型的结构，再生成草稿。
+6. 草稿经过审稿、改写、确认后，才会进入后续上下文和定稿流程。
+7. 记忆库可查看已保存记忆、预览发送结构，再按勾选章节生成或压缩。
+
+安全边界
+--------
+保存设置不会联网。
+测试连接、真实生成和导出动作都需要你主动触发。
+API Key 只保存在软件级本地密钥文件，不写入作品配置或运行记录。"""
 DEFAULT_PREFS = {
     "theme": "system",
     "fontFamily": "literary",
@@ -232,6 +265,7 @@ class WorkbenchBridge:
         self.app = WorkbenchApplicationService.open(projects_root)
         self._busy = False
         self._busy_lock = threading.Lock()
+        self._run_log: list[str] = []
 
     def bind_window(self, window: Any) -> None:
         global _ACTIVE_WINDOW
@@ -281,22 +315,57 @@ class WorkbenchBridge:
         with self._busy_lock:
             self._busy = False
 
+    def _log(self, text: str) -> None:
+        line = f"{utc_stamp()}  {str(text).rstrip()}"
+        self._run_log.append(line)
+        if len(self._run_log) > 500:
+            self._run_log = self._run_log[-400:]
+
     def _run_job(self, name: str, worker: Callable[[], Any], *, on_done: str) -> dict[str, Any]:
         if not self._begin_job():
             return _fail("已有任务正在进行，请等待完成。")
+        self._log(f"开始任务: {name}")
 
         def run() -> None:
             try:
                 result = worker()
             except Exception as exc:
+                self._log(f"任务失败: {name}  {exc}")
                 self._push(on_done, {"ok": False, "error": str(exc)})
             else:
+                self._log(f"任务完成: {name}")
                 self._push(on_done, _ok(_jsonable(result)))
             finally:
                 self._end_job()
 
         threading.Thread(target=run, name=name, daemon=True).start()
         return _ok({"started": True})
+
+    def _stream_hooks(self, content_event: str, *, chapter_id: str = "") -> tuple[Callable[[str], None], Callable[[str], None], Callable[[], None]]:
+        seen = {"reason": False, "content": False}
+
+        def payload(text: str) -> dict[str, Any]:
+            data = {"text": text}
+            if chapter_id:
+                data["chapter_id"] = chapter_id
+            return data
+
+        def mark_sent() -> None:
+            self._push("think_status", {"phase": "sent"})
+
+        def on_reason(chunk: str) -> None:
+            if not seen["reason"]:
+                seen["reason"] = True
+                self._push("think_status", {"phase": "thinking"})
+            self._push("think_chunk", payload(chunk))
+
+        def on_content(chunk: str) -> None:
+            if not seen["content"]:
+                seen["content"] = True
+                self._push("think_status", {"phase": "writing"})
+            self._push(content_event, payload(chunk))
+
+        return on_content, on_reason, mark_sent
 
     def bootstrap(self) -> dict[str, Any]:
         return _ok(
@@ -414,14 +483,16 @@ class WorkbenchBridge:
         kwargs = _sampling_kwargs(settings)
 
         def worker() -> dict[str, Any]:
+            on_content, on_reason, mark_sent = self._stream_hooks("draft_chunk", chapter_id=chapter)
+            mark_sent()
             return self.app.generate_context_draft(
                 project_id,
                 chapter_id=chapter,
                 title=str(title or "").strip(),
                 prompt=user_prompt,
                 system_prompt=str(prompting.get("system_prompt") or ""),
-                stream_callback=lambda chunk: self._push("draft_chunk", {"text": chunk, "chapter_id": chapter}),
-                reasoning_callback=lambda chunk: self._push("reason_chunk", {"text": chunk, "chapter_id": chapter}),
+                stream_callback=on_content,
+                reasoning_callback=on_reason,
                 metadata={"ui_action": "modern_generate_draft"},
                 **kwargs,
             )
@@ -445,14 +516,16 @@ class WorkbenchBridge:
         kwargs = _sampling_kwargs(settings)
 
         def worker() -> dict[str, Any]:
+            on_content, on_reason, mark_sent = self._stream_hooks("draft_chunk", chapter_id=chapter_id)
+            mark_sent()
             return self.app.generate_context_draft(
                 project_id,
                 chapter_id=chapter_id,
                 title=str(draft.get("title") or ""),
                 prompt=prompt,
                 system_prompt=str(prompting.get("system_prompt") or ""),
-                stream_callback=lambda chunk: self._push("draft_chunk", {"text": chunk, "chapter_id": chapter_id}),
-                reasoning_callback=lambda chunk: self._push("reason_chunk", {"text": chunk, "chapter_id": chapter_id}),
+                stream_callback=on_content,
+                reasoning_callback=on_reason,
                 metadata={
                     "ui_action": "modern_regenerate_chapter",
                     "source_draft_id": draft_id,
@@ -476,13 +549,15 @@ class WorkbenchBridge:
         chapter_id = str(draft.get("chapter_id") or "")
 
         def worker() -> dict[str, Any]:
+            on_content, on_reason, mark_sent = self._stream_hooks("draft_chunk", chapter_id=chapter_id)
+            mark_sent()
             return self.app.refine_draft_from_ai_review(
                 project_id,
                 draft_id,
                 review_id=str(review.get("review_id") or ""),
                 instruction=str(instruction or ""),
-                stream_callback=lambda chunk: self._push("draft_chunk", {"text": chunk, "chapter_id": chapter_id}),
-                reasoning_callback=lambda chunk: self._push("reason_chunk", {"text": chunk, "chapter_id": chapter_id}),
+                stream_callback=on_content,
+                reasoning_callback=on_reason,
                 **kwargs,
             )
 
@@ -502,13 +577,15 @@ class WorkbenchBridge:
         context_settings = settings.get("context") if isinstance(settings.get("context"), dict) else {}
 
         def worker() -> dict[str, Any]:
+            on_content, on_reason, mark_sent = self._stream_hooks("review_chunk")
+            mark_sent()
             result = self.app.ai_review_draft(
                 project_id,
                 draft_id,
                 max_context_tokens=optional_int(context_settings.get("max_context_tokens")),
                 stream=True,
-                stream_callback=lambda chunk: self._push("review_chunk", {"text": chunk}),
-                reasoning_callback=lambda chunk: self._push("reason_chunk", {"text": chunk}),
+                stream_callback=on_content,
+                reasoning_callback=on_reason,
             )
             review = self.app.read_review(project_id, str(result.get("review_id") or ""))
             return self._review_payload(project_id, review)
@@ -642,6 +719,7 @@ class WorkbenchBridge:
     def memory_state(self, project_id: str) -> dict[str, Any]:
         try:
             memory = self.app.ensure_main_memory_item(project_id)
+            items = self.app.list_memory_items(project_id, include_text=True)
             chapters = self.app.list_confirmed_chapters(project_id)
         except Exception as exc:
             return _fail(f"记忆库读取失败: {exc}")
@@ -651,6 +729,7 @@ class WorkbenchBridge:
         return _ok(
             {
                 "memory": _jsonable(memory),
+                "items": _jsonable(items),
                 "chapters": [
                     {
                         "chapter_id": str(item.get("chapter_id") or ""),
@@ -705,16 +784,291 @@ class WorkbenchBridge:
             return _fail("请先勾选要写入记忆的已确认章节。")
 
         def worker() -> dict[str, Any]:
+            on_content, on_reason, mark_sent = self._stream_hooks("memory_chunk")
+            mark_sent()
             chapters = [self.app.read_confirmed_chapter(project_id, chapter_id) for chapter_id in chapter_ids]
             return self.app.generate_memory_bank_text(
                 project_id,
                 current_memory=str(data.get("current_memory") or ""),
                 chapters=chapters,
                 target_token_budget=normalize_memory_target_tokens(data.get("target_tokens")),
-                stream_callback=lambda chunk: self._push("memory_chunk", {"text": chunk}),
+                stream_callback=on_content,
+                reasoning_callback=on_reason,
             )
 
         return self._run_job("ModernMemoryGenerate", worker, on_done="memory_done")
+
+    def preview_memory_generation(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        data = payload if isinstance(payload, dict) else {}
+        project_id = str(data.get("project_id") or "")
+        chapter_ids = [str(item) for item in (data.get("chapter_ids") or []) if str(item)]
+        if not chapter_ids:
+            return _fail("请先勾选要写入记忆的已确认章节。")
+        try:
+            chapters = [self.app.read_confirmed_chapter(project_id, chapter_id) for chapter_id in chapter_ids]
+            preview = self.app.preview_memory_generation_request(
+                project_id,
+                current_memory=str(data.get("current_memory") or ""),
+                chapters=chapters,
+                target_token_budget=normalize_memory_target_tokens(data.get("target_tokens")),
+            )
+        except Exception as exc:
+            return _fail(f"生成记忆预览失败: {exc}")
+        return _ok(
+            {
+                "preview": _jsonable(preview),
+                "prompt_text": format_memory_generation_manual_prompt(preview),
+                "request_text": format_memory_generation_request_preview(preview),
+            }
+        )
+
+    def preview_memory_compression(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        data = payload if isinstance(payload, dict) else {}
+        current = str(data.get("current_memory") or "").strip()
+        if not current:
+            return _fail("当前没有可压缩的记忆正文。")
+        try:
+            preview = self.app.preview_memory_compression_request(
+                str(data.get("project_id") or ""),
+                current_memory=current,
+                target_token_budget=normalize_memory_target_tokens(data.get("target_tokens")),
+            )
+        except Exception as exc:
+            return _fail(f"生成缩写预览失败: {exc}")
+        return _ok(
+            {
+                "preview": _jsonable(preview),
+                "prompt_text": format_memory_generation_manual_prompt(preview),
+                "request_text": format_memory_generation_request_preview(preview),
+            }
+        )
+
+    def recent_model_calls(self, project_id: str) -> dict[str, Any]:
+        try:
+            log = self.app.provider_call_log(project_id)
+        except Exception as exc:
+            return _fail(f"读取模型调用记录失败: {exc}")
+        raw_calls = log.get("calls") if isinstance(log, dict) and isinstance(log.get("calls"), list) else []
+        calls = [item for item in raw_calls if isinstance(item, dict)]
+        recent = list(reversed(calls[-20:]))
+        lines = ["最近模型调用", "------------"]
+        if not recent:
+            lines.append("暂无记录。")
+        else:
+            for item in recent:
+                keys = item.get("request_summary") if isinstance(item.get("request_summary"), dict) else {}
+                meta = keys.get("metadata_keys") if isinstance(keys.get("metadata_keys"), list) else []
+                error = str(item.get("error_type") or "").strip()
+                lines.append(
+                    f"{item.get('timestamp') or '-'}  {item.get('status') or '-'}  "
+                    f"{item.get('provider') or '-'} / {item.get('model') or '-'}  "
+                    f"role={item.get('role') or '-'}  "
+                    f"{error or 'ok'}  "
+                    f"prompt={keys.get('prompt_chars') or 0}  "
+                    f"{', '.join(str(key) for key in meta)}"
+                )
+        return _ok({"details": "\n".join(lines), "calls": _jsonable(recent)})
+
+    def records_state(self, kind: str = "connection", project_id: str = "") -> dict[str, Any]:
+        page = next((item for item in RECORD_PAGES if item[0] == kind), RECORD_PAGES[0])
+        kind, title, needs_project = page
+        if needs_project and not str(project_id or "").strip():
+            return _fail("请先选择或新建一个作品。")
+        try:
+            details = self._records_details(kind, str(project_id or "").strip())
+        except Exception as exc:
+            self._log(f"读取{title}失败: {exc}")
+            return _fail(f"{title}读取失败: {exc}")
+        return _ok(
+            {
+                "kind": kind,
+                "title": title,
+                "details": details,
+                "pages": [{"id": item[0], "label": item[1], "needs_project": item[2]} for item in RECORD_PAGES],
+            }
+        )
+
+    def _records_details(self, kind: str, project_id: str) -> str:
+        if kind == "connection":
+            return self._format_connection_check(project_id)
+        if kind == "confirmed":
+            return self._format_confirmed_chapters(project_id)
+        if kind == "chapters":
+            return format_record_sections(
+                [
+                    (
+                        "章节",
+                        visible_chapter_record_rows(
+                            self.app.list_chapters(project_id),
+                            self.app.list_drafts(project_id),
+                            self.app.list_confirmed_chapters(project_id),
+                        ),
+                        ("chapter_id", "title", "status", "planned_at", "updated_at"),
+                    )
+                ]
+            )
+        if kind == "reviews":
+            return format_record_sections(
+                [
+                    ("草稿", self.app.list_drafts(project_id), ("draft_id", "chapter_id", "status", "provider", "created_at")),
+                    (
+                        "审稿记录",
+                        self.app.list_reviews(project_id),
+                        ("review_id", "review_type", "draft_id", "decision", "reason_code", "created_at"),
+                    ),
+                    (
+                        "改写请求",
+                        self.app.list_revision_requests(project_id),
+                        ("revision_request_id", "review_id", "status", "created_at"),
+                    ),
+                    (
+                        "人工改写任务",
+                        self.app.list_manual_rewrite_tasks(project_id),
+                        ("task_id", "status", "draft_id", "created_at"),
+                    ),
+                ]
+            )
+        if kind == "checklist":
+            return format_record_sections(
+                [
+                    (
+                        "功能状态",
+                        [
+                            {
+                                "status": "可查看",
+                                "available": "可以查看已确认章节和内部定稿检查记录。",
+                                "not_ready": "尚未提供一键正式出版导出。",
+                            }
+                        ],
+                        ("status", "available", "not_ready"),
+                    ),
+                    (
+                        "已确认章节",
+                        self.app.list_confirmed_chapters(project_id),
+                        ("chapter_id", "title", "draft_id", "committed_at"),
+                    ),
+                    ("定稿检查", self.app.list_final_assembly_gates(project_id), ("status", "created_at")),
+                    ("模型执行说明", self.app.list_final_provider_runbooks(project_id), ("status", "created_at")),
+                ]
+            )
+        if kind == "export":
+            return self._format_export_settings(project_id)
+        if kind == "calls":
+            calls = self.recent_model_calls(project_id)
+            call_text = str((calls.get("data") or {}).get("details") or "暂无记录。") if calls.get("ok") else str(calls.get("error") or "")
+            extra = format_record_sections(
+                [
+                    (
+                        "连接检查记录",
+                        self.app.list_provider_smoke_tests(project_id),
+                        ("status", "provider", "model", "created_at"),
+                    ),
+                    (
+                        "真实生成记录",
+                        self.app.list_final_provider_real_executions(project_id),
+                        ("status", "provider", "model", "created_at"),
+                    ),
+                ]
+            )
+            return f"{call_text}\n\n{extra}".strip()
+        if kind == "guide":
+            return USER_GUIDE_TEXT
+        if kind == "run_log":
+            return "\n".join(self._run_log) if self._run_log else "暂无运行记录。"
+        if kind == "diagnostics":
+            result = self.app.prepublish_check(repo_root=self.repo_root)
+            summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+            self._log(
+                "开发者诊断: "
+                f"ok={result.get('ok')} "
+                f"blocker={summary.get('blocker_count')} "
+                f"warning={summary.get('warning_count')} "
+                f"finding={summary.get('finding_count')}"
+            )
+            return format_diagnostic_details(result)
+        raise ValueError(f"Unknown records page: {kind}")
+
+    def _format_connection_check(self, project_id: str) -> str:
+        lines = ["连接检查", "--------", "此检查只读取本地配置，不会向模型服务发送请求。", ""]
+        for role, label in MODEL_ROLE_OPTIONS:
+            try:
+                status = self.app.provider_status(project_id, role)
+            except Exception as exc:
+                status = {"ok": False, "role": role, "message": str(exc)}
+            lines.extend(
+                [
+                    f"{label} ({role})",
+                    f"  可用: {'是' if status.get('ok') else '否'}",
+                    f"  服务: {status.get('provider') or '-'}",
+                    f"  模型: {status.get('model') or '-'}",
+                    f"  已配置密钥: {'是' if status.get('has_api_key') else '否'}",
+                    f"  说明: {status.get('message') or '-'}",
+                    "",
+                ]
+            )
+        try:
+            model_state = self.app.model_settings_state()
+        except Exception:
+            model_state = {}
+        assignments = model_state.get("feature_assignments") if isinstance(model_state.get("feature_assignments"), dict) else {}
+        primary = str(model_state.get("primary_model_ref") or "").strip() or "（未设置主模型）"
+        lines.extend(["功能分配", "--------", f"主模型: {primary}"])
+        for feature_id, label, _role in FEATURE_DEFINITIONS:
+            item = assignments.get(feature_id) if isinstance(assignments.get(feature_id), dict) else {}
+            mode = str(item.get("mode") or "inherit")
+            ref = str(item.get("model_ref") or "").strip()
+            if mode == "model" and ref:
+                lines.append(f"{label}: 单独指定 {ref}")
+            else:
+                lines.append(f"{label}: 使用主模型")
+        return "\n".join(lines).strip()
+
+    def _format_confirmed_chapters(self, project_id: str) -> str:
+        chapters = self.app.list_confirmed_chapters(project_id)
+        lines = ["已确认章节", "----------"]
+        if not chapters:
+            lines.append("暂无记录。")
+            return "\n".join(lines)
+        for index, item in enumerate(chapters, start=1):
+            chapter_id = str(item.get("chapter_id") or "")
+            try:
+                chapter = self.app.read_confirmed_chapter(project_id, chapter_id)
+                content = str(chapter.get("content") or "").strip()
+            except Exception as exc:
+                content = f"（读取正文失败：{exc}）"
+            title = str(item.get("title") or chapter_id)
+            lines.extend(
+                [
+                    f"{index}. 章节={chapter_id} | 标题={title} | 来源草稿={item.get('source_draft_id') or '-'} | 确认时间={item.get('committed_at') or '-'}",
+                    "正文:",
+                    content or "（暂无正文）",
+                    "",
+                ]
+            )
+        return "\n".join(lines).rstrip()
+
+    def _format_export_settings(self, project_id: str) -> str:
+        settings_path = self.projects_root / project_id / "data" / "export_settings.json"
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.exists() else {}
+        except (OSError, json.JSONDecodeError) as exc:
+            return f"读取导出设置失败:\n{exc}"
+        if not isinstance(settings, dict):
+            settings = {}
+        return "\n".join(
+            [
+                "导出设置",
+                "--------",
+                "TXT: 可用。导出范围为当前作品的已确认章节，不包含草稿、审稿记录、API Key 或本地私密设置。",
+                "DOCX/ZIP: 开发中。",
+                "",
+                f"TXT设置: {settings.get('txt_enabled', '默认启用')}",
+                f"ZIP: {settings.get('zip_enabled', '-')}",
+                f"DOCX: {settings.get('docx_enabled', '-')}",
+                f"范围: {settings.get('export_scope', '-')}",
+                f"文件: {settings_path}",
+            ]
+        )
 
     def compress_memory(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         data = payload if isinstance(payload, dict) else {}
@@ -724,11 +1078,14 @@ class WorkbenchBridge:
             return _fail("当前没有可压缩的记忆正文。")
 
         def worker() -> dict[str, Any]:
+            on_content, on_reason, mark_sent = self._stream_hooks("memory_chunk")
+            mark_sent()
             return self.app.generate_memory_bank_compression_text(
                 project_id,
                 current_memory=current,
                 target_token_budget=normalize_memory_target_tokens(data.get("target_tokens")),
-                stream_callback=lambda chunk: self._push("memory_chunk", {"text": chunk}),
+                stream_callback=on_content,
+                reasoning_callback=on_reason,
             )
 
         return self._run_job("ModernMemoryCompress", worker, on_done="memory_done")
@@ -821,7 +1178,9 @@ class WorkbenchBridge:
         try:
             result = self.app.export_confirmed_chapters_txt(project_id, path)
         except Exception as exc:
+            self._log(f"导出TXT失败: project={project_id} error={exc}")
             return _fail(f"导出失败: {exc}")
+        self._log(f"导出TXT: project={project_id} chapters={result.get('chapter_count')} path={result.get('path')}")
         return _ok(_jsonable(result))
 
     def choose_data_root(self) -> dict[str, Any]:

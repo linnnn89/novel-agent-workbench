@@ -16,8 +16,26 @@ DRAFTS_INDEX_FILENAME = "drafts_index.json"
 CONFIRMED_CHAPTERS_DIRNAME = "confirmed_chapters"
 CONFIRMED_CHAPTERS_INDEX_FILENAME = "confirmed_chapters.json"
 COMMIT_LOG_FILENAME = "commit_log.json"
-REASONING_BLOCK_PATTERN = re.compile(r"<think\b[^>]*>.*?</think\s*>", flags=re.IGNORECASE | re.DOTALL)
-REASONING_TAG_PATTERN = re.compile(r"</?think\b[^>]*>", flags=re.IGNORECASE)
+REASONING_BLOCK_PATTERN = re.compile(
+    r"<think\b[^>]*>.*?</think\s*>|"
+    r"<thinking\b[^>]*>.*?</thinking\s*>|"
+    r"<thought\b[^>]*>.*?</thought\s*>|"
+    r"<reasoning\b[^>]*>.*?</reasoning\s*>|"
+    r"<\|begin_of_thought\|>.*?<\|end_of_thought\|>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+REASONING_TAG_PATTERN = re.compile(
+    r"</?(?:think|thinking|thought|reasoning)\b[^>]*>|"
+    r"<\|(?:begin|end)_of_thought\|>",
+    flags=re.IGNORECASE,
+)
+REASONING_OPEN_MARKERS = (
+    ("<think", "</think", True),
+    ("<thinking", "</thinking", True),
+    ("<thought", "</thought", True),
+    ("<reasoning", "</reasoning", True),
+    ("<|begin_of_thought|>", "<|end_of_thought|>", False),
+)
 NON_COMMITTABLE_ACCEPTED_REVIEW_REASON_CODES = {"smoke_test_only"}
 
 
@@ -1151,12 +1169,15 @@ def stream_sanitizer_callback(
 class StreamingReasoningSanitizer:
     def __init__(self, *, reasoning_callback: Callable[[str], None] | None = None) -> None:
         self.buffer = ""
-        self.inside_reasoning = False
+        self.inside_close = ""
         self.reasoning_callback = reasoning_callback
 
     def emit_reasoning(self, text: str) -> None:
-        if text and self.reasoning_callback is not None:
-            self.reasoning_callback(text)
+        cleaned = str(text or "")
+        if cleaned.startswith("<") or cleaned.startswith("</") or cleaned.startswith("<|"):
+            return
+        if cleaned and self.reasoning_callback is not None:
+            self.reasoning_callback(cleaned)
 
     def feed(self, chunk: str) -> str:
         text = self.buffer + chunk
@@ -1164,68 +1185,79 @@ class StreamingReasoningSanitizer:
         output: list[str] = []
         index = 0
         while index < len(text):
-            lower = text.lower()
-            if self.inside_reasoning:
-                end = lower.find("</think", index)
+            if self.inside_close:
+                end = find_marker(text, self.inside_close, index)
                 if end == -1:
                     tail = text[index:]
-                    keep = partial_reasoning_close_prefix_len(tail)
+                    keep = partial_prefix_len(tail, (self.inside_close,))
                     if keep:
                         self.emit_reasoning(tail[:-keep])
                         self.buffer = tail[-keep:]
                     else:
                         self.emit_reasoning(tail)
                     return "".join(output)
-                close = text.find(">", end)
-                if close == -1:
+                close_end = marker_end(text, end, self.inside_close)
+                if close_end == -1:
                     self.emit_reasoning(text[index:end])
                     self.buffer = text[end:]
                     return "".join(output)
-                self.emit_reasoning(text[index : close + 1])
-                self.inside_reasoning = False
-                index = close + 1
+                self.emit_reasoning(text[index:end])
+                self.inside_close = ""
+                index = close_end
                 continue
-            start = lower.find("<think", index)
-            close_start = lower.find("</think", index)
-            candidates = [position for position in (start, close_start) if position != -1]
-            if not candidates:
+            start, open_marker, close_marker = next_open_marker(text, index)
+            if start == -1:
                 tail = text[index:]
-                keep = partial_reasoning_tag_prefix_len(tail)
+                keep = partial_prefix_len(tail, [item[0] for item in REASONING_OPEN_MARKERS])
                 if keep:
                     output.append(tail[:-keep])
                     self.buffer = tail[-keep:]
                 else:
                     output.append(tail)
                 return "".join(output)
-            tag_start = min(candidates)
-            output.append(text[index:tag_start])
-            tag_close = text.find(">", tag_start)
-            if tag_close == -1:
-                self.buffer = text[tag_start:]
+            output.append(text[index:start])
+            tag_end = marker_end(text, start, open_marker)
+            if tag_end == -1:
+                self.buffer = text[start:]
                 return "".join(output)
-            self.emit_reasoning(text[tag_start : tag_close + 1])
-            if tag_start == start:
-                self.inside_reasoning = True
-            index = tag_close + 1
+            self.inside_close = close_marker
+            index = tag_end
         return "".join(output)
 
 
-def partial_reasoning_tag_prefix_len(value: str) -> int:
+def next_open_marker(text: str, start: int) -> tuple[int, str, str]:
+    found_at = -1
+    found_open = ""
+    found_close = ""
+    for open_marker, close_marker, _html in REASONING_OPEN_MARKERS:
+        position = find_marker(text, open_marker, start)
+        if position == -1:
+            continue
+        if found_at == -1 or position < found_at:
+            found_at = position
+            found_open = open_marker
+            found_close = close_marker
+    return found_at, found_open, found_close
+
+
+def find_marker(text: str, marker: str, start: int) -> int:
+    return text.lower().find(marker.lower(), start)
+
+
+def marker_end(text: str, start: int, marker: str) -> int:
+    if marker.startswith("<|"):
+        end = start + len(marker)
+        return end if end <= len(text) else -1
+    close = text.find(">", start)
+    return close + 1 if close != -1 else -1
+
+
+def partial_prefix_len(value: str, prefixes: list[str] | tuple[str, ...]) -> int:
     lower = value.lower()
-    prefixes = ("<think", "</think")
-    max_length = max(len(item) for item in prefixes)
+    max_length = max((len(item) for item in prefixes), default=0)
     for length in range(min(len(lower), max_length), 0, -1):
         suffix = lower[-length:]
-        if any(prefix.startswith(suffix) for prefix in prefixes):
-            return length
-    return 0
-
-
-def partial_reasoning_close_prefix_len(value: str) -> int:
-    lower = value.lower()
-    prefix = "</think"
-    for length in range(min(len(lower), len(prefix)), 0, -1):
-        if prefix.startswith(lower[-length:]):
+        if any(prefix.lower().startswith(suffix) for prefix in prefixes):
             return length
     return 0
 

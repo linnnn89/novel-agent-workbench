@@ -278,6 +278,7 @@ class DraftReviewService:
                         max_tokens=2048,
                         stream=stream,
                         stream_callback=safe_stream_callback,
+                        reasoning_callback=reasoning_callback,
                         metadata={
                             "ai_review": True,
                             "chapter_id": chapter_id,

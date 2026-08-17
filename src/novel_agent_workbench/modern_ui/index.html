@@ -91,6 +91,7 @@
             <p id="summaryText">选择作品后，这里会显示章节与草稿概览。</p>
             <div class="stack">
               <button class="btn quiet block" id="healthBtn" type="button">作品概览</button>
+              <button class="btn quiet block" id="recordsBtn" type="button">记录与诊断</button>
               <button class="btn quiet block" id="outlineBtn" type="button">大纲与章节</button>
               <button class="btn quiet block" id="worldBtn" type="button">世界观与人物</button>
               <button class="btn quiet block" id="memoryBtn" type="button">记忆库</button>
@@ -108,6 +109,16 @@
       </main>
     </div>
 
+    <aside class="think-float glass" id="thinkFloat" hidden>
+      <header>
+        <div>
+          <p class="kicker" id="thinkFloatKicker">请求已发出</p>
+          <h2 id="thinkFloatTitle">等待模型接入</h2>
+        </div>
+        <button class="icon-btn" id="thinkFloatClose" type="button">✕</button>
+      </header>
+      <div class="think-float-body" id="thinkFloatBody"></div>
+    </aside>
     <div class="toast" id="toast" hidden></div>
     <div class="ctx-menu glass" id="ctxMenu" hidden></div>
 
@@ -146,6 +157,7 @@
       <div class="drawer-body" id="drawerBody"></div>
     </aside>
 
+    <script src="think.js"></script>
     <script src="app.js"></script>
     <script src="studio.js"></script>
   </body>

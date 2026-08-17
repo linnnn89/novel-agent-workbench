@@ -258,6 +258,45 @@ class MemoryBankService:
             target_token_budget=target_token_budget,
         )
 
+    def preview_memory_compression_request(
+        self,
+        *,
+        current_memory: str,
+        target_token_budget: int | None = None,
+    ) -> dict[str, Any]:
+        request = build_memory_compression_provider_request(
+            self.store,
+            current_memory=current_memory,
+            target_token_budget=target_token_budget,
+        )
+        target_tokens = normalize_memory_target_tokens(target_token_budget)
+        existing_memory = str(current_memory or "").strip()
+        return {
+            "schema_version": 1,
+            "provider_request_role": request.role,
+            "logical_role": "writer",
+            "messages": [
+                {"role": "system", "content": request.system_prompt},
+                {"role": "user", "content": request.prompt},
+            ],
+            "sampling": {
+                "temperature": request.temperature,
+                "top_p": request.top_p,
+                "max_tokens": request.max_tokens,
+                "stream": request.stream,
+            },
+            "metadata": dict(request.metadata),
+            "summary": {
+                "prompt_chars": len(request.prompt),
+                "system_prompt_chars": len(request.system_prompt or ""),
+                "target_token_budget": target_tokens,
+                "request_max_tokens": request.max_tokens,
+                "source_chapter_count": 0,
+                "source_chapter_ids": [],
+                "existing_memory_chars": len(existing_memory),
+            },
+        }
+
     def auto_summary_candidate(self, *, confirmed_chapters: list[dict[str, Any]], batch_size: int = DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL) -> dict[str, Any]:
         return memory_auto_summary_candidate(
             self._read_main_memory_item_or_default(),
