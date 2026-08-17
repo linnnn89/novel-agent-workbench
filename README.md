@@ -1,87 +1,38 @@
-# Novel Agent Workbench
+# 小说创作工作台
 
-### 小说创作工作台
+Novel Agent Workbench
 
-A **local-first** Windows desktop for long-form fiction.  
-面向网文与长篇小说作者的 **本地优先** Windows 写作台。
+写长篇的时候，我不太想把整本书交给网上的编辑器，也不想让模型自己决定哪一段算数。所以做成了这个 Windows 软件：书在你电脑里，AI 只在你点按钮的时候出手。
 
-Drafts stay candidates until you confirm them. Projects stay on your machine. Models are called only when you click.
-
-草稿只是候选，必须由你确认才会成为正文。作品默认保存在本机。模型只有在你点击后才会被调用。
+I made this for writing novels on Windows. The book stays on your machine. The model only runs when you press a button.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg)](https://www.python.org/)
-[![Platform](https://img.shields.io/badge/Platform-Windows-0078D4.svg)](https://github.com/linnnn89/novel-agent-workbench)
 
----
+## 这个软件干什么
 
-## Features / 功能
+一本书的大纲、人物、世界观、章节和各版草稿，都放在同一个窗口里。左边选章节，中间改稿，右边看设定。
 
-- **One project, the full loop / 一本作品走完整流程**  
-  Outline, characters, world-building, chapters, drafts, and confirmed text live in one workspace.  
-  大纲、人物、世界观、章节、草稿和确认稿在同一工作台里完成。
+生成出来的是草稿，不是定稿。你点「确认稿件」之前，正文不会被换掉。改一改、重写一版、按审稿意见精修，都是另存新版本，旧的还在。
 
-- **Human-led confirmation / 人确认，才进正文**  
-  Generate, rewrite, and refine create new versions. Nothing silently overwrites canon.  
-  生成、重写、精修都先落成新版本，不会悄悄替换已确认章节。
+可以先让模型审一稿，再按它的意见改。也可以自己写，软件会自动存。
 
-- **Review, then revise / 先审稿，再改稿**  
-  Ask the model to review a draft, then refine against that review — or edit by hand with autosave.  
-  可以先让模型审稿，再按意见精修，也可以自己改。编辑会自动保存。
+生成下一章时，会把记忆库、设定和前面几章按篇幅拼进去，免得写着写着人设丢了。
 
-- **Context that travels with the book / 带着前文继续写**  
-  Memory Bank, planning notes, and recent chapters are assembled on a token budget before generation.  
-  记忆库、设定资料和前文章节会在生成前按预算组装。
+模型你自己接。硅基流动、DeepSeek、Chutes、OpenRouter、常见的 OpenAI 兼容接口，或者本机 LM Studio / Ollama，都可以。
 
-- **Your models / 自己的模型**  
-  SiliconFlow, DeepSeek, Chutes, OpenRouter, any OpenAI-compatible API, or a local LM Studio / Ollama endpoint.  
-  硅基流动、DeepSeek、Chutes、OpenRouter、OpenAI 兼容接口，或本地 LM Studio / Ollama。
+It's a three-pane desktop app: project tree, manuscript, notes. New generations land as drafts. Confirmed chapters don't get overwritten unless you say so. You can review with a model, rewrite, or just type. Plug in whatever OpenAI-compatible API you already use, including a local one.
 
-- **A modern Windows UI / 现代桌面界面**  
-  Three-pane workbench, frosted panels, light/dark theme, and adjustable type.  
-  三栏工作台、磨砂面板、浅色/深色主题，字体和字号可调。
+## 大概怎么写
 
-This is not an agent that writes a novel unsupervised. You decide which version becomes the book.
+建一个作品，把大纲和人物先丢进去，然后生成或手写一章。不满意就重写或精修。定了就确认。整本差不多了，导出 TXT。
 
-这不是无人值守的自动写书程序。哪一版成为正文，由你决定。
+作品或章节上可以右键。删东西、看这次生成会带上哪些资料、改这一本的专属设置，都在那儿。
 
----
+Typical path: new project → notes and characters → draft a chapter → review or rewrite → confirm → export as TXT.
 
-## Workflow / 工作流
+## 怎么跑起来
 
-```text
-Create a project
-    → outline / characters / world
-    → generate or write a chapter draft
-    → review or refine
-    → confirm the chapter
-    → export TXT
-```
-
-```text
-新建作品
-    → 大纲 / 人物 / 世界观
-    → 生成或手写章节草稿
-    → 审稿或精修
-    → 确认这一章
-    → 导出 TXT
-```
-
-Right-click a project or chapter for more actions: delete, inspect generation context, or open project-specific settings.
-
-在作品或章节上右键，可以删除、查看生成上下文，或打开项目专属设置。
-
----
-
-## Quick start / 快速开始
-
-**Requirements / 环境**
-
-- Windows 10 or 11
-- Python 3.10+
-- Network only for the first build and later model calls
-
-**Build / 构建**
+Windows 10 或 11，装好 Python 3.10 以上。
 
 ```cmd
 git clone https://github.com/linnnn89/novel-agent-workbench.git
@@ -89,84 +40,49 @@ cd novel-agent-workbench
 BUILD_NovelAgentWorkbench.bat
 ```
 
-Then open:
+打完去这个文件：
 
 ```text
 dist\NovelAgentWorkbench\NovelAgentWorkbench.exe
 ```
 
-Projects, settings, and API keys live in `用户数据` next to the EXE. Rebuilding replaces only the app binaries, never that folder.
+你的书和 Key 在旁边的 `用户数据` 里。以后再打包，只会换程序，不会动这份数据。
 
-作品、设置和 API Key 保存在 EXE 同目录的 `用户数据` 里。重新打包只会替换程序文件，不会清空这份数据。
+第一次打开：先到「模型设置」填接口和 Key，再建作品，点「生成新章节」。光保存设置是不会联网的。
 
-**First run / 第一次使用**
-
-1. Open **Model Settings / 模型设置** and add an endpoint plus key.  
-   打开「模型设置」，填写接口和 Key。
-2. Create a project, then **Generate chapter / 生成新章节**.  
-   新建作品，再点「生成新章节」。
-
-Saving settings does not call the network.
-
-保存设置不会联网。
-
----
-
-## Run from source / 从源码运行
+If you want to run the source instead of the EXE:
 
 ```cmd
 SETUP_ENV.bat
 START_ModernUI.cmd
 ```
 
-The modern UI is the default. If `pywebview` is missing, the app falls back to the classic Tk window.
+没装 `pywebview` 的话，会退回一套老的 Tk 界面。能用，就是不好看。
 
-默认打开现代界面。未安装 `pywebview` 时会回到经典 Tk 窗口。
+## 什么时候会花钱
 
----
+打开软件、改稿、存设置，都不会打模型。
 
-## Model boundary / 模型调用边界
+会打模型的只有这些，而且都要你亲手点：生成草稿、AI 审稿、按审稿精修、刷新模型列表、生成或压缩记忆库。
 
-Supported adapters: OpenAI-compatible cloud APIs, SiliconFlow, DeepSeek, Chutes, OpenRouter, local OpenAI-compatible ports, and an offline mock.
+Opening the app and editing text is free. You get billed only when you click generate, review, refine, refresh the model list, or rebuild the memory bank.
 
-支持的接入：OpenAI 兼容云端、硅基流动、DeepSeek、Chutes、OpenRouter、本地兼容端口，以及不联网的离线测试。
-
-These actions may call a model **after an explicit click**:
-
-只有下列动作会在你点击后访问模型：
-
-- generate a draft / 生成草稿
-- AI review / AI 审稿
-- refine from review / 按审稿精修
-- refresh the model catalog / 刷新模型目录
-- generate or compress Memory Bank / 生成或压缩记忆库
-
-Opening the app, editing text, and saving settings never spend API credits on their own.
-
-打开软件、编辑正文、保存设置都不会自动消耗额度。
-
----
-
-## Development / 开发
+## 开发
 
 ```text
 src/novel_agent_workbench/
-├── modern_desktop.py       modern desktop host
-├── modern_ui/              workbench and studios
-├── desktop_app.py          classic Tk fallback
-├── application_service.py  backend facade
-├── storage.py              local projects
-└── providers.py            model adapters
+├── modern_desktop.py
+├── modern_ui/
+├── desktop_app.py          older Tk UI
+├── application_service.py
+├── storage.py
+└── providers.py
 ```
 
-Contracts live in [`codex_docs/`](codex_docs/).
+更细的约定在 [`codex_docs/`](codex_docs/)。
 
-Do not commit `dist/`, `.venv/`, `用户数据`, secrets, or manuscript text.
+`dist/`、`.venv/`、`用户数据`、密钥和小说正文都不要提交。
 
-请勿提交 `dist/`、`.venv/`、`用户数据`、密钥或正文。
-
----
-
-## License / 许可
+## 许可
 
 [AGPL-3.0](LICENSE)
