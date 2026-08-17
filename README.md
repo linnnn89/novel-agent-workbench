@@ -185,26 +185,11 @@ Repository-level folders:
 
 ```text
 src/          application source
-tests/        unit and safety tests
 scripts/      EXE build helpers
 packaging/    desktop launcher
 codex_docs/   architecture notes and contracts
 docs/         current handoff notes
 ```
-
-## Verification / 验证
-
-Run the unit test suite without enabling a real Provider:
-
-不启用真实 Provider，运行单元测试：
-
-```powershell
-py -m unittest discover -s tests
-```
-
-The current main branch passes **32 tests** in the maintained test suite. Tests cover project storage, desktop helpers, draft and review gates, provider safety, Memory Bank/context behavior, and metadata-only output boundaries.
-
-当前 main 分支维护的测试套件为 **32 个通过测试**，覆盖项目存储、桌面辅助逻辑、草稿与审稿 gate、Provider 安全、Memory Bank/上下文行为以及元数据输出边界。
 
 ## Developer entry points / 开发入口
 
@@ -218,7 +203,6 @@ The current main branch passes **32 tests** in the maintained test suite. Tests 
 | [`src/novel_agent_workbench/cli.py`](src/novel_agent_workbench/cli.py) | Backend CLI / 后端 CLI |
 | [`src/novel_agent_workbench/providers.py`](src/novel_agent_workbench/providers.py) | Provider adapters and call policy / Provider 适配与调用策略 |
 | [`src/novel_agent_workbench/storage.py`](src/novel_agent_workbench/storage.py) | Local storage and checkpoints / 本地存储与 checkpoint |
-| [`tests/README.md`](tests/README.md) | Test scope and safety assertions / 测试范围与安全断言 |
 | [`codex_docs/CLI_QUICKSTART.md`](codex_docs/CLI_QUICKSTART.md) | CLI operations / CLI 操作 |
 | [`codex_docs/APPLICATION_SERVICE_CONTRACT.md`](codex_docs/APPLICATION_SERVICE_CONTRACT.md) | Service contracts / 应用服务契约 |
 | [`codex_docs/PROVIDER_ADAPTER_CONTRACT.md`](codex_docs/PROVIDER_ADAPTER_CONTRACT.md) | Provider extension rules / Provider 扩展规则 |
