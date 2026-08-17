@@ -32,6 +32,10 @@ ui_preferences.json
 # Local rollback / obsolete archive — never publish
 old/
 
+# Internal agent handoff — local only
+handoff.md
+docs/handoff.md
+
 # Build and coverage artifacts
 build/
 dist/

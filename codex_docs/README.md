@@ -16,4 +16,4 @@ OI-001 Memory Bank priority is local Context Assembler logic, not an LLM API fea
 OI-002 Final real Provider safety-disable reminder before production use.
 ```
 
-Current product handoff lives in `docs/handoff.md`. Historical MVP logs and probe builds are local-only and are not part of the public tree.
+Internal agent handoff is local-only (`handoff.md`, gitignored). Historical MVP logs and probe builds are also local-only.
