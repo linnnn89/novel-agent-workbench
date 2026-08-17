@@ -78,7 +78,7 @@ if errorlevel 1 (
 
 echo.
 echo Installing Windows desktop build tools ...
-"%VENV_PY%" -m pip install pyinstaller pillow
+"%VENV_PY%" -m pip install pyinstaller pillow "pywebview>=5.0"
 if errorlevel 1 (
     echo Failed to install desktop build tools.
     if not defined NO_PAUSE pause
@@ -91,8 +91,11 @@ echo.
 echo Run CLI:
 echo   .venv\Scripts\novel-agent-workbench.exe --help
 echo.
-echo Run desktop app from source:
+echo Run modern desktop UI from source:
 echo   .venv\Scripts\novel-agent-workbench-desktop.exe
+echo.
+echo Run classic Tk desktop UI:
+echo   .venv\Scripts\novel-agent-workbench-classic.exe
 echo.
 echo Build Windows EXE:
 echo   BUILD_NovelAgentWorkbench.bat

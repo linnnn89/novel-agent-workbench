@@ -7,6 +7,13 @@ Date: 2026-05-30, Asia/Shanghai.
 Desktop source:
 
 ```text
+src/novel_agent_workbench/modern_desktop.py
+src/novel_agent_workbench/modern_ui/
+```
+
+Classic fallback:
+
+```text
 src/novel_agent_workbench/desktop_app.py
 ```
 
@@ -15,6 +22,8 @@ PyInstaller launcher:
 ```text
 packaging/desktop_launcher.py
 ```
+
+The launcher now starts the modern WebView UI. The classic Tk window remains available from source as `novel-agent-workbench-classic`.
 
 Built executable:
 
@@ -46,7 +55,9 @@ Direct PowerShell build command:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows_exe.ps1
 ```
 
-The scripts create/use project-local `.venv`, require Python 3.11-3.14 for the Windows EXE build, install `pyinstaller` and `pillow`, reuse the committed icon by default, and build the Windows EXE. Pass `-RegenerateIcon` to the PowerShell script only when intentionally updating icon assets.
+The scripts create/use project-local `.venv`, require Python 3.11-3.14 for the Windows EXE build, install `pyinstaller`, `pillow`, and `pywebview`, reuse the committed icon by default, and build the Windows EXE. Pass `-RegenerateIcon` to the PowerShell script only when intentionally updating icon assets.
+
+The publish step replaces only `NovelAgentWorkbench.exe` and `_internal`. The `用户数据` directory is never deleted.
 
 ## Icon
 

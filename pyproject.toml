@@ -5,12 +5,16 @@ description = "Local AI novel writing workbench / 本地 AI 小说创作工作�
 requires-python = ">=3.10"
 dependencies = []
 
+[project.optional-dependencies]
+modern-ui = ["pywebview>=5.0"]
+
 [project.scripts]
 novel-agent-workbench = "novel_agent_workbench.cli:main"
-novel-agent-workbench-desktop = "novel_agent_workbench.desktop_app:main"
+novel-agent-workbench-desktop = "novel_agent_workbench.modern_desktop:main"
+novel-agent-workbench-classic = "novel_agent_workbench.desktop_app:main"
 
 [tool.setuptools.package-data]
-novel_agent_workbench = ["assets/*.ico", "assets/*.png"]
+novel_agent_workbench = ["assets/*.ico", "assets/*.png", "modern_ui/*"]
 
 [tool.unittest]
 testpaths = ["tests"]

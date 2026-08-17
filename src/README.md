@@ -2,6 +2,14 @@
 
 This folder will contain the new application source code.
 
+Current desktop product:
+
+```text
+novel_agent_workbench.modern_desktop
+novel_agent_workbench.modern_ui/
+novel_agent_workbench.desktop_app          classic Tk fallback
+```
+
 Current package modules include:
 
 ```text
@@ -38,6 +46,7 @@ novel_agent_workbench.audit
 novel_agent_workbench.application_service
 novel_agent_workbench.cli
 novel_agent_workbench.desktop_app
+novel_agent_workbench.modern_desktop
 ```
 
 Current safety hardening:
@@ -89,6 +98,7 @@ Current safety hardening:
 - final Provider real execution postchecks are read-only and verify the execution artifact, linked draft, disabled writer real-generation gate, unconfirmed chapter state, and metadata-only safety flags after a real run.
 - review handoffs move from `pending_review` to `review_created` after a successful guarded review consumes the handoff. This updates metadata only and does not auto-commit, mutate drafts, or update Memory Bank/RAG/export.
 - confirmed chapter promotion now requires an accepted review for the same draft. Commit-gate failures are no-side-effect refusals, so an accidental early commit attempt does not block the chapter or prevent later review.
-- desktop_app is a local Tkinter launcher for project selection, project health, upload readiness checks, model configuration, and writer-facing actions. It must not call LLMs on startup or in hidden background flows; explicit user-triggered actions may call configured providers.
+- The shipping desktop host is `modern_desktop`. It must not call LLMs on startup or in hidden background flows; explicit user-triggered actions may call configured providers.
+- `desktop_app` remains the classic Tk fallback and still owns helper formatters used by the modern host.
 
-Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md` or `codex_logs/`.
+Do not copy large chunks from the reference project blindly. If reference code is reused, copy only reviewed modules or patterns and document the reason in `codex_docs/DECISIONS.md`.

@@ -70,6 +70,7 @@ $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 $IconPath = Join-Path $RepoRoot "src\novel_agent_workbench\assets\novel_agent_workbench.ico"
 $LauncherPath = Join-Path $RepoRoot "packaging\desktop_launcher.py"
 $AssetsPath = Join-Path $RepoRoot "src\novel_agent_workbench\assets"
+$ModernUiPath = Join-Path $RepoRoot "src\novel_agent_workbench\modern_ui"
 $DistRoot = Join-Path $RepoRoot "dist"
 $FinalAppDir = Join-Path $DistRoot "NovelAgentWorkbench"
 $SpecWorkDir = Join-Path $RepoRoot "build\pyinstaller_spec"
@@ -93,7 +94,7 @@ try {
     if (-not $SkipInstall) {
         Write-Host "[3/6] Installing build dependencies"
         & $VenvPython -m pip install --upgrade pip
-        & $VenvPython -m pip install pyinstaller pillow
+        & $VenvPython -m pip install pyinstaller pillow "pywebview>=5.0"
     }
     else {
         Write-Host "[3/6] Skipping dependency install"
@@ -129,6 +130,11 @@ try {
         --icon $IconPath `
         --paths "src" `
         --add-data "$AssetsPath;novel_agent_workbench\assets" `
+        --add-data "$ModernUiPath;novel_agent_workbench\modern_ui" `
+        --collect-all webview `
+        --collect-all clr_loader `
+        --hidden-import novel_agent_workbench.modern_desktop `
+        --hidden-import novel_agent_workbench.desktop_app `
         $LauncherPath
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller failed."

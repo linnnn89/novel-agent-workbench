@@ -25,12 +25,17 @@ backups/
 run_logs/
 usage_logs/
 *.log
-work/test_outputs/
+work/
 **/用户数据/
+ui_preferences.json
+
+# Local rollback / obsolete archive — never publish
+old/
 
 # Build and coverage artifacts
 build/
 dist/
+build_probe_*/
 *.egg-info/
 *.spec
 .coverage

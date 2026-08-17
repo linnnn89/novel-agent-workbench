@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from novel_agent_workbench.desktop_app import main
+from novel_agent_workbench.modern_desktop import main
 
 
 if __name__ == "__main__":

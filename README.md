@@ -16,13 +16,13 @@ Novel Agent Workbench 是一个面向长篇创作完整流程的 Windows 桌面�
 - draft generation, AI review, revision requests, and rewrite candidates;
 - candidate comparison and explicit promotion to a confirmed chapter;
 - provider configuration, dry-runs, audit metadata, safety gates, and pre-publication checks;
-- local project storage with recoverable write boundaries and a Tkinter desktop UI.
+- local project storage with recoverable write boundaries and a modern Windows desktop UI.
 
 - 管理大纲、人物、世界观、章节规划和 Memory Bank；
 - 生成草稿、AI 审稿、修订请求和重写候选；
 - 对候选进行比较，并显式提交为确认稿；
 - 管理 Provider、dry-run、审计元数据、安全 gate 和发布前检查；
-- 使用本地项目存储、可恢复写入边界和 Tkinter 桌面界面。
+- 使用本地项目存储、可恢复写入边界和现代 Windows 桌面界面。
 
 It is designed for human-led writing workflows. It does not silently replace confirmed text, call real providers in the background, or decide which draft becomes canon.
 
@@ -39,7 +39,8 @@ It is designed for human-led writing workflows. It does not silently replace con
 | Model Settings v2 / 模型设置 v2 | Manage provider profiles, refreshable and cached model catalogs, manual models, and per-feature assignments / 管理 Provider 档案、可刷新与缓存的模型目录、手工模型和按功能分配 |
 | DeepSeek prefix stability / DeepSeek 前缀稳定化 | Keep low-change context ahead of dynamic instructions and expose cache hit/miss usage; actual hit rate depends on service behavior / 稳定低频上下文并把动态指令放在末尾，保留命中/未命中统计；实际命中率取决于服务行为 |
 | Provider safety boundary / Provider 安全边界 | Mock and dry-run paths are available; real network execution requires explicit user action and preflight gates / 提供 mock 与 dry-run，真实网络调用必须由用户显式触发并通过 preflight |
-| Responsive Windows desktop workflow / 响应式 Windows 桌面流程 | Build a local EXE with the included scripts; settings windows resize and key actions remain available in narrow layouts / 使用仓库内脚本构建本地 EXE；设置窗口可调整大小，窄窗口下关键操作仍保持可见 |
+| Modern desktop UI / 现代桌面界面 | Rounded glass panels, theme/font settings, and in-app studios for model settings, Memory Bank, outline, and world materials / 圆角磨砂面板、主题与字体设置，以及模型设置、记忆库、大纲和世界观工作室 |
+| Responsive Windows desktop workflow / 响应式 Windows 桌面流程 | Build a local EXE with the included scripts; the user package lives in `dist\NovelAgentWorkbench` and keeps existing `用户数据` / 使用仓库内脚本构建本地 EXE；用户包位于 `dist\NovelAgentWorkbench`，会保留已有 `用户数据` |
 
 ## Workflow / 工作流
 
@@ -80,11 +81,16 @@ Clone the repository, enter its root, and run:
 BUILD_NovelAgentWorkbench.bat
 ```
 
-构建完成后，EXE 位于：
+构建完成后，给用户使用的目录是：
 
 ```text
-dist\NovelAgentWorkbench\NovelAgentWorkbench.exe
+dist\NovelAgentWorkbench\
+  NovelAgentWorkbench.exe
+  _internal\
+  用户数据\          已有作品、设置和密钥会保留
 ```
+
+重新打包只会替换 EXE 和 `_internal`，不会删除 `用户数据`。
 
 The build script shows environment checks and packaging output in the foreground. To prepare only the development environment:
 
@@ -107,6 +113,28 @@ After environment setup:
 
 ```cmd
 .venv\Scripts\novel-agent-workbench-desktop.exe
+```
+
+默认打开现代界面。如果还没安装 `pywebview`，会自动回退到经典 Tk 界面。
+
+The default desktop entry opens the modern UI. If `pywebview` is missing, it falls back to the classic Tkinter UI.
+
+现代界面入口：
+
+- 顶栏：专注、模型设置、外观（字体/字号/浅色深色）
+- 右侧：大纲与章节、世界观与人物、记忆库、打开文件夹、导出 TXT
+- 稿纸：自动保存、重新生成、审稿、精修、确认稿
+
+经典界面 / classic UI:
+
+```cmd
+.venv\Scripts\novel-agent-workbench-classic.exe
+```
+
+或 / or:
+
+```cmd
+START_ModernUI.cmd
 ```
 
 实际生成的运行项目、`.venv`、本地密钥和构建输出不会提交到 GitHub。
@@ -137,7 +165,9 @@ Provider 响应和日志受到 sanitizer、审计、元数据输出、密钥引�
 
 ```text
 src/novel_agent_workbench/
-├── desktop_app.py              Tkinter desktop UI
+├── modern_desktop.py           modern WebView desktop host
+├── modern_ui/                  HTML/CSS/JS workbench and studios
+├── desktop_app.py              classic Tkinter fallback UI
 ├── application_service.py      UI/backend application boundary
 ├── cli.py                       backend CLI entrypoint
 ├── providers.py                 provider adapters and call policy
@@ -154,11 +184,12 @@ Repository-level folders:
 仓库主要目录：
 
 ```text
-codex_docs/   architecture notes, contracts, and operating constraints
-codex_logs/   project development logs
 src/          application source
 tests/        unit and safety tests
-scripts/      build helpers
+scripts/      EXE build helpers
+packaging/    desktop launcher
+codex_docs/   architecture notes and contracts
+docs/         current handoff notes
 ```
 
 ## Verification / 验证
@@ -179,7 +210,10 @@ The current main branch passes **32 tests** in the maintained test suite. Tests 
 
 | Path / 路径 | Purpose / 用途 |
 |---|---|
-| [`src/novel_agent_workbench/desktop_app.py`](src/novel_agent_workbench/desktop_app.py) | Tkinter desktop UI / 桌面界面 |
+| [`src/novel_agent_workbench/modern_desktop.py`](src/novel_agent_workbench/modern_desktop.py) | Modern WebView desktop host / 现代桌面宿主 |
+| [`src/novel_agent_workbench/modern_ui/`](src/novel_agent_workbench/modern_ui/) | Workbench and studio UI / 工作台与工作室界面 |
+| [`src/novel_agent_workbench/desktop_app.py`](src/novel_agent_workbench/desktop_app.py) | Classic Tkinter fallback UI / 经典 Tk 回退界面 |
+| [`docs/handoff.md`](docs/handoff.md) | Current product handoff / 当前产品交接 |
 | [`src/novel_agent_workbench/application_service.py`](src/novel_agent_workbench/application_service.py) | UI/backend application-service boundary / UI 与后端应用服务边界 |
 | [`src/novel_agent_workbench/cli.py`](src/novel_agent_workbench/cli.py) | Backend CLI / 后端 CLI |
 | [`src/novel_agent_workbench/providers.py`](src/novel_agent_workbench/providers.py) | Provider adapters and call policy / Provider 适配与调用策略 |
@@ -198,27 +232,25 @@ Never commit the following to the public repository:
 
 - local manuscripts, draft text, confirmed chapter text, or private corpora;
 - API keys, tokens, endpoint secrets, or plaintext secret values;
-- `.venv/`, build output, coverage output, or runtime project data;
+- `.venv/`, `dist/`, `old/`, build output, coverage output, or runtime project data;
+- local UI preference files and historical MVP log markdown;
 - any private or unauthorized source material.
 
 - 本地小说正文、草稿、确认稿或私人语料；
 - API key、Token、Endpoint secret 或明文密钥；
-- `.venv/`、构建产物、Coverage 产物或运行时项目数据；
+- `.venv/`、`dist/`、`old/`、构建产物、Coverage 产物或运行时项目数据；
+- 本地界面偏好和历史 MVP 日志 markdown；
 - 任何私人或未经授权的源材料。
 
 ## Project status / 项目状态
 
-The repository is an actively developed multi-stage MVP. The implemented path spans local project storage, model settings, draft generation, review and revision workflows, Memory Bank/context assembly, corpus profiling, manual rewrite, provider gates, audit, and Windows desktop packaging.
+The repository is an actively developed multi-stage MVP. The implemented path spans local project storage, model settings, draft generation, review and revision, Memory Bank/context assembly, and a modern Windows desktop UI packaged as a local EXE.
 
-仓库目前是持续开发中的多阶段 MVP，已经覆盖本地项目存储、模型设置、草稿生成、审稿与修订、Memory Bank/上下文装配、语料分析、人工重写、Provider gate、审计和 Windows 桌面打包。
+仓库目前是持续开发中的多阶段 MVP，已经覆盖本地项目存储、模型设置、草稿生成、审稿与修订、Memory Bank/上下文装配，以及可打包为本地 EXE 的现代 Windows 桌面界面。
 
-Recent work also includes Model Settings v2, provider/model catalog caching, per-feature model assignments, and DeepSeek-oriented stable-prefix request ordering. The cache work exposes service-reported hit/miss usage for observation; it does not promise a fixed hit rate.
+The default desktop product is the modern UI. Classic Tkinter remains as a fallback.
 
-近期还加入了 Model Settings v2、Provider/模型目录缓存、按功能分配模型以及面向 DeepSeek 的稳定前缀请求排序。缓存优化会展示服务端返回的命中/未命中统计，不能承诺固定命中率。
-
-The public README intentionally summarizes the architecture rather than listing every internal development log. Historical implementation notes remain in [`codex_logs/`](codex_logs/) and the commit history.
-
-公开 README 刻意总结架构，不逐条复制内部开发日志。历史实现记录保留在 [`codex_logs/`](codex_logs/) 和提交历史中。
+默认桌面产品是现代界面；经典 Tkinter 仅作回退。
 
 ## License / 许可证
 
