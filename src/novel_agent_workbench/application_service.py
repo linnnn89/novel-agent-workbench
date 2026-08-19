@@ -969,6 +969,7 @@ class WorkbenchApplicationService:
         draft_id: str,
         *,
         max_context_tokens: int | None = None,
+        max_tokens: int | None = None,
         stream: bool | None = None,
         stream_callback: Callable[[str], None] | None = None,
         reasoning_callback: Callable[[str], None] | None = None,
@@ -977,6 +978,7 @@ class WorkbenchApplicationService:
         result = DraftReviewService(self._runtime_store(project_id)).ai_review_draft(
             draft_id,
             max_context_tokens=max_context_tokens,
+            max_tokens=max_tokens,
             stream=stream,
             stream_callback=stream_callback,
             reasoning_callback=reasoning_callback,

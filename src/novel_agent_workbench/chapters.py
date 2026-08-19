@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from .storage import ProjectStore, utc_stamp
+
+MIN_CHAPTER_NUMBER_WIDTH = 3
+CHAPTER_ID_NUMBER_PATTERN = re.compile(r"(\d+)$")
 
 
 CHAPTER_WORKFLOW_FILENAME = "chapters_workflow.json"
@@ -354,6 +358,30 @@ def validate_chapter_id(chapter_id: str) -> None:
         raise ChapterWorkflowError(f"Unsafe chapter_id: {chapter_id!r}")
     if not all(character.isascii() and (character.isalnum() or character in {"_", "-"}) for character in value):
         raise ChapterWorkflowError(f"Unsafe chapter_id: {chapter_id!r}")
+
+
+def chapter_id_number(chapter_id: str) -> int | None:
+    match = CHAPTER_ID_NUMBER_PATTERN.search(str(chapter_id or "").strip())
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def chapter_number_width(numbers: Iterable[int] | None = None, *, minimum: int = MIN_CHAPTER_NUMBER_WIDTH) -> int:
+    width = max(MIN_CHAPTER_NUMBER_WIDTH, int(minimum))
+    for number in numbers or []:
+        width = max(width, len(str(abs(int(number)))))
+    return width
+
+
+def format_chapter_number(number: int, width: int | None = None) -> str:
+    value = abs(int(number))
+    pad = chapter_number_width([value], minimum=MIN_CHAPTER_NUMBER_WIDTH if width is None else int(width))
+    return f"{value:0{pad}d}"
+
+
+def format_chapter_id(number: int, width: int | None = None) -> str:
+    return f"chapter_{format_chapter_number(number, width)}"
 
 
 def safe_error_field(value: str) -> str:

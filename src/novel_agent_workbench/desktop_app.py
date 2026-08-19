@@ -15,6 +15,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .application_service import WorkbenchApplicationService
+from .chapters import chapter_id_number, chapter_number_width, format_chapter_id, format_chapter_number
 from .config import default_generation_settings
 from .context_assembler import DEFAULT_CHARS_PER_TOKEN
 from .memory_bank import (
@@ -2169,6 +2170,7 @@ class WorkbenchDesktopApp(tk.Tk):
             messagebox.showerror(APP_TITLE, f"读取创作设置失败:\n{exc}", parent=parent or self)
             return
         context_settings = settings.get("context") if isinstance(settings.get("context"), dict) else {}
+        sampling = settings.get("sampling") if isinstance(settings.get("sampling"), dict) else {}
         self.write_log(
             f"AI审稿请求已发送: project={project_id} draft_id={draft_id} "
             f"extra_instruction_chars={len(str(extra_instruction or '').strip())}"
@@ -2196,6 +2198,7 @@ class WorkbenchDesktopApp(tk.Tk):
                     project_id,
                     draft_id,
                     max_context_tokens=optional_int(context_settings.get("max_context_tokens")),
+                    max_tokens=optional_int(sampling.get("max_tokens")),
                     stream=True,
                     stream_callback=stream_callback,
                     reasoning_callback=reasoning_callback,
@@ -2224,6 +2227,14 @@ class WorkbenchDesktopApp(tk.Tk):
             review = review or {}
             if not streamed_review["seen"]:
                 self.append_text_window_chunk(review_body, str(review.get("comment") or "AI 审稿无可显示内容。"))
+            provider = review.get("provider") if isinstance(review.get("provider"), dict) else {}
+            if str(provider.get("finish_reason") or "").strip().lower() in {"length", "max_tokens", "max_output_tokens"}:
+                notice = (
+                    "注意：这次审稿在模型输出上限处被截断，意见可能不完整。"
+                    "请提高创作设置里的 Max Tokens 后重新审稿，或先按已有片段处理。"
+                )
+                self.append_text_window_chunk(review_body, f"\n\n[{notice}]\n")
+                messagebox.showwarning(APP_TITLE, notice)
             self.append_text_window_chunk(
                 review_body,
                 f"\n\n[已保存到审稿意见汇总] review_id={result.get('review_id')} status={result.get('status')}\n",
@@ -5243,10 +5254,10 @@ def readable_chapter_label(chapter_id: str) -> str:
     value = str(chapter_id or "").strip()
     if not value:
         return "全局"
-    match = re.search(r"(\d+)$", value)
-    if not match:
+    number = chapter_id_number(value)
+    if number is None:
         return value
-    return f"第 {int(match.group(1)):03d} 章"
+    return f"第 {format_chapter_number(number)} 章"
 
 
 def short_identifier(value: str) -> str:
@@ -5263,12 +5274,12 @@ def memory_progress_label(memory_item: dict[str, Any], chapters: list[dict[str, 
     if last_number > 0:
         return (
             f"当前记忆银行已记录到 {readable_chapter_label(last_chapter_id)}。"
-            f"建议从第 {last_number + 1:03d} 章开始勾选新定稿。"
+            f"建议从第 {format_chapter_number(last_number + 1)} 章开始勾选新定稿。"
         )
     if has_memory:
         return "当前记忆银行已有正文，但没有记录章节进度。请手动勾选尚未汇总过的定稿章节。"
     if chapters:
-        return "当前记忆银行尚未建立。建议从第 001 章开始勾选定稿章节。"
+        return f"当前记忆银行尚未建立。建议从第 {format_chapter_number(1)} 章开始勾选定稿章节。"
     return "当前项目还没有已确认章节。先确认稿件后再更新记忆银行。"
 
 
@@ -5367,7 +5378,7 @@ def format_memory_update_prompt(
     if not selected_chapters:
         chapter_lines.append("（未选择本次要增量合并的定稿章节。）")
     for index, item in enumerate(selected_chapters, start=1):
-        chapter_id = safe_record_value(item.get("chapter_id")) or f"chapter_{index:03d}"
+        chapter_id = safe_record_value(item.get("chapter_id")) or format_chapter_id(index)
         title = safe_record_value(item.get("title")) or chapter_id
         content = str(item.get("content") or "").strip() or "（本章正文为空或未读取到正文。）"
         chapter_lines.extend(
@@ -5575,11 +5586,23 @@ def format_review_details(project_id: str, review: dict[str, Any]) -> str:
         "",
         "审稿说明",
         "--------",
-        str(review.get("comment") or "暂无审稿说明。"),
-        "",
-        "评分",
-        "----",
     ]
+    finish_reason = str(provider.get("finish_reason") or "").strip().lower()
+    truncated_notice = (
+        "注意：这次审稿在模型输出上限处被截断，意见可能不完整。"
+        "请提高创作设置里的 Max Tokens 后重新审稿，或先按已有片段处理。"
+    )
+    comment = str(review.get("comment") or "暂无审稿说明。")
+    if finish_reason in {"length", "max_tokens", "max_output_tokens"} and truncated_notice not in comment:
+        lines.extend([truncated_notice, ""])
+    lines.extend(
+        [
+            comment,
+            "",
+            "评分",
+            "----",
+        ]
+    )
     if scores:
         for key, value in scores.items():
             lines.append(f"{key}: {value}")
@@ -5975,7 +5998,7 @@ def optional_bool(value: object) -> bool | None:
 def suggest_next_chapter_id(chapters: list[dict[str, Any]]) -> str:
     max_seen = 0
     width = 3
-    retry_candidates: list[tuple[int, int]] = []
+    retry_candidates: list[tuple[int, str]] = []
     for chapter in chapters:
         chapter_id = str(chapter.get("chapter_id") or "")
         match = re.fullmatch(r"chapter_(\d+)", chapter_id)
@@ -5984,14 +6007,15 @@ def suggest_next_chapter_id(chapters: list[dict[str, Any]]) -> str:
         number_text = match.group(1)
         number = int(number_text)
         if is_empty_retriable_chapter(chapter):
-            retry_candidates.append((number, len(number_text)))
+            retry_candidates.append((number, chapter_id))
             continue
         max_seen = max(max_seen, number)
         width = max(width, len(number_text))
     if retry_candidates:
-        number, candidate_width = min(retry_candidates)
-        return f"chapter_{number:0{max(width, candidate_width)}d}"
-    return f"chapter_{max_seen + 1:0{width}d}"
+        _number, original_id = min(retry_candidates, key=lambda item: item[0])
+        return original_id
+    next_number = max_seen + 1
+    return format_chapter_id(next_number, chapter_number_width([next_number], minimum=width))
 
 
 def is_empty_retriable_chapter(chapter: dict[str, Any]) -> bool:

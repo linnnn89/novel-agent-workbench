@@ -42,6 +42,7 @@ from .desktop_app import (
 )
 from .memory_bank import normalize_memory_target_tokens
 from .model_settings import FEATURE_DEFINITIONS
+from .reviews import REVIEW_TRUNCATED_NOTICE, review_output_truncated
 from .storage import utc_stamp
 
 
@@ -192,10 +193,11 @@ def _normalize_generation_payload(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _chapter_sort_key(chapter_id: str) -> tuple[int, str]:
+def _chapter_sort_key(chapter_id: str) -> tuple[int, int, str]:
     match = re.search(r"(\d+)$", chapter_id)
-    number = int(match.group(1)) if match else 999999
-    return (number, chapter_id)
+    if match:
+        return (0, int(match.group(1)), chapter_id)
+    return (1, 0, chapter_id)
 
 
 def build_workspace_tree(app: WorkbenchApplicationService) -> list[dict[str, Any]]:
@@ -579,10 +581,12 @@ class WorkbenchBridge:
         def worker() -> dict[str, Any]:
             on_content, on_reason, mark_sent = self._stream_hooks("review_chunk")
             mark_sent()
+            sampling = settings.get("sampling") if isinstance(settings.get("sampling"), dict) else {}
             result = self.app.ai_review_draft(
                 project_id,
                 draft_id,
                 max_context_tokens=optional_int(context_settings.get("max_context_tokens")),
+                max_tokens=optional_int(sampling.get("max_tokens")),
                 stream=True,
                 stream_callback=on_content,
                 reasoning_callback=on_reason,
@@ -1377,6 +1381,8 @@ class WorkbenchBridge:
             "review_type": str(review.get("review_type") or ""),
             "recommendation": str(review.get("recommendation") or ""),
             "comment": str(review.get("comment") or ""),
+            "truncated": review_output_truncated(review),
+            "truncated_notice": REVIEW_TRUNCATED_NOTICE,
             "details": format_review_details(project_id, review),
         }
 

@@ -4,6 +4,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
+from .chapters import format_chapter_id
 from .drafts import sanitize_provider_draft_text
 from .providers import ProviderRequest, generate_with_provider, provider_request_role_or_writer_fallback
 from .storage import ProjectStore, utc_stamp
@@ -750,7 +751,7 @@ def format_memory_update_prompt(
         existing_memory = "（当前记忆银行为空，请根据本次发送的定稿章节建立项目长期记忆。）"
     chapter_lines: list[str] = []
     for index, item in enumerate(selected_chapters, start=1):
-        chapter_id = safe_memory_prompt_value(item.get("chapter_id")) or f"chapter_{index:03d}"
+        chapter_id = safe_memory_prompt_value(item.get("chapter_id")) or format_chapter_id(index)
         title = safe_memory_prompt_value(item.get("title")) or chapter_id
         content = str(item.get("content") or "").strip() or "（本章正文为空或未读取到正文。）"
         chapter_lines.extend(
@@ -882,7 +883,7 @@ def normalize_memory_generation_chapters(chapters: list[dict[str, Any]] | None) 
     for index, item in enumerate(chapters, start=1):
         if not isinstance(item, dict):
             raise MemoryBankError("Memory Bank generation chapters must be objects.")
-        chapter_id = safe_memory_prompt_value(item.get("chapter_id")) or f"chapter_{index:03d}"
+        chapter_id = safe_memory_prompt_value(item.get("chapter_id")) or format_chapter_id(index)
         normalize_source_chapter_ids([chapter_id])
         title = safe_memory_prompt_value(item.get("title")) or chapter_id
         content = str(item.get("content") or "").strip()

@@ -158,20 +158,18 @@ class DraftGenerationService:
 
     def generate_draft(self, request: DraftGenerationRequest) -> DraftGenerationResult:
         self.store.initialize()
-        with self.store.lock():
-            title = request.title.strip()
-            workflow = ChapterWorkflowService(self.store)
-            chapter_preexisted = any(item.get("chapter_id") == request.chapter_id for item in workflow.list_chapters())
-            try:
-                stream_callback = stream_sanitizer_callback(request.stream_callback, request.reasoning_callback)
-                provider_request = request.to_provider_request()
-                if stream_callback is not None:
-                    provider_request = replace(provider_request, stream_callback=stream_callback)
-                response = generate_with_provider(self.store, provider_request)
-                draft_id = new_draft_id()
-                created_at = utc_stamp()
-            except Exception as exc:
-                if chapter_preexisted:
+        title = request.title.strip()
+        workflow = ChapterWorkflowService(self.store)
+        chapter_preexisted = any(item.get("chapter_id") == request.chapter_id for item in workflow.list_chapters())
+        try:
+            stream_callback = stream_sanitizer_callback(request.stream_callback, request.reasoning_callback)
+            provider_request = request.to_provider_request()
+            if stream_callback is not None:
+                provider_request = replace(provider_request, stream_callback=stream_callback)
+            response = generate_with_provider(self.store, provider_request)
+        except Exception as exc:
+            if chapter_preexisted:
+                with self.store.lock():
                     workflow.record_error(
                         request.chapter_id,
                         title=title,
@@ -179,8 +177,11 @@ class DraftGenerationService:
                         error_type=getattr(exc, "error_type", exc.__class__.__name__),
                         message=str(exc),
                     )
-                raise
-            sanitized = sanitize_provider_draft_text(response.text)
+            raise
+        draft_id = new_draft_id()
+        created_at = utc_stamp()
+        sanitized = sanitize_provider_draft_text(response.text)
+        with self.store.lock():
             version = self.next_chapter_draft_version(request.chapter_id)
             version_label = f"ver{version}"
             draft_path = self.drafts_dir / f"{safe_filename(request.chapter_id)}__{version_label}__{draft_id}.json"

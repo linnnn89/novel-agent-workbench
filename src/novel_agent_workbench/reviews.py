@@ -28,6 +28,35 @@ REASONING_LEAK_REASON_CODE = "reasoning_leak"
 REASONING_LEAK_ISSUE_CODE = "reasoning_leak_detected"
 AI_REVIEW_TYPE = "ai"
 AI_REVIEW_SYSTEM_PROMPT = DEFAULT_REVIEW_SYSTEM_PROMPT
+TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens", "max_output_tokens"})
+REVIEW_TRUNCATED_NOTICE = (
+    "注意：这次审稿在模型输出上限处被截断，意见可能不完整。"
+    "请提高创作设置里的 Max Tokens 后重新审稿，或先按已有片段处理。"
+)
+
+
+def finish_reason_truncated(finish_reason: object) -> bool:
+    return str(finish_reason or "").strip().lower() in TRUNCATED_FINISH_REASONS
+
+
+def review_output_truncated(review: dict[str, Any] | None) -> bool:
+    if not isinstance(review, dict):
+        return False
+    provider = review.get("provider") if isinstance(review.get("provider"), dict) else {}
+    if finish_reason_truncated(provider.get("finish_reason")):
+        return True
+    issues = review.get("issues") if isinstance(review.get("issues"), list) else []
+    return any(isinstance(item, dict) and item.get("code") == "ai_review_truncated" for item in issues)
+
+
+def _positive_max_tokens(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 class DraftReviewError(RuntimeError):
@@ -214,80 +243,86 @@ class DraftReviewService:
         draft_id: str,
         *,
         max_context_tokens: int | None = None,
+        max_tokens: int | None = None,
         stream: bool | None = None,
         stream_callback: Any | None = None,
         reasoning_callback: Any | None = None,
         extra_instruction: str = "",
     ) -> DraftReviewResult:
         self.store.initialize()
-        with self.store.lock():
-            draft_service = DraftGenerationService(self.store)
-            draft = draft_service.read_draft(draft_id)
-            chapter_id = str(draft.get("chapter_id") or "").strip()
-            validate_chapter_id(chapter_id)
-            title = str(draft.get("title") or "")
-            workflow = ChapterWorkflowService(self.store)
-            workflow.get_chapter(chapter_id)
-            gate = manual_rewrite_review_gate(self.store, draft)
-            if gate["required"] and not gate["allowed"]:
-                raise DraftReviewError(
-                    "Manual rewrite submitted draft requires selected_for_review comparison "
-                    "or pending_review handoff before AI review."
-                )
-            from .context_assembler import ContextAssemblerService
+        from .context_assembler import ContextAssemblerService
 
-            config = self.store.read_config()
-            raw_content = str(draft.get("content") or "")
-            draft_sanitized = sanitize_provider_draft_text(raw_content)
-            review_system_prompt = ai_review_system_prompt(config)
-            review_task_template = ai_review_task_prompt_template(config)
-            task_prompt = ai_review_task_prompt(
-                chapter_id=chapter_id,
-                title=title,
-                template=review_task_template,
-                extra_instruction=extra_instruction,
+        workflow = ChapterWorkflowService(self.store)
+        draft_service = DraftGenerationService(self.store)
+        draft = draft_service.read_draft(draft_id)
+        chapter_id = str(draft.get("chapter_id") or "").strip()
+        validate_chapter_id(chapter_id)
+        title = str(draft.get("title") or "")
+        workflow.get_chapter(chapter_id)
+        gate = manual_rewrite_review_gate(self.store, draft)
+        if gate["required"] and not gate["allowed"]:
+            raise DraftReviewError(
+                "Manual rewrite submitted draft requires selected_for_review comparison "
+                "or pending_review handoff before AI review."
             )
-            render = ContextAssemblerService(self.store).prompt_render_dry_run(
-                prompt=task_prompt,
-                system_prompt=review_system_prompt,
-                max_context_tokens=max_context_tokens,
-                chapter_id=chapter_id,
-                include_prompt_text=True,
-                include_context_text=True,
-            ).to_dict()
-            provider_prompt = render_ai_review_prompt(
-                render,
-                draft,
-                draft_sanitized["content"],
-                review_prompt=task_prompt,
-            )
-            request_role = provider_request_role_or_writer_fallback(
+        config = self.store.read_config()
+        raw_content = str(draft.get("content") or "")
+        draft_sanitized = sanitize_provider_draft_text(raw_content)
+        review_system_prompt = ai_review_system_prompt(config)
+        review_task_template = ai_review_task_prompt_template(config)
+        task_prompt = ai_review_task_prompt(
+            chapter_id=chapter_id,
+            title=title,
+            template=review_task_template,
+            extra_instruction=extra_instruction,
+        )
+        render = ContextAssemblerService(self.store).prompt_render_dry_run(
+            prompt=task_prompt,
+            system_prompt=review_system_prompt,
+            max_context_tokens=max_context_tokens,
+            chapter_id=chapter_id,
+            include_prompt_text=True,
+            include_context_text=True,
+        ).to_dict()
+        provider_prompt = render_ai_review_prompt(
+            render,
+            draft,
+            draft_sanitized["content"],
+            review_prompt=task_prompt,
+        )
+        request_role = provider_request_role_or_writer_fallback(
+            self.store,
+            "scorer",
+            feature_id="ai_review",
+        )
+        safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
+        review_max_tokens = _positive_max_tokens(max_tokens)
+        if review_max_tokens is None:
+            settings = effective_generation_settings(config)
+            sampling = settings.get("sampling") if isinstance(settings.get("sampling"), dict) else {}
+            review_max_tokens = _positive_max_tokens(sampling.get("max_tokens"))
+        try:
+            response = generate_with_provider(
                 self.store,
-                "scorer",
-                feature_id="ai_review",
+                ProviderRequest(
+                    role=request_role,
+                    feature_id="ai_review",
+                    prompt=provider_prompt,
+                    system_prompt=review_system_prompt,
+                    max_tokens=review_max_tokens,
+                    stream=stream,
+                    stream_callback=safe_stream_callback,
+                    reasoning_callback=reasoning_callback,
+                    metadata={
+                        "ai_review": True,
+                        "chapter_id": chapter_id,
+                        "draft_id": draft_id,
+                        "context_aware_review": True,
+                    },
+                ),
             )
-            safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
-            try:
-                response = generate_with_provider(
-                    self.store,
-                    ProviderRequest(
-                        role=request_role,
-                        feature_id="ai_review",
-                        prompt=provider_prompt,
-                        system_prompt=review_system_prompt,
-                        max_tokens=2048,
-                        stream=stream,
-                        stream_callback=safe_stream_callback,
-                        reasoning_callback=reasoning_callback,
-                        metadata={
-                            "ai_review": True,
-                            "chapter_id": chapter_id,
-                            "draft_id": draft_id,
-                            "context_aware_review": True,
-                        },
-                    ),
-                )
-            except Exception as exc:
+        except Exception as exc:
+            with self.store.lock():
                 workflow.record_error(
                     chapter_id,
                     title=title,
@@ -295,15 +330,34 @@ class DraftReviewService:
                     error_type=getattr(exc, "error_type", exc.__class__.__name__),
                     message=str(exc),
                 )
-                raise
+            raise
 
-            created_at = utc_stamp()
-            review_id = new_review_id()
-            review_path = self.reviews_dir / f"{safe_filename(chapter_id)}__{review_id}.json"
-            status = "ai_review_ready"
-            response_sanitized = sanitize_provider_draft_text(response.text)
-            comment = response_sanitized["content"] or "AI 审稿未返回可显示的意见。"
-            context_stats = render_context_stats(render)
+        created_at = utc_stamp()
+        review_id = new_review_id()
+        review_path = self.reviews_dir / f"{safe_filename(chapter_id)}__{review_id}.json"
+        status = "ai_review_ready"
+        response_sanitized = sanitize_provider_draft_text(response.text)
+        comment = response_sanitized["content"] or "AI 审稿未返回可显示的意见。"
+        truncated = finish_reason_truncated(response.finish_reason)
+        if truncated:
+            comment = f"{REVIEW_TRUNCATED_NOTICE}\n\n{comment}"
+        context_stats = render_context_stats(render)
+        issues = [
+            {
+                "code": "ai_review_completed",
+                "severity": "info",
+                "message": "AI review completed with draft text and active context.",
+            }
+        ]
+        if truncated:
+            issues.append(
+                {
+                    "code": "ai_review_truncated",
+                    "severity": "warning",
+                    "message": REVIEW_TRUNCATED_NOTICE,
+                }
+            )
+        with self.store.lock():
             artifact = {
                 "schema_version": 1,
                 "review_type": AI_REVIEW_TYPE,
@@ -313,13 +367,7 @@ class DraftReviewService:
                 "status": status,
                 "created_at": created_at,
                 "scores": mock_scores(response.text),
-                "issues": [
-                    {
-                        "code": "ai_review_completed",
-                        "severity": "info",
-                        "message": "AI review completed with draft text and active context.",
-                    }
-                ],
+                "issues": issues,
                 "recommendation": "ai_review_completed",
                 "comment": comment,
                 "decision": pending_decision(),
@@ -337,6 +385,8 @@ class DraftReviewService:
                     "prompt_chars": len(provider_prompt),
                     "provider_request_role": request_role,
                     "logical_role": "scorer",
+                    "max_tokens": review_max_tokens,
+                    "output_truncated": truncated,
                     "metadata_keys": ["ai_review", "chapter_id", "context_aware_review", "draft_id"],
                     "manual_rewrite_review_gate": gate,
                     "draft_text_sanitizer": draft_sanitized["summary"],

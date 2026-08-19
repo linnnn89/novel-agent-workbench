@@ -5,6 +5,8 @@ const FONTS = {
   mono: { label: "等宽草稿", value: "var(--font-mono)" },
 };
 
+const CHAPTER_GROUP_SIZE = 10;
+
 const state = {
   ready: false,
   workspace: [],
@@ -17,6 +19,10 @@ const state = {
   generating: false,
   follow: true,
   saveTimer: 0,
+  streamProjectId: "",
+  streamChapterId: "",
+  treeOpen: { projects: Object.create(null), groups: Object.create(null) },
+  treeSearchOpen: { projects: Object.create(null), groups: Object.create(null) },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -150,66 +156,204 @@ function currentProject() {
   return state.workspace.find((item) => item.project_id === state.projectId);
 }
 
+function chapterNumberFromId(chapterId) {
+  const match = String(chapterId || "").match(/(\d+)$/);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function chapterGroupStart(number) {
+  if (!Number.isFinite(number) || number <= 0) return 0;
+  return Math.floor((number - 1) / CHAPTER_GROUP_SIZE) * CHAPTER_GROUP_SIZE + 1;
+}
+
+function chapterGroupKey(projectId, start) {
+  return `${projectId}:${start}`;
+}
+
+function searchQuery() {
+  return $("searchInput").value.trim().toLowerCase();
+}
+
+function isSearching() {
+  return Boolean(searchQuery());
+}
+
+function isProjectExpanded(projectId, ctx) {
+  if (ctx.searching) {
+    const flag = state.treeSearchOpen.projects[projectId];
+    if (flag === true) return true;
+    if (flag === false) return false;
+    return Boolean(ctx.hasChapterHits || ctx.projectTitleMatch);
+  }
+  return Boolean(state.treeOpen.projects[projectId]);
+}
+
+function isGroupExpanded(projectId, start, ctx) {
+  const key = chapterGroupKey(projectId, start);
+  if (ctx.searching) {
+    const flag = state.treeSearchOpen.groups[key];
+    if (flag === true) return true;
+    if (flag === false) return false;
+    return Boolean(ctx.groupHasHits);
+  }
+  return Boolean(state.treeOpen.groups[key]);
+}
+
+function toggleProjectOpen(projectId, ctx) {
+  if (ctx.searching) {
+    state.treeSearchOpen.projects[projectId] = !isProjectExpanded(projectId, ctx);
+    return;
+  }
+  state.treeOpen.projects[projectId] = !state.treeOpen.projects[projectId];
+}
+
+function toggleGroupOpen(projectId, start, ctx) {
+  const key = chapterGroupKey(projectId, start);
+  if (ctx.searching) {
+    state.treeSearchOpen.groups[key] = !isGroupExpanded(projectId, start, ctx);
+    return;
+  }
+  state.treeOpen.groups[key] = !state.treeOpen.groups[key];
+}
+
+function revealInTree(projectId, chapterId) {
+  if (!projectId) return;
+  state.treeOpen.projects[projectId] = true;
+  const number = chapterNumberFromId(chapterId);
+  const start = number == null ? 0 : chapterGroupStart(number);
+  if (chapterId) state.treeOpen.groups[chapterGroupKey(projectId, start)] = true;
+}
+
+function groupChapters(chapters) {
+  const groups = new Map();
+  chapters.forEach((chapter) => {
+    const number = chapterNumberFromId(chapter.chapter_id);
+    const start = number == null ? 0 : chapterGroupStart(number);
+    let group = groups.get(start);
+    if (!group) {
+      group = {
+        start,
+        end: start === 0 ? 0 : start + CHAPTER_GROUP_SIZE - 1,
+        chapters: [],
+      };
+      groups.set(start, group);
+    }
+    group.chapters.push(chapter);
+  });
+  return [...groups.values()].sort((left, right) => left.start - right.start);
+}
+
+function groupLabel(group) {
+  if (group.start === 0) return "其他";
+  return `${group.start}-${group.end}`;
+}
+
+function renderChapterRow(project, chapter) {
+  const row = document.createElement("div");
+  row.className = `tree-chapter${chapter.chapter_id === state.chapterId ? " active" : ""}`;
+  const chapterBtn = document.createElement("button");
+  chapterBtn.type = "button";
+  chapterBtn.innerHTML = `<span class="dot ${chapter.status}"></span><span class="tree-title">${escapeHtml(chapter.title || chapter.chapter_id)}</span>`;
+  chapterBtn.addEventListener("click", () => openChapter(project.project_id, chapter));
+  chapterBtn.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    showTreeMenu(event, { kind: "chapter", project, chapter });
+  });
+  row.append(chapterBtn);
+  if (chapter.chapter_id === state.chapterId) {
+    (chapter.drafts || []).forEach((draft) => {
+      const draftBtn = document.createElement("button");
+      draftBtn.type = "button";
+      draftBtn.className = `tree-draft${draft.draft_id === state.draftId ? " active" : ""}`;
+      draftBtn.innerHTML = `<span class="tree-title">${escapeHtml(draft.version_label || draft.draft_id)}</span>`;
+      draftBtn.addEventListener("click", () => loadDraft(project.project_id, draft.draft_id));
+      draftBtn.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showTreeMenu(event, { kind: "draft", project, chapter, draft });
+      });
+      row.append(draftBtn);
+    });
+  }
+  return row;
+}
+
 function renderTree() {
-  const query = $("searchInput").value.trim().toLowerCase();
+  const query = searchQuery();
+  const searching = Boolean(query);
   const root = $("tree");
+  const scrollTop = root.scrollTop;
   root.innerHTML = "";
   state.workspace.forEach((project) => {
-    const visibleChapters = (project.chapters || []).filter((chapter) => {
-      if (!query) return true;
-      const hay = `${project.title} ${project.project_id} ${chapter.title} ${chapter.chapter_id}`.toLowerCase();
-      return hay.includes(query);
-    });
-    if (query && !visibleChapters.length && !`${project.title} ${project.project_id}`.toLowerCase().includes(query)) {
+    const projectHay = `${project.title} ${project.project_id}`.toLowerCase();
+    const projectTitleMatch = searching && projectHay.includes(query);
+    const chapterHits = searching
+      ? (project.chapters || []).filter((chapter) => {
+          const hay = `${chapter.title || ""} ${chapter.chapter_id}`.toLowerCase();
+          return hay.includes(query);
+        })
+      : [];
+    if (searching && !chapterHits.length && !projectTitleMatch) {
       return;
     }
+    const sourceChapters = searching
+      ? (chapterHits.length ? chapterHits : (project.chapters || []))
+      : (project.chapters || []);
+    const ctx = {
+      searching,
+      projectTitleMatch,
+      hasChapterHits: chapterHits.length > 0,
+    };
+    const open = isProjectExpanded(project.project_id, ctx);
     const box = document.createElement("div");
-    box.className = `tree-project${project.project_id === state.projectId ? " active" : ""}`;
+    box.className = `tree-project${project.project_id === state.projectId ? " active" : ""}${open ? " open" : ""}`;
     const button = document.createElement("button");
     button.type = "button";
-    button.innerHTML = `<span class="tree-title">${escapeHtml(project.title)}</span>`;
-    button.addEventListener("click", () => selectProject(project.project_id));
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.innerHTML = `<span class="chevron">${open ? "▾" : "▸"}</span><span class="tree-title">${escapeHtml(project.title)}</span><span class="tree-count">${(project.chapters || []).length}</span>`;
+    button.addEventListener("click", () => {
+      toggleProjectOpen(project.project_id, ctx);
+      renderTree();
+    });
     button.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       event.stopPropagation();
       showTreeMenu(event, { kind: "project", project });
     });
     box.append(button);
-    const list = document.createElement("div");
-    list.className = "chapters";
-    visibleChapters.forEach((chapter) => {
-      const row = document.createElement("div");
-      row.className = `tree-chapter${chapter.chapter_id === state.chapterId ? " active" : ""}`;
-      const chapterBtn = document.createElement("button");
-      chapterBtn.type = "button";
-      chapterBtn.innerHTML = `<span class="dot ${chapter.status}"></span><span class="tree-title">${escapeHtml(chapter.title || chapter.chapter_id)}</span>`;
-      chapterBtn.addEventListener("click", () => openChapter(project.project_id, chapter));
-      chapterBtn.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        showTreeMenu(event, { kind: "chapter", project, chapter });
-      });
-      row.append(chapterBtn);
-      if (chapter.chapter_id === state.chapterId) {
-        (chapter.drafts || []).forEach((draft) => {
-          const draftBtn = document.createElement("button");
-          draftBtn.type = "button";
-          draftBtn.className = `tree-draft${draft.draft_id === state.draftId ? " active" : ""}`;
-          draftBtn.innerHTML = `<span class="tree-title">${escapeHtml(draft.version_label || draft.draft_id)}</span>`;
-          draftBtn.addEventListener("click", () => loadDraft(project.project_id, draft.draft_id));
-          draftBtn.addEventListener("contextmenu", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            showTreeMenu(event, { kind: "draft", project, chapter, draft });
-          });
-          row.append(draftBtn);
+    if (open) {
+      const list = document.createElement("div");
+      list.className = "chapters";
+      groupChapters(sourceChapters).forEach((group) => {
+        const groupCtx = { ...ctx, groupHasHits: searching && chapterHits.some((chapter) => {
+          const number = chapterNumberFromId(chapter.chapter_id);
+          const start = number == null ? 0 : chapterGroupStart(number);
+          return start === group.start;
+        }) };
+        const groupOpen = isGroupExpanded(project.project_id, group.start, groupCtx);
+        const groupBox = document.createElement("div");
+        groupBox.className = `tree-group${groupOpen ? " open" : ""}`;
+        const groupBtn = document.createElement("button");
+        groupBtn.type = "button";
+        groupBtn.setAttribute("aria-expanded", groupOpen ? "true" : "false");
+        groupBtn.innerHTML = `<span class="chevron">${groupOpen ? "▾" : "▸"}</span><span class="tree-title">${escapeHtml(groupLabel(group))}</span><span class="tree-count">${group.chapters.length}</span>`;
+        groupBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          toggleGroupOpen(project.project_id, group.start, groupCtx);
+          renderTree();
         });
-      }
-      list.append(row);
-    });
-    box.append(list);
+        groupBox.append(groupBtn);
+        if (groupOpen) {
+          group.chapters.forEach((chapter) => groupBox.append(renderChapterRow(project, chapter)));
+        }
+        list.append(groupBox);
+      });
+      box.append(list);
+    }
     root.append(box);
   });
+  root.scrollTop = scrollTop;
 }
 
 function escapeHtml(value) {
@@ -233,16 +377,35 @@ async function refreshWorkspace(keepSelection = true) {
   if (state.projectId) await loadOverview(state.projectId);
 }
 
+async function flushSave() {
+  clearTimeout(state.saveTimer);
+  state.saveTimer = 0;
+  await saveDraft();
+}
+
+function blockIfGenerating() {
+  if (!state.generating) return false;
+  toast("请等待当前生成完成。");
+  return true;
+}
+
 async function selectProject(projectId) {
+  if (!projectId) return false;
+  if (projectId !== state.projectId) {
+    if (blockIfGenerating()) return false;
+    await flushSave();
+  }
   if (window.ThinkTrace && ThinkTrace.isIdle()) ThinkTrace.dispose();
   state.projectId = projectId;
   $("projectChip").textContent = currentProject()?.title || "未选择作品";
   renderTree();
   await loadOverview(projectId);
+  return true;
 }
 
 async function loadOverview(projectId) {
   const overview = await call("project_overview", projectId);
+  if (projectId !== state.projectId) return;
   $("projectChip").textContent = currentProject()?.title || projectId;
   $("modelPill").textContent = overview.model_status;
   $("summaryText").textContent = `章节 ${overview.chapter_count} · 草稿 ${overview.draft_count}\n已确认 ${overview.committed_chapter_count} · 审稿 ${overview.review_count}`;
@@ -250,25 +413,39 @@ async function loadOverview(projectId) {
 }
 
 async function openChapter(projectId, chapter) {
-  await selectProject(projectId);
+  if (blockIfGenerating()) return;
+  if (state.draftId && (projectId !== state.projectId || chapter.chapter_id !== state.chapterId)) {
+    await flushSave();
+  }
+  revealInTree(projectId, chapter.chapter_id);
+  if ((await selectProject(projectId)) === false) return;
   state.chapterId = chapter.chapter_id;
   const latest = [...(chapter.drafts || [])].pop();
   renderTree();
   if (latest?.draft_id) {
     await loadDraft(projectId, latest.draft_id);
   } else {
+    state.draftId = "";
+    state.draftIds = [];
+    state.draftIndex = -1;
     $("draftTitle").textContent = chapter.title || chapter.chapter_id;
     $("draftHint").textContent = "这一章还没有可读草稿";
     $("editor").value = "";
     $("countPill").textContent = "字数 0";
+    $("versionLabel").textContent = "—";
   }
 }
 
-async function loadDraft(projectId, draftId, { silent = false } = {}) {
+async function loadDraft(projectId, draftId, { silent = false, force = false } = {}) {
+  if (!force && blockIfGenerating()) return;
+  if (!force && state.draftId && (projectId !== state.projectId || draftId !== state.draftId)) {
+    await flushSave();
+  }
   const draft = await call("open_draft", projectId, draftId);
   state.projectId = draft.project_id;
   state.chapterId = draft.chapter_id;
   state.draftId = draft.draft_id;
+  revealInTree(draft.project_id, draft.chapter_id);
   state.draftIds = draft.draft_ids || [];
   state.draftIndex = draft.index ?? -1;
   $("draftTitle").textContent = `${draft.chapter_id} · ${draft.title}`;
@@ -398,10 +575,14 @@ async function generateChapter() {
         label: "生成草稿",
         style: "primary",
         onClick: async () => {
+          const projectId = state.projectId;
+          const chapterId = chapter.value.trim();
+          const chapterTitle = title.value.trim() || chapterId;
+          const userPrompt = prompt.value;
           try {
             closeModal();
-            beginStream(chapter.value.trim(), title.value.trim() || chapter.value.trim());
-            await call("generate_draft", state.projectId, chapter.value.trim(), title.value.trim(), prompt.value);
+            beginStream(projectId, chapterId, chapterTitle);
+            await call("generate_draft", projectId, chapterId, chapterTitle, userPrompt);
           } catch (error) {
             setBusy(false);
             ThinkTrace.finish(false);
@@ -413,8 +594,11 @@ async function generateChapter() {
   });
 }
 
-function beginStream(chapterId, title) {
+function beginStream(projectId, chapterId, title) {
   state.follow = true;
+  state.streamProjectId = projectId;
+  state.streamChapterId = chapterId;
+  state.projectId = projectId;
   state.chapterId = chapterId;
   state.draftId = "";
   $("draftTitle").textContent = `${chapterId} · ${title}`;
@@ -426,7 +610,9 @@ function beginStream(chapterId, title) {
   setBusy(true, "请求已发出，正在等待模型接入…");
 }
 
-function appendEditor(text) {
+function appendEditor(text, chapterId = "") {
+  if (state.streamChapterId && chapterId && chapterId !== state.streamChapterId) return;
+  if (state.streamProjectId && state.projectId !== state.streamProjectId) return;
   const editor = $("editor");
   editor.value += text;
   $("countPill").textContent = `字数 ${countChars(editor.value)}`;
@@ -436,19 +622,24 @@ function appendEditor(text) {
 }
 
 async function finishDraft(payload) {
+  const projectId = state.streamProjectId || state.projectId;
   setBusy(false);
   ThinkTrace.finish(payload?.ok !== false);
   if (!payload?.ok) {
     $("savePill").textContent = "生成失败";
     toast(payload?.error || "生成失败");
+    state.streamProjectId = "";
+    state.streamChapterId = "";
     return;
   }
   const draftId = payload.data?.draft_id;
   await refreshWorkspace();
   if (draftId) {
-    await loadDraft(state.projectId, draftId, { silent: true });
+    await loadDraft(projectId, draftId, { silent: true, force: true });
     toast("新草稿已写入，尚未成为确认稿。");
   }
+  state.streamProjectId = "";
+  state.streamChapterId = "";
 }
 
 async function rewriteDraft() {
@@ -463,7 +654,7 @@ async function rewriteDraft() {
       const chapterId = state.chapterId;
       const project = currentProject();
       const chapter = project?.chapters?.find((item) => item.chapter_id === chapterId);
-      beginStream(chapterId, chapter?.title || chapterId);
+      beginStream(projectId, chapterId, chapter?.title || chapterId);
       try {
         await call("rewrite_draft", projectId, draftId, instruction);
       } catch (error) {
@@ -485,7 +676,7 @@ async function refineDraft() {
       const projectId = state.projectId;
       const draftId = state.draftId;
       const chapterId = state.chapterId;
-      beginStream(chapterId, `精修 ${chapterId}`);
+      beginStream(projectId, chapterId, `精修 ${chapterId}`);
       try {
         await call("refine_draft", projectId, draftId, instruction);
       } catch (error) {
@@ -504,6 +695,7 @@ async function reviewDraft() {
     const result = await call("ai_review", state.projectId, state.draftId);
     if (result?.existing) {
       openDrawer({ kicker: "已有审稿", title: `审稿 · ${result.review.chapter_id}`, content: result.review.details });
+      if (result.review.truncated) toast(result.review.truncated_notice || "审稿意见被截断，可能不完整。");
       return;
     }
     const box = document.createElement("div");
@@ -527,6 +719,7 @@ function finishReview(payload) {
   }
   const review = payload.data || {};
   openDrawer({ kicker: "AI 审稿完成", title: `审稿 · ${review.chapter_id || ""}`, content: review.details || review.comment || "暂无说明" });
+  if (review.truncated) toast(review.truncated_notice || "审稿意见被截断，可能不完整。");
   loadOverview(state.projectId).catch(() => {});
 }
 
@@ -708,7 +901,20 @@ function menuItemsFor(target) {
     ];
   }
   return [
-    { label: "生成草稿", onClick: () => generateChapter() },
+    {
+      label: "打开作品",
+      onClick: async () => {
+        state.treeOpen.projects[projectId] = true;
+        await selectProject(projectId);
+      },
+    },
+    {
+      label: "生成草稿",
+      onClick: async () => {
+        if ((await selectProject(projectId)) === false) return;
+        await generateChapter();
+      },
+    },
     { label: "AI审稿当前稿", onClick: reviewDraft },
     { label: "本地初审当前稿", onClick: localReviewCurrent },
     { label: "确认当前稿", onClick: confirmDraft },
@@ -929,7 +1135,13 @@ async function applyWorkspaceResult(result, projectId) {
 }
 
 function bindEvents() {
-  $("searchInput").addEventListener("input", renderTree);
+  $("searchInput").addEventListener("input", () => {
+    if (!searchQuery()) {
+      state.treeSearchOpen = { projects: Object.create(null), groups: Object.create(null) };
+      revealInTree(state.projectId, state.chapterId);
+    }
+    renderTree();
+  });
   $("refreshBtn").addEventListener("click", () => refreshWorkspace().catch((error) => toast(error.message)));
   $("newProjectBtn").addEventListener("click", () => createProject().catch((error) => toast(error.message)));
   $("newChapterBtn").addEventListener("click", () => generateChapter().catch((error) => toast(error.message)));
@@ -1036,7 +1248,7 @@ function bindEvents() {
 
 window.__workbenchPush = function workbenchPush(event, payload) {
   if (window.ThinkTrace && ThinkTrace.handle(event, payload)) return;
-  if (event === "draft_chunk") appendEditor(payload?.text || "");
+  if (event === "draft_chunk") appendEditor(payload?.text || "", payload?.chapter_id || "");
   if (event === "review_chunk" && state.reviewBox) {
     state.reviewBox.textContent += payload?.text || "";
     $("drawerBody").scrollTo({ top: $("drawerBody").scrollHeight, behavior: "smooth" });

@@ -248,11 +248,11 @@ h3 {
   scroll-behavior: smooth;
   padding-right: 4px;
 }
-.tree-project, .tree-chapter {
+.tree-project, .tree-chapter, .tree-group {
   border-radius: 16px;
   margin-bottom: 6px;
 }
-.tree-project > button, .tree-chapter > button, .tree-draft {
+.tree-project > button, .tree-chapter > button, .tree-draft, .tree-group > button {
   width: 100%;
   text-align: left;
   border: 0;
@@ -265,15 +265,34 @@ h3 {
   gap: 8px;
   transition: background 180ms var(--spring), transform 160ms var(--bounce);
 }
-.tree-project > button:hover, .tree-chapter > button:hover, .tree-draft:hover {
+.tree-group > button {
+  padding: 7px 10px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.tree-project > button:hover, .tree-chapter > button:hover, .tree-draft:hover, .tree-group > button:hover {
   background: rgba(79, 70, 229, 0.08);
 }
-.tree-project > button:active, .tree-chapter > button:active, .tree-draft:active,
+.tree-project > button:active, .tree-chapter > button:active, .tree-draft:active, .tree-group > button:active,
 .btn:active, .icon-btn:active { transform: scale(0.97); }
 .tree-project.active > button, .tree-chapter.active > button, .tree-draft.active {
   background: rgba(79, 70, 229, 0.12);
 }
 .tree-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.chevron {
+  flex: 0 0 auto;
+  width: 1em;
+  text-align: center;
+  opacity: 0.55;
+  font-size: 11px;
+}
+.tree-group .tree-chapter { margin-left: 8px; margin-bottom: 4px; }
 .dot {
   width: 8px;
   height: 8px;

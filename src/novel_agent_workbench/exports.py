@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .chapters import chapter_id_number, chapter_number_width, format_chapter_number
 from .drafts import DraftGenerationService
 from .storage import ProjectStore
 
@@ -67,10 +68,17 @@ class TxtManuscriptExportService:
         project_meta = self.store.read_project_meta()
         project_title = str(project_meta.get("title") or self.store.project_id).strip()
         parts = [project_title]
+        numbers = [
+            number
+            for number in (chapter_id_number(str(chapter.get("chapter_id") or "")) for chapter in chapters)
+            if number is not None
+        ]
+        heading_width = chapter_number_width(numbers)
         for chapter in chapters:
             title = format_chapter_heading(
                 str(chapter.get("chapter_id") or ""),
                 str(chapter.get("title") or ""),
+                width=heading_width,
             )
             content = normalize_txt_content(str(chapter.get("content") or ""))
             parts.append(f"{title}\n\n{content}".rstrip())
@@ -84,12 +92,11 @@ def chapter_sort_key(chapter_id: str) -> tuple[str, int, str]:
     return (chapter_id, 0, chapter_id)
 
 
-def format_chapter_heading(chapter_id: str, title: str) -> str:
+def format_chapter_heading(chapter_id: str, title: str, *, width: int | None = None) -> str:
     clean_title = title.strip()
-    match = re.search(r"(\d+)$", chapter_id)
-    if match:
-        number = int(match.group(1))
-        prefix = f"第{number:03d}章"
+    number = chapter_id_number(chapter_id)
+    if number is not None:
+        prefix = f"第{format_chapter_number(number, width)}章"
         if clean_title and clean_title != chapter_id:
             return f"{prefix} {clean_title}"
         return prefix

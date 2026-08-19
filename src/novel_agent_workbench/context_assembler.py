@@ -603,7 +603,7 @@ def target_chapter_prompt(chapter_id: str) -> str:
 
 
 CHAPTER_PLAN_HEADING_PATTERN = re.compile(
-    r"(?m)^\s{0,3}#{1,6}\s*(?:章节|第)\s*(?P<number>[0-9]{1,4}|[一二三四五六七八九十两]+)\s*(?:章)?[：:、\s].*$"
+    r"(?m)^\s{0,3}#{1,6}\s*(?:章节|第)\s*(?P<number>[0-9]{1,8}|[一二三四五六七八九十两]+)\s*(?:章)?[：:、\s].*$"
 )
 
 
