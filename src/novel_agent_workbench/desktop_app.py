@@ -4958,7 +4958,7 @@ class WorkbenchDesktopApp(tk.Tk):
             row=5, column=1, sticky="ew", padx=(0, 20), pady=8
         )
 
-        ttk.Label(dialog, text="生成等待上限（秒）").grid(row=6, column=0, sticky="e", padx=(20, 10), pady=8)
+        ttk.Label(dialog, text="接入等待上限（秒，收到思考后不再计时）").grid(row=6, column=0, sticky="e", padx=(20, 10), pady=8)
         ttk.Entry(dialog, textvariable=timeout_var, width=40).grid(
             row=6, column=1, sticky="ew", padx=(0, 20), pady=8
         )

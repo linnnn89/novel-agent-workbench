@@ -1110,6 +1110,30 @@ def should_stream_response(request: ProviderRequest, role_config: ModelRoleConfi
     return bool(request.stream)
 
 
+def http_response_socket(response: Any) -> Any | None:
+    fp = getattr(response, "fp", None)
+    raw = getattr(fp, "raw", None) if fp is not None else None
+    for candidate in (
+        getattr(raw, "_sock", None),
+        raw,
+        getattr(fp, "_sock", None),
+        getattr(response, "_sock", None),
+    ):
+        if candidate is not None and hasattr(candidate, "settimeout"):
+            return candidate
+    return None
+
+
+def clear_http_response_timeout(response: Any) -> None:
+    sock = http_response_socket(response)
+    if sock is None:
+        return
+    try:
+        sock.settimeout(None)
+    except OSError:
+        return
+
+
 def parse_openai_compatible_json_response(response_body: bytes) -> dict[str, Any]:
     try:
         data = json.loads(response_body.decode("utf-8"))
@@ -1156,6 +1180,7 @@ def read_openai_compatible_stream_response(
     content_parts: list[str] = []
     finish_reason = ""
     usage: dict[str, Any] = {}
+    idle_timeout_cleared = False
     while True:
         line = response.readline()
         if not line:
@@ -1188,8 +1213,12 @@ def read_openai_compatible_stream_response(
         if content is None:
             content = message.get("content") if isinstance(message, dict) else ""
         reasoning_content = extract_stream_reasoning(delta, message)
-        if reasoning_content and reasoning_callback is not None:
-            reasoning_callback(reasoning_content)
+        if reasoning_content:
+            if not idle_timeout_cleared:
+                clear_http_response_timeout(response)
+                idle_timeout_cleared = True
+            if reasoning_callback is not None:
+                reasoning_callback(reasoning_content)
         if content:
             text = str(content)
             content_parts.append(text)

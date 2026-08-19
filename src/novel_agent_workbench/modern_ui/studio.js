@@ -138,7 +138,7 @@ function renderProviderPage() {
     field("适配器", adapter),
     field("API 地址", base),
     field("API Key", key),
-    field("等待上限（秒）", timeout)
+    field("接入等待上限（秒，收到思考后不再计时）", timeout)
   );
   const actions = el("div", "side-actions");
   const save = el("button", "btn primary", "保存当前设置");

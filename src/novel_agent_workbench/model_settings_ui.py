@@ -139,7 +139,7 @@ class ModelSettingsDialog:
             ("适配器", self.provider_adapter_var),
             ("API 地址", self.provider_base_url_var),
             ("API Key", self.provider_key_var),
-            ("等待上限（秒）", self.provider_timeout_var),
+            ("接入等待上限（秒，收到思考后不再计时）", self.provider_timeout_var),
         )
         for row, (label, variable) in enumerate(fields):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="e", padx=(0, 12), pady=8)
