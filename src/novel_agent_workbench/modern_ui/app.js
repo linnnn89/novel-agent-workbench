@@ -458,11 +458,14 @@ async function rewriteDraft() {
     title: "重新生成",
     desc: "会生成一个全新版本，不会覆盖当前草稿，也不会参考上一版正文。",
     onSubmit: async (instruction) => {
+      const projectId = state.projectId;
+      const draftId = state.draftId;
+      const chapterId = state.chapterId;
       const project = currentProject();
-      const chapter = project?.chapters?.find((item) => item.chapter_id === state.chapterId);
-      beginStream(state.chapterId, chapter?.title || state.chapterId);
+      const chapter = project?.chapters?.find((item) => item.chapter_id === chapterId);
+      beginStream(chapterId, chapter?.title || chapterId);
       try {
-        await call("rewrite_draft", state.projectId, state.draftId, instruction);
+        await call("rewrite_draft", projectId, draftId, instruction);
       } catch (error) {
         setBusy(false);
         ThinkTrace.finish(false);
@@ -479,9 +482,12 @@ async function refineDraft() {
     title: "根据审稿精修",
     desc: "必须以当前 AI 审稿意见为主约束。没有审稿时不能精修。",
     onSubmit: async (instruction) => {
-      beginStream(state.chapterId, `精修 ${state.chapterId}`);
+      const projectId = state.projectId;
+      const draftId = state.draftId;
+      const chapterId = state.chapterId;
+      beginStream(chapterId, `精修 ${chapterId}`);
       try {
-        await call("refine_draft", state.projectId, state.draftId, instruction);
+        await call("refine_draft", projectId, draftId, instruction);
       } catch (error) {
         setBusy(false);
         ThinkTrace.finish(false);
