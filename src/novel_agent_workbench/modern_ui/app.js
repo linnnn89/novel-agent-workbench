@@ -5,12 +5,27 @@ const FONTS = {
   mono: { label: "等宽草稿", value: "var(--font-mono)" },
 };
 
+const ICONS = {
+  refresh: '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
+  close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  chevronRight: '<polyline points="9 18 15 12 9 6"/>',
+  chevronDown: '<polyline points="6 9 12 15 18 9"/>',
+};
+
+function iconSvg(name) {
+  return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+}
+
 const CHAPTER_GROUP_SIZE = 10;
 
 const state = {
   ready: false,
   workspace: [],
-  prefs: { theme: "system", fontFamily: "literary", fontSize: 16, focusMode: false },
+  prefs: { theme: "system", fontFamily: "literary", fontSize: 16, focusMode: false, editorWidth: "comfort" },
+  inspectorTab: "chapter",
+  hasReview: false,
+  reviewText: "",
+  lastSavedAt: 0,
   projectId: "",
   chapterId: "",
   draftId: "",
@@ -67,12 +82,63 @@ function applyPrefs() {
   root.dataset.theme = theme;
   root.style.setProperty("--editor-font", (FONTS[state.prefs.fontFamily] || FONTS.literary).value);
   root.style.setProperty("--editor-size", `${Number(state.prefs.fontSize) || 18}px`);
+  $("app").dataset.editorWidth = state.prefs.editorWidth === "fill" ? "fill" : "comfort";
   $("app").classList.toggle("focus-mode", Boolean(state.prefs.focusMode));
   $("focusBtn").textContent = state.prefs.focusMode ? "退出专注" : "专注";
+  const widthBtn = $("widthBtn");
+  if (widthBtn) widthBtn.textContent = state.prefs.editorWidth === "fill" ? "铺满" : "舒适宽";
 }
 
 function countChars(text) {
   return Array.from(String(text || "").replace(/\s+/g, "")).length;
+}
+
+function formatCount(value) {
+  return Number(value || 0).toLocaleString("zh-CN");
+}
+
+function selectedEditorChars() {
+  const editor = $("editor");
+  if (!editor) return 0;
+  const start = editor.selectionStart || 0;
+  const end = editor.selectionEnd || 0;
+  if (end <= start) return 0;
+  return countChars(editor.value.slice(start, end));
+}
+
+function updateCountPill() {
+  const chars = countChars($("editor").value);
+  const selected = selectedEditorChars();
+  const minutes = chars ? Math.max(1, Math.round(chars / 400)) : 0;
+  let text = `本章 ${formatCount(chars)}`;
+  if (minutes) text += ` · 约 ${minutes} 分钟`;
+  if (selected) text += ` · 选中 ${formatCount(selected)}`;
+  $("countPill").textContent = text;
+}
+
+function refreshSavePill() {
+  if (state.generating) return;
+  if (!state.lastSavedAt) {
+    $("savePill").textContent = "本地保存就绪";
+    return;
+  }
+  const sec = Math.max(0, Math.round((Date.now() - state.lastSavedAt) / 1000));
+  if (sec < 8) $("savePill").textContent = "已自动保存";
+  else if (sec < 60) $("savePill").textContent = `${sec}秒前已保存`;
+  else $("savePill").textContent = `${Math.max(1, Math.round(sec / 60))}分钟前已保存`;
+}
+
+function updateDock() {
+  const busy = state.generating;
+  ["rewriteBtn", "reviewBtn", "confirmBtn", "newChapterBtn"].forEach((id) => {
+    const button = $(id);
+    if (button) button.disabled = busy;
+  });
+  const refine = $("refineBtn");
+  if (refine) {
+    refine.disabled = busy || !state.hasReview;
+    refine.title = state.hasReview ? "" : "需要先完成 AI 审稿";
+  }
 }
 
 function setBusy(busy, label) {
@@ -80,9 +146,7 @@ function setBusy(busy, label) {
   $("streamVeil").hidden = !busy;
   $("streamLabel").textContent = label || "模型正在书写…";
   $("editor").disabled = busy;
-  ["rewriteBtn", "refineBtn", "reviewBtn", "confirmBtn", "newChapterBtn"].forEach((id) => {
-    $(id).disabled = busy;
-  });
+  updateDock();
 }
 
 function closeModal() {
@@ -311,7 +375,7 @@ function renderTree() {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("aria-expanded", open ? "true" : "false");
-    button.innerHTML = `<span class="chevron">${open ? "▾" : "▸"}</span><span class="tree-title">${escapeHtml(project.title)}</span><span class="tree-count">${(project.chapters || []).length}</span>`;
+    button.innerHTML = `<span class="chevron">${iconSvg(open ? "chevronDown" : "chevronRight")}</span><span class="tree-title">${escapeHtml(project.title)}</span><span class="tree-count">${(project.chapters || []).length}</span>`;
     button.addEventListener("click", () => {
       toggleProjectOpen(project.project_id, ctx);
       renderTree();
@@ -337,7 +401,7 @@ function renderTree() {
         const groupBtn = document.createElement("button");
         groupBtn.type = "button";
         groupBtn.setAttribute("aria-expanded", groupOpen ? "true" : "false");
-        groupBtn.innerHTML = `<span class="chevron">${groupOpen ? "▾" : "▸"}</span><span class="tree-title">${escapeHtml(groupLabel(group))}</span><span class="tree-count">${group.chapters.length}</span>`;
+        groupBtn.innerHTML = `<span class="chevron">${iconSvg(groupOpen ? "chevronDown" : "chevronRight")}</span><span class="tree-title">${escapeHtml(groupLabel(group))}</span><span class="tree-count">${group.chapters.length}</span>`;
         groupBtn.addEventListener("click", (event) => {
           event.stopPropagation();
           toggleGroupOpen(project.project_id, group.start, groupCtx);
@@ -410,6 +474,7 @@ async function loadOverview(projectId) {
   $("modelPill").textContent = overview.model_status;
   $("summaryText").textContent = `章节 ${overview.chapter_count} · 草稿 ${overview.draft_count}\n已确认 ${overview.committed_chapter_count} · 审稿 ${overview.review_count}`;
   $("contextText").textContent = `大纲与资料 ${overview.planning_item_count} 项\n记忆库 ${overview.memory_bank_item_count} 项\n生成前会按预算组装，不会自动联网。`;
+  if (state.inspectorTab !== "chapter") renderInspector().catch(() => {});
 }
 
 async function openChapter(projectId, chapter) {
@@ -431,8 +496,12 @@ async function openChapter(projectId, chapter) {
     $("draftTitle").textContent = chapter.title || chapter.chapter_id;
     $("draftHint").textContent = "这一章还没有可读草稿";
     $("editor").value = "";
-    $("countPill").textContent = "字数 0";
+    updateCountPill();
     $("versionLabel").textContent = "—";
+    state.hasReview = false;
+    state.reviewText = "";
+    updateDock();
+    if (state.inspectorTab === "review") renderInspector();
   }
 }
 
@@ -452,16 +521,21 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
   $("draftHint").textContent = `${draft.version_label} · ${draft.status_label} · 编辑会自动保存`;
   $("versionLabel").textContent = draft.version_label;
   $("editor").value = draft.content || "";
-  $("countPill").textContent = `字数 ${countChars(draft.content)}`;
-  $("savePill").textContent = "已自动保存";
+  state.hasReview = Boolean(draft.has_review);
+  state.reviewText = draft.review?.details || draft.review?.comment || "";
+  state.lastSavedAt = Date.now();
+  updateCountPill();
+  refreshSavePill();
+  updateDock();
   $("prevBtn").disabled = state.draftIndex <= 0;
   $("nextBtn").disabled = state.draftIndex < 0 || state.draftIndex >= state.draftIds.length - 1;
   renderTree();
+  if (state.inspectorTab === "review") renderInspector();
   if (!silent) $("editor").focus();
 }
 
 function scheduleSave() {
-  $("countPill").textContent = `字数 ${countChars($("editor").value)}`;
+  updateCountPill();
   if (!state.draftId || state.generating) return;
   $("savePill").textContent = "保存中…";
   clearTimeout(state.saveTimer);
@@ -472,7 +546,8 @@ async function saveDraft() {
   if (!state.projectId || !state.draftId || state.generating) return;
   try {
     await call("save_draft", state.projectId, state.draftId, $("editor").value);
-    $("savePill").textContent = "已自动保存";
+    state.lastSavedAt = Date.now();
+    refreshSavePill();
   } catch (error) {
     $("savePill").textContent = "保存失败";
     toast(error.message);
@@ -604,7 +679,7 @@ function beginStream(projectId, chapterId, title) {
   $("draftTitle").textContent = `${chapterId} · ${title}`;
   $("draftHint").textContent = "请求已发出，正在等待模型接入…";
   $("editor").value = "";
-  $("countPill").textContent = "字数 0";
+  updateCountPill();
   $("savePill").textContent = "正在生成…";
   ThinkTrace.start();
   setBusy(true, "请求已发出，正在等待模型接入…");
@@ -615,7 +690,7 @@ function appendEditor(text, chapterId = "") {
   if (state.streamProjectId && state.projectId !== state.streamProjectId) return;
   const editor = $("editor");
   editor.value += text;
-  $("countPill").textContent = `字数 ${countChars(editor.value)}`;
+  updateCountPill();
   if (state.follow) {
     editor.scrollTo({ top: editor.scrollHeight, behavior: "smooth" });
   }
@@ -668,6 +743,11 @@ async function rewriteDraft() {
 
 async function refineDraft() {
   if (!requireDraft()) return;
+  if (!state.hasReview) {
+    toast("需要先完成 AI 审稿，才能根据审稿精修。");
+    setInspectorTab("review");
+    return;
+  }
   await saveDraft();
   promptText({
     title: "根据审稿精修",
@@ -694,17 +774,23 @@ async function reviewDraft() {
   try {
     const result = await call("ai_review", state.projectId, state.draftId);
     if (result?.existing) {
-      openDrawer({ kicker: "已有审稿", title: `审稿 · ${result.review.chapter_id}`, content: result.review.details });
+      state.hasReview = true;
+      state.reviewText = result.review.details || result.review.comment || "";
+      updateDock();
+      setInspectorTab("review");
       if (result.review.truncated) toast(result.review.truncated_notice || "审稿意见被截断，可能不完整。");
       return;
     }
     const box = document.createElement("div");
     box.className = "review-stream";
     box.textContent = "";
-    openDrawer({ kicker: "AI 审稿", title: "正在阅读这一稿", content: box });
+    state.reviewBox = box;
+    setInspectorTab("review");
+    const pane = $("pane-review");
+    pane.innerHTML = "";
+    pane.append(elNote("正在阅读这一稿…"), box);
     ThinkTrace.start();
     setBusy(true, "请求已发出，正在等待模型接入…");
-    state.reviewBox = box;
   } catch (error) {
     toast(error.message);
   }
@@ -718,7 +804,10 @@ function finishReview(payload) {
     return;
   }
   const review = payload.data || {};
-  openDrawer({ kicker: "AI 审稿完成", title: `审稿 · ${review.chapter_id || ""}`, content: review.details || review.comment || "暂无说明" });
+  state.hasReview = true;
+  state.reviewText = review.details || review.comment || "暂无说明";
+  updateDock();
+  setInspectorTab("review");
   if (review.truncated) toast(review.truncated_notice || "审稿意见被截断，可能不完整。");
   loadOverview(state.projectId).catch(() => {});
 }
@@ -760,6 +849,186 @@ async function openLibrary() {
   await openPlanningStudio("outline");
 }
 
+function elNote(text) {
+  const p = document.createElement("p");
+  p.className = "studio-note";
+  p.textContent = text;
+  return p;
+}
+
+function setInspectorTab(tab) {
+  state.inspectorTab = tab;
+  document.querySelectorAll(".inspector-tabs .tab").forEach((button) => {
+    button.classList.toggle("active", button.dataset.tab === tab);
+  });
+  ["chapter", "outline", "world", "memory", "review"].forEach((name) => {
+    const pane = $(`pane-${name}`);
+    if (pane) pane.hidden = name !== tab;
+  });
+  if (tab !== "chapter") renderInspector();
+}
+
+async function renderInspector() {
+  const tab = state.inspectorTab;
+  if (tab === "review") {
+    renderReviewPane();
+    return;
+  }
+  if (!state.projectId) {
+    const pane = $(`pane-${tab}`);
+    if (pane && tab !== "chapter") {
+      pane.innerHTML = "";
+      pane.append(elNote("请先选择作品。"));
+    }
+    return;
+  }
+  if (tab === "outline" || tab === "world") {
+    await renderPlanningPane(tab);
+    return;
+  }
+  if (tab === "memory") await renderMemoryPane();
+}
+
+function renderReviewPane() {
+  const pane = $("pane-review");
+  if (!pane) return;
+  if (state.reviewBox && state.generating) {
+    if (!pane.contains(state.reviewBox)) {
+      pane.innerHTML = "";
+      pane.append(elNote("正在阅读这一稿…"), state.reviewBox);
+    }
+    return;
+  }
+  pane.innerHTML = "";
+  if (!state.draftId) {
+    pane.append(elNote("打开草稿后，这里显示该稿的 AI 审稿意见。"));
+    return;
+  }
+  if (!state.hasReview) {
+    pane.append(elNote("这一稿还没有审稿。点底部「AI 审稿」后，意见会出现在这里，不会挡住正文。"));
+    return;
+  }
+  const body = document.createElement("div");
+  body.className = "review-stream";
+  body.textContent = state.reviewText || "暂无说明";
+  pane.append(elNote("审稿意见与正文并排，可边看边改。"), body);
+}
+
+async function renderPlanningPane(kind) {
+  const pane = $(`pane-${kind}`);
+  if (!pane) return;
+  let data;
+  try {
+    data = await call("planning_state", state.projectId, kind);
+  } catch (error) {
+    pane.innerHTML = "";
+    pane.append(elNote(error.message));
+    return;
+  }
+  if (state.inspectorTab !== kind) return;
+  const items = data.items || [];
+  const selectedId = pane.dataset.selected || items[0]?.planning_id || "";
+  pane.dataset.selected = selectedId;
+  pane.innerHTML = "";
+  pane.append(elNote(kind === "outline" ? "对照大纲写正文。需要新建或删条目时，打开完整编辑。" : "对照人物与世界观写正文。"));
+  const list = document.createElement("div");
+  list.className = "stack";
+  items.forEach((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `choice${item.planning_id === selectedId ? " active" : ""}`;
+    button.textContent = item.title || item.planning_id;
+    button.addEventListener("click", () => {
+      pane.dataset.selected = item.planning_id;
+      renderPlanningPane(kind).catch((error) => toast(error.message));
+    });
+    list.append(button);
+  });
+  if (!items.length) list.append(elNote("还没有资料。"));
+  pane.append(list);
+  const current = items.find((item) => item.planning_id === selectedId);
+  if (current) {
+    const editor = document.createElement("textarea");
+    editor.className = "studio-editor";
+    editor.value = current.text || "";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn primary";
+    save.textContent = "保存";
+    save.addEventListener("click", async () => {
+      try {
+        await call("save_planning", {
+          project_id: state.projectId,
+          planning_id: current.planning_id,
+          creating: false,
+          item_type: current.item_type,
+          title: current.title || "",
+          text: editor.value,
+          active: current.enabled !== false && current.active !== false,
+          adherence_level: current.adherence_level || "balanced",
+          chapter_range: current.chapter_range || "",
+        });
+        toast("资料已保存。");
+        loadOverview(state.projectId).catch(() => {});
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    pane.append(editor, save);
+  }
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "btn ghost block";
+  more.textContent = "完整编辑";
+  more.addEventListener("click", () => openPlanningStudio(kind).catch((error) => toast(error.message)));
+  pane.append(more);
+}
+
+async function renderMemoryPane() {
+  const pane = $("pane-memory");
+  if (!pane) return;
+  let data;
+  try {
+    data = await call("memory_state", state.projectId);
+  } catch (error) {
+    pane.innerHTML = "";
+    pane.append(elNote(error.message));
+    return;
+  }
+  if (state.inspectorTab !== "memory") return;
+  pane.innerHTML = "";
+  pane.append(elNote(data.token_advice || "记忆库正文会参与后续生成。保存不会联网。"));
+  const editor = document.createElement("textarea");
+  editor.className = "studio-editor";
+  editor.value = data.memory?.text || "";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "btn primary";
+  save.textContent = "保存记忆";
+  save.addEventListener("click", async () => {
+    try {
+      await call("save_memory_workspace", {
+        project_id: state.projectId,
+        memory_id: data.memory?.memory_id || "main_memory_bank",
+        text: editor.value,
+        chapter_ids: data.memory?.source_chapter_ids || [],
+        target_tokens: data.target_tokens || 5000,
+        enabled: data.memory?.enabled !== false,
+      });
+      toast("记忆已保存。");
+      loadOverview(state.projectId).catch(() => {});
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "btn ghost block";
+  more.textContent = "完整编辑与生成";
+  more.addEventListener("click", () => openMemoryStudio().catch((error) => toast(error.message)));
+  pane.append(editor, save, more);
+}
+
 function openSettings() {
   const theme = input(state.prefs.theme, { select: true, options: [["system", "跟随系统"], ["light", "浅色"], ["dark", "深色"]] });
   const font = input(state.prefs.fontFamily, {
@@ -780,8 +1049,16 @@ function openSettings() {
   const sizeRow = document.createElement("div");
   sizeRow.className = "pref-row";
   sizeRow.append(size, sizeLabel);
+  const width = input(state.prefs.editorWidth === "fill" ? "fill" : "comfort", {
+    select: true,
+    options: [["comfort", "舒适宽（约 40 字）"], ["fill", "铺满中间栏"]],
+  });
+  width.addEventListener("change", () => {
+    state.prefs.editorWidth = width.value;
+    applyPrefs();
+  });
   const body = document.createElement("div");
-  body.append(field("外观", theme), field("正文字体", font), field("正文字号", sizeRow));
+  body.append(field("外观", theme), field("正文字体", font), field("正文字号", sizeRow), field("稿纸宽度", width));
   theme.addEventListener("change", () => {
     state.prefs.theme = theme.value;
     applyPrefs();
@@ -802,6 +1079,7 @@ function openSettings() {
           state.prefs.theme = theme.value;
           state.prefs.fontFamily = font.value;
           state.prefs.fontSize = Number(size.value);
+          state.prefs.editorWidth = width.value;
           applyPrefs();
           await call("save_prefs", state.prefs);
           closeModal();
@@ -867,6 +1145,7 @@ function menuItemsFor(target) {
   if (target.kind === "chapter") {
     const items = [
       { label: "打开章节", onClick: () => openChapter(projectId, chapter) },
+      { label: "重命名章节", onClick: () => renameChapter(projectId, chapter) },
       { label: "AI审稿当前稿", onClick: () => runOnChapterDraft(projectId, chapter, reviewDraft) },
       { label: "本地初审当前稿", onClick: () => runOnChapterDraft(projectId, chapter, localReviewCurrent) },
       { label: "要求重写（重新随机）当前稿", onClick: () => runOnChapterDraft(projectId, chapter, rewriteDraft) },
@@ -908,6 +1187,7 @@ function menuItemsFor(target) {
         await selectProject(projectId);
       },
     },
+    { label: "重命名作品", onClick: () => renameProject(target.project) },
     {
       label: "生成草稿",
       onClick: async () => {
@@ -958,6 +1238,74 @@ async function localReviewCurrent() {
 async function showContextPreview(projectId) {
   const result = await call("context_preview", projectId);
   openDrawer({ kicker: "生成上下文", title: "生成时会携带的上下文", content: result.details });
+}
+
+function promptName({ title, desc, value, onSubmit }) {
+  const box = input(value || "", { placeholder: "新名称" });
+  openModal({
+    title,
+    desc,
+    body: field("名称", box),
+    actions: [
+      { label: "取消", onClick: closeModal },
+      {
+        label: "保存",
+        style: "primary",
+        onClick: async () => {
+          const name = box.value.trim();
+          if (!name) {
+            toast("名称不能为空。");
+            return;
+          }
+          closeModal();
+          await onSubmit(name);
+        },
+      },
+    ],
+  });
+  setTimeout(() => {
+    box.focus();
+    box.select();
+  }, 30);
+}
+
+async function renameProject(project) {
+  promptName({
+    title: "重命名作品",
+    desc: `内部编号 ${project.project_id} 不会改变。`,
+    value: project.title || project.project_id,
+    onSubmit: async (title) => {
+      const result = await call("rename_project", project.project_id, title);
+      state.workspace = result.workspace || [];
+      renderTree();
+      if (state.projectId === project.project_id) {
+        $("projectChip").textContent = title;
+        await loadOverview(project.project_id);
+      }
+      toast("作品已重命名。");
+    },
+  });
+}
+
+async function renameChapter(projectId, chapter) {
+  promptName({
+    title: "重命名章节",
+    desc: `章节编号 ${chapter.chapter_id} 不会改变。`,
+    value: chapter.title || chapter.chapter_id,
+    onSubmit: async (title) => {
+      const result = await call("rename_chapter", projectId, chapter.chapter_id, title);
+      state.workspace = result.workspace || [];
+      renderTree();
+      if (state.projectId === projectId && state.chapterId === chapter.chapter_id) {
+        const hint = $("draftHint").textContent;
+        $("draftTitle").textContent = state.draftId
+          ? `${chapter.chapter_id} · ${title}`
+          : title;
+        $("draftHint").textContent = hint;
+      }
+      toast("章节已重命名。");
+    },
+  });
 }
 
 function confirmTyped({ title, desc, phrase, onConfirm }) {
@@ -1152,14 +1500,22 @@ function bindEvents() {
   $("recordsBtn").addEventListener("click", () => openRecordsStudio("connection").catch((error) => toast(error.message)));
   $("aboutBtn").addEventListener("click", () => showAbout().catch((error) => toast(error.message)));
   $("trashBtn").addEventListener("click", () => emptyTrash().catch((error) => toast(error.message)));
-  $("thinkClose").addEventListener("click", () => {
-    $("thinkPanel").hidden = true;
-  });
   ThinkTrace.bind();
   $("modelBtn").addEventListener("click", () => openModelStudio().catch((error) => toast(error.message)));
-  $("outlineBtn").addEventListener("click", () => openPlanningStudio("outline").catch((error) => toast(error.message)));
-  $("worldBtn").addEventListener("click", () => openPlanningStudio("world").catch((error) => toast(error.message)));
-  $("memoryBtn").addEventListener("click", () => openMemoryStudio().catch((error) => toast(error.message)));
+  $("widthBtn").addEventListener("click", async () => {
+    state.prefs.editorWidth = state.prefs.editorWidth === "fill" ? "comfort" : "fill";
+    applyPrefs();
+    try {
+      await call("save_prefs", { editorWidth: state.prefs.editorWidth });
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  $("inspectorTabs").addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-tab]");
+    if (!tab) return;
+    setInspectorTab(tab.dataset.tab);
+  });
   $("dataRootBtn").addEventListener("click", async () => {
     try {
       const result = await call("choose_data_root");
@@ -1206,6 +1562,9 @@ function bindEvents() {
   $("reviewBtn").addEventListener("click", () => reviewDraft().catch((error) => toast(error.message)));
   $("confirmBtn").addEventListener("click", () => confirmDraft().catch((error) => toast(error.message)));
   $("editor").addEventListener("input", scheduleSave);
+  $("editor").addEventListener("select", updateCountPill);
+  $("editor").addEventListener("keyup", updateCountPill);
+  $("editor").addEventListener("mouseup", updateCountPill);
   $("editor").addEventListener("scroll", () => {
     const el = $("editor");
     state.follow = el.scrollTop + el.clientHeight >= el.scrollHeight - 48;
@@ -1251,7 +1610,7 @@ window.__workbenchPush = function workbenchPush(event, payload) {
   if (event === "draft_chunk") appendEditor(payload?.text || "", payload?.chapter_id || "");
   if (event === "review_chunk" && state.reviewBox) {
     state.reviewBox.textContent += payload?.text || "";
-    $("drawerBody").scrollTo({ top: $("drawerBody").scrollHeight, behavior: "smooth" });
+    state.reviewBox.scrollIntoView({ block: "end", behavior: "smooth" });
   }
   if (event === "draft_done") finishDraft(payload);
   if (event === "review_done") finishReview(payload);
@@ -1259,8 +1618,12 @@ window.__workbenchPush = function workbenchPush(event, payload) {
 };
 
 async function boot() {
+  $("refreshBtn").innerHTML = iconSvg("refresh");
+  $("drawerClose").innerHTML = iconSvg("close");
+  $("studioClose").textContent = "关闭";
   bindEvents();
   applyPrefs();
+  setInterval(refreshSavePill, 5000);
   const data = await call("bootstrap");
   state.prefs = { ...state.prefs, ...(data.prefs || {}) };
   state.workspace = data.workspace || [];

@@ -155,6 +155,12 @@ class WorkbenchApplicationService:
     def list_projects(self) -> list[dict[str, Any]]:
         return self.registry.list_projects()
 
+    def rename_project(self, project_id: str, *, title: str) -> dict[str, Any]:
+        return self.registry.rename_project(project_id, title=title)
+
+    def rename_chapter(self, project_id: str, chapter_id: str, *, title: str) -> dict[str, Any]:
+        return DraftGenerationService(self._open_store(project_id)).rename_chapter(chapter_id, title=title)
+
     def delete_project(self, project_id: str) -> dict[str, Any]:
         return self.registry.delete_project(project_id)
 

@@ -81,6 +81,7 @@ DEFAULT_PREFS = {
     "fontFamily": "literary",
     "fontSize": 16,
     "focusMode": False,
+    "editorWidth": "comfort",
 }
 _ACTIVE_WINDOW = None
 
@@ -410,6 +411,26 @@ class WorkbenchBridge:
             }
         )
 
+    def rename_project(self, project_id: str, title: str) -> dict[str, Any]:
+        name = str(title or "").strip()
+        if not name:
+            return _fail("作品标题不能为空。")
+        try:
+            result = self.app.rename_project(project_id, title=name)
+        except Exception as exc:
+            return _fail(f"重命名作品失败: {exc}")
+        return _ok({"result": _jsonable(result), "workspace": build_workspace_tree(self.app)})
+
+    def rename_chapter(self, project_id: str, chapter_id: str, title: str) -> dict[str, Any]:
+        name = str(title or "").strip()
+        if not name:
+            return _fail("章节标题不能为空。")
+        try:
+            result = self.app.rename_chapter(project_id, chapter_id, title=name)
+        except Exception as exc:
+            return _fail(f"重命名章节失败: {exc}")
+        return _ok({"result": _jsonable(result), "workspace": build_workspace_tree(self.app)})
+
     def create_project(self, title: str, project_id: str = "") -> dict[str, Any]:
         title_text = str(title or "").strip()
         existing = {str(item.get("project_id") or "") for item in self.app.list_projects()}
@@ -448,6 +469,10 @@ class WorkbenchBridge:
         if draft_id not in draft_ids:
             draft_ids.append(draft_id)
         index = draft_ids.index(draft_id)
+        try:
+            review = self.app.find_ai_review_for_draft(project_id, draft_id)
+        except Exception:
+            review = None
         return _ok(
             {
                 "project_id": project_id,
@@ -460,6 +485,8 @@ class WorkbenchBridge:
                 "content": str(draft.get("content") or ""),
                 "draft_ids": draft_ids,
                 "index": index,
+                "has_review": review is not None,
+                "review": self._review_payload(project_id, review) if review else None,
             }
         )
 

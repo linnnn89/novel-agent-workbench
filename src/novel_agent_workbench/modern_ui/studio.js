@@ -845,7 +845,7 @@ function renderPlanningStudio() {
     const typeLabel = (studio.planning.types || []).find((entry) => entry.id === item.item_type)?.label || item.item_type;
     const button = el("button", `choice${item.planning_id === studio.selectedPlanning && !studio.creating ? " active" : ""}`);
     button.type = "button";
-    button.innerHTML = `<span class="tree-title">${active ? "☑" : "☐"} ${escapeHtml(typeLabel)} ${escapeHtml(item.title || item.planning_id)}</span>`;
+    button.innerHTML = `<span class="tree-title">${active ? "●" : "○"} ${escapeHtml(typeLabel)} ${escapeHtml(item.title || item.planning_id)}</span>`;
     button.addEventListener("click", () => {
       studio.creating = false;
       studio.selectedPlanning = item.planning_id;

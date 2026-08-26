@@ -776,6 +776,52 @@ class DraftGenerationService:
                     )
                 raise
 
+    def rename_chapter(self, chapter_id: str, *, title: str) -> dict[str, Any]:
+        validate_chapter_id(chapter_id)
+        name = title.strip()
+        if not name:
+            raise DraftGenerationError("章节标题不能为空。")
+        updated_drafts = 0
+        confirmed = False
+        self.store.initialize()
+        with self.store.lock():
+            for item in self.list_drafts():
+                if str(item.get("chapter_id") or "") != chapter_id:
+                    continue
+                path = item.get("path")
+                draft_id = str(item.get("draft_id") or "")
+                if not isinstance(path, str) or not draft_id:
+                    continue
+                draft = self.store.read_json(path, default=None)
+                if not isinstance(draft, dict):
+                    continue
+                draft["title"] = name
+                self.store.write_json(path, draft)
+                self._update_draft_index_entry(draft_id, {"title": name})
+                updated_drafts += 1
+            index: list[dict[str, Any]] = []
+            for item in self._read_confirmed_index():
+                if str(item.get("chapter_id") or "") == chapter_id:
+                    path = item.get("path")
+                    if isinstance(path, str):
+                        chapter = self.store.read_json(path, default=None)
+                        if isinstance(chapter, dict):
+                            chapter["title"] = name
+                            self.store.write_json(path, chapter)
+                    item = {**item, "title": name}
+                    confirmed = True
+                index.append(item)
+            if confirmed:
+                self.store.write_json(self.confirmed_index_path, {"schema_version": 1, "chapters": index})
+        workflow = ChapterWorkflowService(self.store).rename(chapter_id, title=name)
+        return {
+            "chapter_id": chapter_id,
+            "title": name,
+            "updated_drafts": updated_drafts,
+            "updated_confirmed": confirmed,
+            "workflow": workflow,
+        }
+
     def list_confirmed_chapters(self) -> list[dict[str, Any]]:
         return self._read_confirmed_index()
 

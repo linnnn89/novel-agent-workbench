@@ -87,6 +87,27 @@ class ProjectRegistry:
         )
         return store
 
+    def rename_project(self, project_id: str, *, title: str) -> dict[str, Any]:
+        validate_project_id(project_id)
+        name = title.strip()
+        if not name:
+            raise StorageError("作品标题不能为空。")
+        store = self.open_project(project_id)
+        meta = store.read_project_meta()
+        meta["title"] = name
+        meta["updated_at"] = utc_stamp()
+        store.write_project_meta(meta)
+        self._upsert_entry(
+            {
+                "project_id": project_id,
+                "title": name,
+                "path": str(store.root),
+                "created_at": str(meta.get("created_at") or ""),
+                "updated_at": meta["updated_at"],
+            }
+        )
+        return {"project_id": project_id, "title": name}
+
     def open_project(self, project_id: str) -> ProjectStore:
         validate_project_id(project_id)
         store = ProjectStore.open(self.projects_root, project_id)

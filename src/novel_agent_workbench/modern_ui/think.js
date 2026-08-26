@@ -6,6 +6,9 @@ const ThinkTrace = (() => {
   let text = "";
   let dismissed = false;
   let bound = false;
+  let startedAt = 0;
+  let elapsed = 0;
+  let expanded = false;
 
   function el(id) {
     return document.getElementById(id);
@@ -15,57 +18,62 @@ const ThinkTrace = (() => {
     return id == null || id === activeJob;
   }
 
-  function renderHeader() {
-    const kicker = el("thinkFloatKicker");
-    const title = el("thinkFloatTitle");
-    if (!kicker || !title) return;
-    if (phase === "thinking") {
-      kicker.textContent = "模型已接入";
-      title.textContent = "正在思考";
-      return;
-    }
-    if (phase === "writing") {
-      kicker.textContent = text ? "思考结束" : "模型已接入";
-      title.textContent = "正在输出正文";
-      return;
-    }
-    if (phase === "done") {
-      kicker.textContent = "本次生成";
-      title.textContent = text ? "思考记录" : "没有思考链";
-      return;
-    }
-    if (phase === "failed") {
-      kicker.textContent = "本次生成";
-      title.textContent = "生成失败";
-      return;
-    }
-    kicker.textContent = "请求已发出";
-    title.textContent = "等待模型接入";
+  function seconds() {
+    if (phase === "done" || phase === "failed") return elapsed;
+    if (!startedAt) return 0;
+    return Math.max(1, Math.round((Date.now() - startedAt) / 1000));
   }
 
-  function renderBody() {
-    const body = el("thinkFloatBody");
-    if (!body) return;
-    if (text) {
-      body.textContent = text;
-      body.scrollTop = body.scrollHeight;
-      return;
+  function titleForPhase() {
+    if (phase === "thinking") return "正在思考";
+    if (phase === "writing") return text ? "正在输出正文" : "模型已接入";
+    if (phase === "done") return text ? "思考完成" : "没有思考链";
+    if (phase === "failed") return "生成失败";
+    return "等待模型接入";
+  }
+
+  function setExpanded(open) {
+    expanded = Boolean(open);
+    const body = el("thinkBarBody");
+    const toggle = el("thinkBarToggle");
+    if (body) body.hidden = !expanded;
+    if (toggle) toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  }
+
+  function render() {
+    const bar = el("thinkBar");
+    const title = el("thinkBarTitle");
+    const meta = el("thinkBarMeta");
+    const body = el("thinkBarBody");
+    if (!bar || !title || !body) return;
+    bar.classList.toggle("active", phase === "sent" || phase === "thinking" || phase === "writing");
+    bar.classList.toggle("done", phase === "done");
+    bar.classList.toggle("failed", phase === "failed");
+    title.textContent = titleForPhase();
+    const secs = seconds();
+    if (meta) {
+      if (phase === "done" || phase === "failed") meta.textContent = secs ? `${secs}s` : "";
+      else if (phase === "thinking" || phase === "writing") meta.textContent = secs ? `${secs}s` : "";
+      else meta.textContent = "";
     }
-    if (phase === "thinking") body.textContent = "模型已接入，正在思考…";
+    if (text) body.textContent = text;
+    else if (phase === "thinking") body.textContent = "模型已接入，正在思考…";
     else if (phase === "writing") body.textContent = "模型已接入，正在输出正文。这次没有单独的思考链。";
     else if (phase === "done") body.textContent = "这次没有单独的思考链。";
     else if (phase === "failed") body.textContent = "请求已结束。";
     else body.textContent = WAITING;
+    if (text) body.scrollTop = body.scrollHeight;
   }
 
   function show() {
-    const box = el("thinkFloat");
-    if (box) box.hidden = false;
+    const bar = el("thinkBar");
+    if (bar) bar.hidden = false;
   }
 
   function hide() {
-    const box = el("thinkFloat");
-    if (box) box.hidden = true;
+    const bar = el("thinkBar");
+    if (bar) bar.hidden = true;
+    setExpanded(false);
   }
 
   function start() {
@@ -74,8 +82,10 @@ const ThinkTrace = (() => {
     phase = "sent";
     text = "";
     dismissed = false;
-    renderHeader();
-    renderBody();
+    startedAt = Date.now();
+    elapsed = 0;
+    render();
+    setExpanded(true);
     show();
     return activeJob;
   }
@@ -85,9 +95,11 @@ const ThinkTrace = (() => {
     if (nextPhase === "sent" && (phase === "thinking" || phase === "writing")) return;
     if (nextPhase === "thinking" && phase === "writing") return;
     phase = nextPhase;
-    renderHeader();
-    renderBody();
-    if (!dismissed && (phase === "sent" || phase === "thinking" || (phase === "writing" && !text))) show();
+    render();
+    if (!dismissed && (phase === "sent" || phase === "thinking" || (phase === "writing" && !text))) {
+      setExpanded(true);
+      show();
+    }
   }
 
   function append(chunk) {
@@ -96,17 +108,22 @@ const ThinkTrace = (() => {
     phase = "thinking";
     dismissed = false;
     text += piece;
-    renderHeader();
-    renderBody();
+    render();
+    setExpanded(true);
     show();
   }
 
   function finish(ok) {
     if (phase === "idle") return;
+    elapsed = startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 1000)) : 0;
     phase = ok === false ? "failed" : "done";
-    renderHeader();
-    renderBody();
-    if (!text) hide();
+    render();
+    if (!text) {
+      hide();
+      return;
+    }
+    setExpanded(false);
+    show();
   }
 
   function close() {
@@ -120,8 +137,10 @@ const ThinkTrace = (() => {
     phase = "idle";
     text = "";
     dismissed = false;
+    startedAt = 0;
+    elapsed = 0;
     hide();
-    const body = el("thinkFloatBody");
+    const body = el("thinkBarBody");
     if (body) body.textContent = "";
   }
 
@@ -142,8 +161,13 @@ const ThinkTrace = (() => {
 
   function bind() {
     if (bound) return;
-    const button = el("thinkFloatClose");
-    if (button) button.addEventListener("click", close);
+    const toggle = el("thinkBarToggle");
+    if (toggle) {
+      toggle.addEventListener("click", () => {
+        if (el("thinkBar")?.hidden) return;
+        setExpanded(!expanded);
+      });
+    }
     bound = true;
   }
 
@@ -155,8 +179,8 @@ const ThinkTrace = (() => {
     handle,
     bind,
     isOpen() {
-      const box = el("thinkFloat");
-      return Boolean(box && !box.hidden);
+      const bar = el("thinkBar");
+      return Boolean(bar && !bar.hidden);
     },
     isIdle() {
       return phase === "idle" || phase === "done" || phase === "failed";

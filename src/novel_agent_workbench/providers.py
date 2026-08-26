@@ -1144,29 +1144,37 @@ def parse_openai_compatible_json_response(response_body: bytes) -> dict[str, Any
     return data
 
 
-def extract_stream_reasoning(delta: object, message: object = None) -> str:
-    """Collect thinking text from common OpenAI-compatible stream shapes."""
+def _reasoning_text_from_source(source: object) -> str:
+    if not isinstance(source, dict):
+        return ""
+    for key in ("reasoning_content", "reasoning", "reasoning_text", "thinking", "thought"):
+        value = source.get(key)
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, dict):
+            text = value.get("text") or value.get("content") or value.get("reasoning_content")
+            if isinstance(text, str) and text:
+                return text
+    details = source.get("reasoning_details")
+    if not isinstance(details, list):
+        return ""
     parts: list[str] = []
-    for source in (delta, message):
-        if not isinstance(source, dict):
+    for item in details:
+        if not isinstance(item, dict):
             continue
-        for key in ("reasoning_content", "reasoning", "reasoning_text", "thinking", "thought"):
-            value = source.get(key)
-            if isinstance(value, str) and value:
-                parts.append(value)
-            elif isinstance(value, dict):
-                text = value.get("text") or value.get("content") or value.get("reasoning_content")
-                if isinstance(text, str) and text:
-                    parts.append(text)
-        details = source.get("reasoning_details")
-        if isinstance(details, list):
-            for item in details:
-                if not isinstance(item, dict):
-                    continue
-                text = item.get("text") or item.get("content") or item.get("reasoning")
-                if isinstance(text, str) and text:
-                    parts.append(text)
+        text = item.get("text") or item.get("content") or item.get("reasoning")
+        if isinstance(text, str) and text:
+            parts.append(text)
     return "".join(parts)
+
+
+def extract_stream_reasoning(delta: object, message: object = None) -> str:
+    """Return one thinking delta. Some adapters repeat the same snippet on
+    several keys or copy delta onto message; joining those doubles every token."""
+    from_delta = _reasoning_text_from_source(delta)
+    if from_delta:
+        return from_delta
+    return _reasoning_text_from_source(message)
 
 
 def read_openai_compatible_stream_response(
@@ -1221,9 +1229,10 @@ def read_openai_compatible_stream_response(
                 reasoning_callback(reasoning_content)
         if content:
             text = str(content)
-            content_parts.append(text)
-            if stream_callback is not None:
-                stream_callback(text)
+            if not (reasoning_content and text == reasoning_content):
+                content_parts.append(text)
+                if stream_callback is not None:
+                    stream_callback(text)
         if choice.get("finish_reason"):
             finish_reason = str(choice.get("finish_reason") or "")
     return {

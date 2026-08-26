@@ -22,7 +22,7 @@
         <div class="top-status" aria-live="polite">
           <span class="pill" id="modelPill" role="status">模型待配置</span>
           <span class="pill" id="savePill" role="status">本地保存就绪</span>
-          <span class="pill" id="countPill" role="status">字数 0</span>
+          <span class="pill" id="countPill" role="status">本章 0</span>
         </div>
         <div class="top-actions">
           <button class="btn ghost" id="focusBtn" type="button">专注</button>
@@ -36,7 +36,7 @@
         <aside class="sidebar glass" id="sidebar">
           <div class="panel-head">
             <h2>作品与章节</h2>
-            <button class="icon-btn" id="refreshBtn" type="button" title="刷新">↻</button>
+            <button class="icon-btn" id="refreshBtn" type="button" title="刷新" aria-label="刷新"></button>
           </div>
           <label class="search">
             <input id="searchInput" type="search" placeholder="搜索作品、章节或标题" />
@@ -58,20 +58,23 @@
               <h1 id="draftTitle">开始写作</h1>
             </div>
             <div class="version-nav">
+              <button class="btn quiet compact" id="widthBtn" type="button">舒适宽</button>
               <button class="btn quiet compact" id="prevBtn" type="button">上一版</button>
               <span class="version-label" id="versionLabel">—</span>
               <button class="btn quiet compact" id="nextBtn" type="button">下一版</button>
             </div>
           </div>
+          <section class="think-bar" id="thinkBar" hidden>
+            <button class="think-bar-toggle" id="thinkBarToggle" type="button" aria-expanded="false">
+              <span class="think-dot" id="thinkBarDot"></span>
+              <span id="thinkBarTitle">等待模型接入</span>
+              <span class="think-bar-meta" id="thinkBarMeta"></span>
+              <span class="think-chevron" id="thinkBarChevron"></span>
+            </button>
+            <div class="think-bar-body" id="thinkBarBody" hidden></div>
+          </section>
           <div class="paper-wrap">
             <textarea id="editor" spellcheck="false" placeholder="这里是稿纸。打开章节后开始写，编辑会自动保存。"></textarea>
-            <aside class="think-panel" id="thinkPanel" hidden>
-              <header>
-                <span>思考过程</span>
-                <button class="icon-btn" id="thinkClose" type="button">✕</button>
-              </header>
-              <div id="thinkBody"></div>
-            </aside>
             <div class="stream-veil" id="streamVeil" hidden>
               <div class="pulse"></div>
               <span id="streamLabel">模型正在书写…</span>
@@ -79,46 +82,46 @@
           </div>
           <div class="dock">
             <button class="btn quiet" id="rewriteBtn" type="button">重新生成</button>
-            <button class="btn accent" id="refineBtn" type="button">根据审稿精修</button>
-            <button class="btn accent" id="reviewBtn" type="button">AI 审稿</button>
-            <button class="btn success" id="confirmBtn" type="button">确认稿件</button>
+            <button class="btn quiet" id="refineBtn" type="button" disabled title="需要先完成 AI 审稿">根据审稿精修</button>
+            <button class="btn outline" id="reviewBtn" type="button">AI 审稿</button>
+            <button class="btn primary" id="confirmBtn" type="button">确认稿件</button>
           </div>
         </section>
 
         <aside class="inspector glass" id="inspector">
-          <section>
-            <h3>本章目标</h3>
-            <p id="summaryText">选择作品后，这里会显示章节与草稿概览。</p>
-            <div class="stack">
-              <button class="btn quiet block" id="healthBtn" type="button">作品概览</button>
-              <button class="btn quiet block" id="recordsBtn" type="button">记录与诊断</button>
-              <button class="btn quiet block" id="outlineBtn" type="button">大纲与章节</button>
-              <button class="btn quiet block" id="worldBtn" type="button">世界观与人物</button>
-              <button class="btn quiet block" id="memoryBtn" type="button">记忆库</button>
-              <button class="btn quiet block" id="openFolderBtn" type="button">打开作品文件夹</button>
-              <button class="btn quiet block" id="exportBtn" type="button">导出 TXT</button>
-              <button class="btn quiet block" id="aboutBtn" type="button">关于软件</button>
-            </div>
-          </section>
-          <hr />
-          <section>
-            <h3>上下文</h3>
-            <p id="contextText">记忆库、资料和前文章节会在生成前按预算组装。</p>
-          </section>
+          <div class="inspector-tabs" id="inspectorTabs">
+            <button class="tab active" type="button" data-tab="chapter">本章</button>
+            <button class="tab" type="button" data-tab="outline">大纲</button>
+            <button class="tab" type="button" data-tab="world">设定</button>
+            <button class="tab" type="button" data-tab="memory">记忆</button>
+            <button class="tab" type="button" data-tab="review">审稿</button>
+          </div>
+          <div class="inspector-pane" id="pane-chapter">
+            <section>
+              <h3>本章目标</h3>
+              <p id="summaryText">选择作品后，这里会显示章节与草稿概览。</p>
+              <div class="stack">
+                <button class="btn quiet block" id="healthBtn" type="button">作品概览</button>
+                <button class="btn quiet block" id="recordsBtn" type="button">记录与诊断</button>
+                <button class="btn quiet block" id="openFolderBtn" type="button">打开作品文件夹</button>
+                <button class="btn quiet block" id="exportBtn" type="button">导出 TXT</button>
+                <button class="btn quiet block" id="aboutBtn" type="button">关于软件</button>
+              </div>
+            </section>
+            <hr />
+            <section>
+              <h3>上下文</h3>
+              <p id="contextText">记忆库、资料和前文章节会在生成前按预算组装。</p>
+            </section>
+          </div>
+          <div class="inspector-pane" id="pane-outline" hidden></div>
+          <div class="inspector-pane" id="pane-world" hidden></div>
+          <div class="inspector-pane" id="pane-memory" hidden></div>
+          <div class="inspector-pane" id="pane-review" hidden></div>
         </aside>
       </main>
     </div>
 
-    <aside class="think-float glass" id="thinkFloat" hidden>
-      <header>
-        <div>
-          <p class="kicker" id="thinkFloatKicker">请求已发出</p>
-          <h2 id="thinkFloatTitle">等待模型接入</h2>
-        </div>
-        <button class="icon-btn" id="thinkFloatClose" type="button">✕</button>
-      </header>
-      <div class="think-float-body" id="thinkFloatBody"></div>
-    </aside>
     <div class="toast" id="toast" hidden></div>
     <div class="ctx-menu glass" id="ctxMenu" hidden></div>
 

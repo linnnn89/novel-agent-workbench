@@ -88,6 +88,14 @@ class ChapterWorkflowService:
             "remaining_count": len(kept),
         }
 
+    def rename(self, chapter_id: str, *, title: str) -> dict[str, Any]:
+        name = title.strip()
+        if not name:
+            raise ChapterWorkflowError("章节标题不能为空。")
+        current = self._find(chapter_id)
+        status = str((current or {}).get("status") or "drafting")
+        return self._upsert(chapter_id, title=name, status=status)
+
     def mark_planned(self, chapter_id: str, *, title: str = "") -> dict[str, Any]:
         return self._upsert(chapter_id, title=title, status="planned")
 
