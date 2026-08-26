@@ -1,0 +1,52 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+.venv_*/
+venv/
+env/
+
+# Local secrets and machine-only config
+secrets.local.json
+*.local.json
+.env
+.env.*
+
+# Runtime data and generated outputs
+workspace_projects/
+app_projects/
+exports/
+backups/
+run_logs/
+usage_logs/
+*.log
+work/
+**/用户数据/
+ui_preferences.json
+
+# Local rollback / obsolete archive — never publish
+old/
+
+# Internal agent handoff — local only
+handoff.md
+docs/handoff.md
+
+# Build and coverage artifacts
+build/
+dist/
+build_probe_*/
+*.egg-info/
+*.spec
+.coverage
+htmlcov/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

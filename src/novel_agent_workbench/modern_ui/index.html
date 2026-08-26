@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>小说创作工作台</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <div class="ambient" aria-hidden="true"></div>
+
+      <header class="topbar glass">
+        <div class="brand">
+          <span class="mark">墨</span>
+          <div class="brand-copy">
+            <strong>小说创作工作台</strong>
+            <span>本地优先 · 人主导</span>
+          </div>
+        </div>
+        <div class="project-chip" id="projectChip">未选择作品</div>
+        <div class="top-status" aria-live="polite">
+          <span class="pill" id="modelPill" role="status">模型待配置</span>
+          <span class="pill" id="savePill" role="status">本地保存就绪</span>
+          <span class="pill" id="countPill" role="status">字数 0</span>
+        </div>
+        <div class="top-actions">
+          <button class="btn ghost" id="focusBtn" type="button">专注</button>
+          <button class="btn ghost" id="genBtn" type="button">创作设置</button>
+          <button class="btn ghost" id="modelBtn" type="button">模型设置</button>
+          <button class="btn ghost" id="settingsBtn" type="button">外观</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar glass" id="sidebar">
+          <div class="panel-head">
+            <h2>作品与章节</h2>
+            <button class="icon-btn" id="refreshBtn" type="button" title="刷新">↻</button>
+          </div>
+          <label class="search">
+            <input id="searchInput" type="search" placeholder="搜索作品、章节或标题" />
+          </label>
+          <div class="side-actions">
+            <button class="btn quiet" id="newProjectBtn" type="button">新建作品</button>
+            <button class="btn primary" id="newChapterBtn" type="button">生成新章节</button>
+          </div>
+          <div class="tree" id="tree"></div>
+          <p class="hint">单击作品展开 · 点章节打开 · 章节按 10 章分组 · 右键更多操作 · 生成不会自动成为确认稿</p>
+          <button class="btn ghost block" id="dataRootBtn" type="button">更改项目库位置</button>
+          <button class="btn ghost block" id="trashBtn" type="button">清空回收站</button>
+        </aside>
+
+        <section class="editor glass" id="editorPanel">
+          <div class="editor-head">
+            <div>
+              <p class="kicker" id="draftHint">选择章节，或生成一章新草稿</p>
+              <h1 id="draftTitle">开始写作</h1>
+            </div>
+            <div class="version-nav">
+              <button class="btn quiet compact" id="prevBtn" type="button">上一版</button>
+              <span class="version-label" id="versionLabel">—</span>
+              <button class="btn quiet compact" id="nextBtn" type="button">下一版</button>
+            </div>
+          </div>
+          <div class="paper-wrap">
+            <textarea id="editor" spellcheck="false" placeholder="这里是稿纸。打开章节后开始写，编辑会自动保存。"></textarea>
+            <aside class="think-panel" id="thinkPanel" hidden>
+              <header>
+                <span>思考过程</span>
+                <button class="icon-btn" id="thinkClose" type="button">✕</button>
+              </header>
+              <div id="thinkBody"></div>
+            </aside>
+            <div class="stream-veil" id="streamVeil" hidden>
+              <div class="pulse"></div>
+              <span id="streamLabel">模型正在书写…</span>
+            </div>
+          </div>
+          <div class="dock">
+            <button class="btn quiet" id="rewriteBtn" type="button">重新生成</button>
+            <button class="btn accent" id="refineBtn" type="button">根据审稿精修</button>
+            <button class="btn accent" id="reviewBtn" type="button">AI 审稿</button>
+            <button class="btn success" id="confirmBtn" type="button">确认稿件</button>
+          </div>
+        </section>
+
+        <aside class="inspector glass" id="inspector">
+          <section>
+            <h3>本章目标</h3>
+            <p id="summaryText">选择作品后，这里会显示章节与草稿概览。</p>
+            <div class="stack">
+              <button class="btn quiet block" id="healthBtn" type="button">作品概览</button>
+              <button class="btn quiet block" id="recordsBtn" type="button">记录与诊断</button>
+              <button class="btn quiet block" id="outlineBtn" type="button">大纲与章节</button>
+              <button class="btn quiet block" id="worldBtn" type="button">世界观与人物</button>
+              <button class="btn quiet block" id="memoryBtn" type="button">记忆库</button>
+              <button class="btn quiet block" id="openFolderBtn" type="button">打开作品文件夹</button>
+              <button class="btn quiet block" id="exportBtn" type="button">导出 TXT</button>
+              <button class="btn quiet block" id="aboutBtn" type="button">关于软件</button>
+            </div>
+          </section>
+          <hr />
+          <section>
+            <h3>上下文</h3>
+            <p id="contextText">记忆库、资料和前文章节会在生成前按预算组装。</p>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <aside class="think-float glass" id="thinkFloat" hidden>
+      <header>
+        <div>
+          <p class="kicker" id="thinkFloatKicker">请求已发出</p>
+          <h2 id="thinkFloatTitle">等待模型接入</h2>
+        </div>
+        <button class="icon-btn" id="thinkFloatClose" type="button">✕</button>
+      </header>
+      <div class="think-float-body" id="thinkFloatBody"></div>
+    </aside>
+    <div class="toast" id="toast" hidden></div>
+    <div class="ctx-menu glass" id="ctxMenu" hidden></div>
+
+    <div class="overlay" id="modal" hidden>
+      <div class="sheet glass" role="dialog" aria-modal="true">
+        <header>
+          <h2 id="modalTitle">对话框</h2>
+          <p id="modalDesc"></p>
+        </header>
+        <div class="sheet-body" id="modalBody"></div>
+        <footer class="sheet-foot" id="modalFoot"></footer>
+      </div>
+    </div>
+
+    <section class="studio glass" id="studio" hidden>
+      <header>
+        <div>
+          <p class="kicker" id="studioKicker">工作室</p>
+          <h2 id="studioTitle">标题</h2>
+        </div>
+        <div class="studio-tabs" id="studioTabs"></div>
+        <p class="studio-status" id="studioStatus"></p>
+        <button class="btn quiet compact" id="studioClose" type="button">关闭</button>
+      </header>
+      <div class="studio-body" id="studioBody"></div>
+    </section>
+
+    <aside class="drawer glass" id="drawer" hidden>
+      <header>
+        <div>
+          <p class="kicker" id="drawerKicker">面板</p>
+          <h2 id="drawerTitle">标题</h2>
+        </div>
+        <button class="icon-btn" id="drawerClose" type="button">✕</button>
+      </header>
+      <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <script src="think.js"></script>
+    <script src="app.js"></script>
+    <script src="studio.js"></script>
+  </body>
+</html>
