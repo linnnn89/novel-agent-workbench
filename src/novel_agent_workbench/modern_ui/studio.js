@@ -531,6 +531,7 @@ function renderAssignPage() {
         primary_model_ref: primary.value,
         feature_assignments: assignments,
       });
+      syncModelState(studio.model);
       setStudioStatus("主模型和功能分配已保存。");
       renderModelStudio();
       if (state.projectId) loadOverview(state.projectId).catch(() => {});
@@ -978,6 +979,7 @@ function handleStudioPush(event, payload) {
       return;
     }
     studio.model = payload.data || studio.model;
+    syncModelState(studio.model);
     setStudioStatus(`模型目录已刷新：${payload.data?.refresh?.model_count || 0} 个模型。`);
     if (studio.mode === "models") renderModelStudio();
     if (state.projectId) loadOverview(state.projectId).catch(() => {});

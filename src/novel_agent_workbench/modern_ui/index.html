@@ -20,7 +20,7 @@
         </div>
         <div class="project-chip" id="projectChip">未选择作品</div>
         <div class="top-status" aria-live="polite">
-          <span class="pill" id="modelPill" role="status">模型待配置</span>
+          <button class="pill model-pill" id="modelPill" type="button" aria-haspopup="menu" aria-expanded="false" title="切换正文生成模型">模型待配置</button>
           <span class="pill" id="savePill" role="status">本地保存就绪</span>
           <span class="pill" id="countPill" role="status">本章 0</span>
         </div>
@@ -81,12 +81,14 @@
             </div>
           </div>
           <div class="dock">
-            <button class="btn quiet" id="rewriteBtn" type="button">重新生成</button>
+            <button class="btn ghost" id="rewriteBtn" type="button">重新生成</button>
             <button class="btn quiet" id="refineBtn" type="button" disabled title="需要先完成 AI 审稿">根据审稿精修</button>
             <button class="btn outline" id="reviewBtn" type="button">AI 审稿</button>
             <button class="btn primary" id="confirmBtn" type="button">确认稿件</button>
           </div>
         </section>
+
+        <button class="inspector-handle" id="inspectorToggle" type="button" title="收起右侧面板" aria-controls="inspector" aria-expanded="true"></button>
 
         <aside class="inspector glass" id="inspector">
           <div class="inspector-tabs" id="inspectorTabs">
@@ -94,7 +96,7 @@
             <button class="tab" type="button" data-tab="outline">大纲</button>
             <button class="tab" type="button" data-tab="world">设定</button>
             <button class="tab" type="button" data-tab="memory">记忆</button>
-            <button class="tab" type="button" data-tab="review">审稿</button>
+            <button class="tab" type="button" data-tab="review">审稿<span class="tab-badge" id="reviewBadge" hidden title="审稿意见已就绪"></span></button>
           </div>
           <div class="inspector-pane" id="pane-chapter">
             <section>
@@ -124,6 +126,7 @@
 
     <div class="toast" id="toast" hidden></div>
     <div class="ctx-menu glass" id="ctxMenu" hidden></div>
+    <div class="ctx-menu glass" id="modelMenu" hidden role="menu"></div>
 
     <div class="overlay" id="modal" hidden>
       <div class="sheet glass" role="dialog" aria-modal="true">

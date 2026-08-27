@@ -81,6 +81,7 @@ DEFAULT_PREFS = {
     "fontFamily": "literary",
     "fontSize": 16,
     "focusMode": False,
+    "hideInspector": False,
     "editorWidth": "comfort",
 }
 _ACTIVE_WINDOW = None

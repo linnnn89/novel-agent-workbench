@@ -21,10 +21,12 @@ const CHAPTER_GROUP_SIZE = 10;
 const state = {
   ready: false,
   workspace: [],
-  prefs: { theme: "system", fontFamily: "literary", fontSize: 16, focusMode: false, editorWidth: "comfort" },
+  prefs: { theme: "system", fontFamily: "literary", fontSize: 16, focusMode: false, hideInspector: false, editorWidth: "comfort" },
   inspectorTab: "chapter",
   hasReview: false,
+  reviewBadge: false,
   reviewText: "",
+  model: null,
   lastSavedAt: 0,
   projectId: "",
   chapterId: "",
@@ -84,7 +86,14 @@ function applyPrefs() {
   root.style.setProperty("--editor-size", `${Number(state.prefs.fontSize) || 18}px`);
   $("app").dataset.editorWidth = state.prefs.editorWidth === "fill" ? "fill" : "comfort";
   $("app").classList.toggle("focus-mode", Boolean(state.prefs.focusMode));
+  $("app").classList.toggle("hide-inspector", Boolean(state.prefs.hideInspector));
   $("focusBtn").textContent = state.prefs.focusMode ? "退出专注" : "专注";
+  const hideInspector = Boolean(state.prefs.hideInspector);
+  const inspectorToggle = $("inspectorToggle");
+  if (inspectorToggle) {
+    inspectorToggle.setAttribute("aria-expanded", hideInspector ? "false" : "true");
+    inspectorToggle.title = hideInspector ? "展开右侧面板" : "收起右侧面板";
+  }
   const widthBtn = $("widthBtn");
   if (widthBtn) widthBtn.textContent = state.prefs.editorWidth === "fill" ? "铺满" : "舒适宽";
 }
@@ -141,12 +150,179 @@ function updateDock() {
   }
 }
 
-function setBusy(busy, label) {
+function setBusy(busy, label, options = {}) {
+  const lockEditor = options.lockEditor !== false;
+  const veil = options.veil !== false;
   state.generating = busy;
-  $("streamVeil").hidden = !busy;
-  $("streamLabel").textContent = label || "模型正在书写…";
-  $("editor").disabled = busy;
+  $("streamVeil").hidden = !(busy && veil);
+  if (label) $("streamLabel").textContent = label;
+  $("editor").readOnly = Boolean(busy && lockEditor);
+  $("editor").removeAttribute("disabled");
   updateDock();
+}
+
+function writingModelRef(model) {
+  const assignment = model?.feature_assignments?.draft_generation || {};
+  if (assignment.mode === "model" && assignment.model_ref) return assignment.model_ref;
+  return model?.primary_model_ref || "";
+}
+
+function findModelProfile(model, ref) {
+  return (model?.models || []).find((item) => item.model_ref === ref) || null;
+}
+
+function shortModelName(model, ref) {
+  const item = findModelProfile(model, ref);
+  return item ? item.display_name || item.model_id || "" : "";
+}
+
+function enabledWritingModels(model) {
+  const providers = model?.providers || [];
+  return (model?.models || [])
+    .filter((item) => item.enabled !== false)
+    .map((item) => {
+      const provider = providers.find((row) => row.profile_id === item.provider_profile_id);
+      return {
+        ...item,
+        providerName: provider?.display_name || item.provider_profile_id || "",
+      };
+    });
+}
+
+function renderModelPill() {
+  const pill = $("modelPill");
+  if (!pill) return;
+  const name = shortModelName(state.model, writingModelRef(state.model));
+  let label = pill.querySelector(".model-pill-name");
+  if (!label) {
+    label = document.createElement("span");
+    label.className = "model-pill-name";
+    pill.replaceChildren(label);
+  }
+  label.textContent = name || "模型待配置";
+  pill.classList.toggle("empty", !name);
+  pill.title = name ? "切换正文生成模型" : "尚未配置正文模型，点击打开模型设置";
+}
+
+function syncModelState(data) {
+  if (data) state.model = data;
+  renderModelPill();
+}
+
+async function refreshModelPill() {
+  try {
+    state.model = await call("model_state");
+  } catch (_error) {
+    state.model = state.model || null;
+  }
+  renderModelPill();
+}
+
+function hideModelMenu() {
+  const menu = $("modelMenu");
+  if (!menu) return;
+  menu.hidden = true;
+  menu.innerHTML = "";
+  const pill = $("modelPill");
+  if (pill) pill.setAttribute("aria-expanded", "false");
+}
+
+function placeAnchorMenu(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  menu.hidden = false;
+  const pad = 8;
+  let left = rect.left;
+  let top = rect.bottom + 6;
+  left = Math.min(left, window.innerWidth - menu.offsetWidth - pad);
+  left = Math.max(pad, left);
+  if (top + menu.offsetHeight > window.innerHeight - pad) {
+    top = Math.max(pad, rect.top - menu.offsetHeight - 6);
+  }
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+async function toggleModelMenu() {
+  const menu = $("modelMenu");
+  const pill = $("modelPill");
+  if (!menu || !pill) return;
+  if (!menu.hidden) {
+    hideModelMenu();
+    return;
+  }
+  await refreshModelPill();
+  menu.innerHTML = "";
+  const current = writingModelRef(state.model);
+  const models = enabledWritingModels(state.model);
+  if (!models.length) {
+    const empty = document.createElement("button");
+    empty.type = "button";
+    empty.textContent = "还没有可用模型，打开模型设置";
+    empty.addEventListener("click", () => {
+      hideModelMenu();
+      openModelStudio().catch((error) => toast(error.message));
+    });
+    menu.append(empty);
+  } else {
+    models.forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "menuitem");
+      if (item.model_ref === current) button.className = "active";
+      button.innerHTML = `<span class="tree-title">${escapeHtml(item.display_name || item.model_id)}</span><span class="pill">${escapeHtml(item.providerName)}</span>`;
+      button.addEventListener("click", async () => {
+        hideModelMenu();
+        if (item.model_ref === current) return;
+        try {
+          await switchWritingModel(item.model_ref);
+        } catch (error) {
+          toast(error.message);
+        }
+      });
+      menu.append(button);
+    });
+    menu.append(document.createElement("hr"));
+    const more = document.createElement("button");
+    more.type = "button";
+    more.textContent = "打开模型设置";
+    more.addEventListener("click", () => {
+      hideModelMenu();
+      openModelStudio().catch((error) => toast(error.message));
+    });
+    menu.append(more);
+  }
+  pill.setAttribute("aria-expanded", "true");
+  placeAnchorMenu(menu, pill);
+}
+
+async function switchWritingModel(modelRef) {
+  const model = state.model || (await call("model_state"));
+  const assignments = { ...(model.feature_assignments || {}) };
+  const draft = assignments.draft_generation || { mode: "inherit", model_ref: "" };
+  if (draft.mode === "model") {
+    assignments.draft_generation = { mode: "model", model_ref: modelRef };
+  }
+  const currentPrimary = model.primary_model_ref || "";
+  const primaryValid = (model.models || []).some(
+    (item) => item.model_ref === currentPrimary && item.enabled !== false
+  );
+  const primary = draft.mode === "model" && primaryValid ? currentPrimary : modelRef;
+  const data = await call("save_assignments", {
+    primary_model_ref: primary,
+    feature_assignments: assignments,
+  });
+  syncModelState(data);
+  if (typeof studio !== "undefined" && studio.model) {
+    studio.model = data;
+    if (studio.mode === "models" && studio.tab === "assign") renderModelStudio();
+  }
+  toast("正文模型已切换。");
+}
+
+function setReviewBadge(on) {
+  state.reviewBadge = Boolean(on);
+  const badge = $("reviewBadge");
+  if (badge) badge.hidden = !state.reviewBadge;
 }
 
 function closeModal() {
@@ -471,7 +647,7 @@ async function loadOverview(projectId) {
   const overview = await call("project_overview", projectId);
   if (projectId !== state.projectId) return;
   $("projectChip").textContent = currentProject()?.title || projectId;
-  $("modelPill").textContent = overview.model_status;
+  refreshModelPill().catch(() => {});
   $("summaryText").textContent = `章节 ${overview.chapter_count} · 草稿 ${overview.draft_count}\n已确认 ${overview.committed_chapter_count} · 审稿 ${overview.review_count}`;
   $("contextText").textContent = `大纲与资料 ${overview.planning_item_count} 项\n记忆库 ${overview.memory_bank_item_count} 项\n生成前会按预算组装，不会自动联网。`;
   if (state.inspectorTab !== "chapter") renderInspector().catch(() => {});
@@ -500,6 +676,7 @@ async function openChapter(projectId, chapter) {
     $("versionLabel").textContent = "—";
     state.hasReview = false;
     state.reviewText = "";
+    setReviewBadge(false);
     updateDock();
     if (state.inspectorTab === "review") renderInspector();
   }
@@ -523,6 +700,7 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
   $("editor").value = draft.content || "";
   state.hasReview = Boolean(draft.has_review);
   state.reviewText = draft.review?.details || draft.review?.comment || "";
+  setReviewBadge(false);
   state.lastSavedAt = Date.now();
   updateCountPill();
   refreshSavePill();
@@ -536,14 +714,14 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
 
 function scheduleSave() {
   updateCountPill();
-  if (!state.draftId || state.generating) return;
+  if (!state.draftId || $("editor").readOnly) return;
   $("savePill").textContent = "保存中…";
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(saveDraft, 700);
 }
 
 async function saveDraft() {
-  if (!state.projectId || !state.draftId || state.generating) return;
+  if (!state.projectId || !state.draftId || $("editor").readOnly) return;
   try {
     await call("save_draft", state.projectId, state.draftId, $("editor").value);
     state.lastSavedAt = Date.now();
@@ -790,7 +968,7 @@ async function reviewDraft() {
     pane.innerHTML = "";
     pane.append(elNote("正在阅读这一稿…"), box);
     ThinkTrace.start();
-    setBusy(true, "请求已发出，正在等待模型接入…");
+    setBusy(true, "请求已发出，正在等待模型接入…", { lockEditor: false, veil: false });
   } catch (error) {
     toast(error.message);
   }
@@ -806,8 +984,15 @@ function finishReview(payload) {
   const review = payload.data || {};
   state.hasReview = true;
   state.reviewText = review.details || review.comment || "暂无说明";
+  state.reviewBox = null;
   updateDock();
-  setInspectorTab("review");
+  if (state.inspectorTab === "review") {
+    setReviewBadge(false);
+    renderReviewPane();
+  } else {
+    setReviewBadge(true);
+    if (!review.truncated) toast("审稿意见已就绪");
+  }
   if (review.truncated) toast(review.truncated_notice || "审稿意见被截断，可能不完整。");
   loadOverview(state.projectId).catch(() => {});
 }
@@ -858,6 +1043,7 @@ function elNote(text) {
 
 function setInspectorTab(tab) {
   state.inspectorTab = tab;
+  if (tab === "review") setReviewBadge(false);
   document.querySelectorAll(".inspector-tabs .tab").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tab);
   });
@@ -1091,8 +1277,19 @@ function openSettings() {
 
 async function toggleFocus() {
   state.prefs.focusMode = !state.prefs.focusMode;
+  if (state.prefs.focusMode) state.prefs.hideInspector = true;
+  else state.prefs.hideInspector = false;
   applyPrefs();
-  await call("save_prefs", { focusMode: state.prefs.focusMode });
+  await call("save_prefs", {
+    focusMode: state.prefs.focusMode,
+    hideInspector: state.prefs.hideInspector,
+  });
+}
+
+async function toggleInspector() {
+  state.prefs.hideInspector = !state.prefs.hideInspector;
+  applyPrefs();
+  await call("save_prefs", { hideInspector: state.prefs.hideInspector });
 }
 
 function hideTreeMenu() {
@@ -1476,6 +1673,7 @@ async function applyWorkspaceResult(result, projectId) {
       state.chapterId = "";
       $("editor").value = "";
       $("draftTitle").textContent = "开始写作";
+      setReviewBadge(false);
     }
   }
   renderTree();
@@ -1495,6 +1693,12 @@ function bindEvents() {
   $("newChapterBtn").addEventListener("click", () => generateChapter().catch((error) => toast(error.message)));
   $("settingsBtn").addEventListener("click", openSettings);
   $("focusBtn").addEventListener("click", () => toggleFocus().catch((error) => toast(error.message)));
+  $("inspectorToggle").addEventListener("click", () => toggleInspector().catch((error) => toast(error.message)));
+  $("modelPill").addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleModelMenu().catch((error) => toast(error.message));
+  });
+  $("modelMenu").addEventListener("click", (event) => event.stopPropagation());
   $("genBtn").addEventListener("click", () => openGenSettings("global").catch((error) => toast(error.message)));
   $("healthBtn").addEventListener("click", () => showProjectHealth().catch((error) => toast(error.message)));
   $("recordsBtn").addEventListener("click", () => openRecordsStudio("connection").catch((error) => toast(error.message)));
@@ -1574,7 +1778,10 @@ function bindEvents() {
   $("modal").addEventListener("click", (event) => {
     if (event.target === $("modal")) closeModal();
   });
-  document.addEventListener("click", hideTreeMenu);
+  document.addEventListener("click", () => {
+    hideTreeMenu();
+    hideModelMenu();
+  });
   document.addEventListener("contextmenu", (event) => {
     if (!$("tree").contains(event.target)) hideTreeMenu();
   });
@@ -1598,6 +1805,7 @@ function bindEvents() {
         return;
       }
       hideTreeMenu();
+      hideModelMenu();
       closeModal();
       closeDrawer();
       closeStudio();
@@ -1628,6 +1836,7 @@ async function boot() {
   state.prefs = { ...state.prefs, ...(data.prefs || {}) };
   state.workspace = data.workspace || [];
   applyPrefs();
+  await refreshModelPill();
   if (state.workspace[0]) await selectProject(state.workspace[0].project_id);
   renderTree();
   state.ready = true;
