@@ -60,6 +60,7 @@ from .model_settings import (
     MODEL_SETTINGS_SCHEMA_VERSION,
     make_model_ref,
     migrate_global_model_settings,
+    normalize_draft_reasoning_effort,
     normalize_model_profile,
     normalize_provider_profile,
     resolve_model_role_mapping,
@@ -122,10 +123,12 @@ class RuntimeModelSettingsStore:
     def read_secrets(self) -> dict[str, Any]:
         return dict(self._secrets)
 AI_REFINEMENT_SYSTEM_PROMPT = (
-    "你是一名专业小说改稿编辑。当前任务不是续写新章节，而是根据 AI 审稿意见精修当前草稿。"
-    "AI 审稿意见是本次改稿的主要约束；必须逐条落实其中明确指出的问题。"
-    "若审稿意见与已给定上下文、前文事实或草稿事实冲突，以保持连续性为最高规则，"
-    "但不得无视审稿意见。只输出修订后的小说正文，不输出说明、分析或 <think>。"
+    "你是一名专业小说改稿编辑。当前任务不是续写新章节，而是按 AI 审稿意见改写待改原文。"
+    "AI 审稿意见是本次改稿的主要约束，必须逐条落实其中明确指出的问题。"
+    "待改原文只供对照，禁止整章原样输出。"
+    "保留既有事实、人物关系和情节因果；被审稿点名的段落、对白和描写必须改写。"
+    "若审稿意见与已给定上下文或前文事实冲突，用正文方式化解，不得无视审稿。"
+    "只输出修订后的小说正文，不输出说明、分析或 <think>。"
 )
 
 
@@ -811,6 +814,10 @@ class WorkbenchApplicationService:
                 "mode": mode,
                 "model_ref": model_ref if mode == "model" else "",
             }
+            if feature_id == "draft_generation":
+                normalized_assignments[feature_id]["reasoning_effort"] = normalize_draft_reasoning_effort(
+                    item.get("reasoning_effort")
+                )
         settings["primary_model_ref"] = primary
         settings["feature_assignments"] = normalized_assignments
         settings = sync_legacy_model_roles(settings)
@@ -1817,8 +1824,8 @@ def ai_refinement_task_prompt(*, chapter_id: str, title: str = "", instruction: 
     user_instruction = str(instruction or "").strip()
     lines = [
         f"请根据 AI 审稿意见精修当前章节：{heading}。",
-        "必须优先解决审稿指出的问题；不要只做泛泛润色，也不要另起炉灶重写成新章节。",
-        "保持主线、人物动机、已有设定、前文事实和关键场景连续。",
+        "必须优先解决审稿指出的问题；待改原文禁止整章原样输出。",
+        "保留主线事实和人物动机，但必须改写被点名的段落和措辞。",
         "输出必须是修订后的小说正文，不要写分析过程、修改说明、免责声明或 <think>。",
     ]
     if user_instruction:
@@ -1846,26 +1853,22 @@ def render_ai_refinement_prompt(
         lines.extend([context_block, ""])
     lines.extend(
         [
-            "【精修任务】",
-            "你将根据 AI 审稿意见，把当前草稿改成一个新的修订版。",
-            "AI 审稿意见是本次精修的主要执行清单；必须优先落实，不要只做普通续写或表层润色。",
-            "只输出小说正文，不要输出修改说明。",
-            "",
             "【目标章节】",
             f"章节 ID：{chapter_id}",
             f"标题：{title or chapter_id}",
             f"源草稿版本：{version_label or '-'}",
             "",
+            "【待改原文（禁止原样整章输出）】",
+            "下面是需要改写的原文，只供对照。不要把它整章复制后当作完成。",
+            draft_text or "（空草稿）",
+            "",
+            "【精修任务】",
+            "根据后面的审稿意见，把待改原文改成一个新的修订版。",
+            "保留既有事实、人物关系和情节因果，不要另起一条新剧情。",
+            "被审稿点名的段落、对白、节奏和感官描写必须改写，不能只做个别用词替换。",
+            "",
             "【必须落实的 AI 审稿意见】",
             review_text or "（无审稿意见）",
-            "",
-            "【落实规则】",
-            "1. 优先修复上方审稿意见明确指出的问题。",
-            "2. 保留未被审稿意见否定的主线、人物关系、信息量和关键场景。",
-            "3. 如果某条审稿意见与上下文或草稿事实冲突，用正文方式化解冲突，不要在输出中解释。",
-            "",
-            "【当前草稿正文】",
-            draft_text or "（空草稿）",
         ]
     )
     if str(instruction or "").strip():
@@ -1875,8 +1878,8 @@ def render_ai_refinement_prompt(
             "",
             "【输出要求】",
             "直接输出精修后的完整章节正文。",
-            "正文应体现 AI 审稿意见已被落实，但不要列出修改清单。",
-            "不要输出审稿、分析、提纲、说明、免责声明或 <think>。",
+            "正文必须能看出审稿意见已被落实，且不得与待改原文整章逐字相同。",
+            "不要列出修改清单，不要输出审稿、分析、提纲、说明、免责声明或 <think>。",
         ]
     )
     return "\n".join(lines).strip()

@@ -19,6 +19,8 @@ ROLE_DEFAULT_FEATURE = {
     "scorer": "ai_review",
     "reviser": "ai_refinement",
 }
+DRAFT_REASONING_EFFORTS = ("none", "low", "high", "max")
+DEFAULT_DRAFT_REASONING_EFFORT = "high"
 
 BUILTIN_PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
     "siliconflow": {
@@ -60,10 +62,38 @@ def default_model_settings_fields() -> dict[str, Any]:
         "model_profiles": {},
         "primary_model_ref": "",
         "feature_assignments": {
-            feature_id: {"mode": "inherit", "model_ref": ""}
+            feature_id: default_feature_assignment(feature_id)
             for feature_id, _label, _role in FEATURE_DEFINITIONS
         },
     }
+
+
+def default_feature_assignment(feature_id: str) -> dict[str, str]:
+    assignment = {"mode": "inherit", "model_ref": ""}
+    if feature_id == "draft_generation":
+        assignment["reasoning_effort"] = DEFAULT_DRAFT_REASONING_EFFORT
+    return assignment
+
+
+def normalize_draft_reasoning_effort(value: object) -> str:
+    effort = str(value or "").strip().lower()
+    if effort in DRAFT_REASONING_EFFORTS:
+        return effort
+    return DEFAULT_DRAFT_REASONING_EFFORT
+
+
+def draft_reasoning_effort_from_settings(settings: object) -> str:
+    source = settings if isinstance(settings, dict) else {}
+    assignments = source.get("feature_assignments") if isinstance(source.get("feature_assignments"), dict) else {}
+    assignment = assignments.get("draft_generation") if isinstance(assignments.get("draft_generation"), dict) else {}
+    return normalize_draft_reasoning_effort(assignment.get("reasoning_effort"))
+
+
+def is_deepseek_v4_flash_0731(model_id: str) -> bool:
+    value = str(model_id or "").strip().lower().replace("_", "-")
+    if "vision" in value:
+        return False
+    return "v4-flash-0731" in value
 
 
 def make_model_ref(profile_id: str, model_id: str) -> str:
@@ -150,6 +180,10 @@ def migrate_global_model_settings(value: object) -> tuple[dict[str, Any], bool]:
                     "mode": mode,
                     "model_ref": str(item.get("model_ref") or "").strip() if mode == "model" else "",
                 }
+                if feature_id == "draft_generation":
+                    assignments[feature_id]["reasoning_effort"] = normalize_draft_reasoning_effort(
+                        item.get("reasoning_effort")
+                    )
 
     primary_model_ref = str(source.get("primary_model_ref") or "").strip()
     roles = source.get("model_roles") if isinstance(source.get("model_roles"), dict) else {}

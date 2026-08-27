@@ -837,6 +837,55 @@ h3 {
   align-items: center;
   margin-bottom: 10px;
 }
+.assign-extra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin: -2px 0 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+}
+.assign-extra-label {
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 64px;
+}
+.assign-extra .studio-note {
+  flex: 1 1 220px;
+  margin: 0;
+}
+.seg-capsules {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: rgba(28, 25, 23, 0.04);
+  gap: 0;
+}
+:root[data-theme="dark"] .seg-capsules {
+  background: rgba(255, 255, 255, 0.04);
+}
+.seg-cap {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 52px;
+}
+.seg-cap.active {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.seg-cap:hover:not(.active) {
+  color: var(--ink);
+}
 .search-select {
   position: relative;
   min-width: 0;

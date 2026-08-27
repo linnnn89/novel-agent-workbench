@@ -41,7 +41,7 @@
 
 ### 模型怎么接
 
-模型设置里已经预置硅基流动、Chutes 和 OpenRouter，也可以添加 DeepSeek、其他 OpenAI 兼容接口，或本机的 LM Studio、Ollama 兼容地址。
+模型设置里已经预置硅基流动、Chutes 和 OpenRouter，也可以添加 DeepSeek、其他 OpenAI 兼容接口，或本机的 LM Studio、Ollama 兼容地址。正文生成可在「功能分配」里用 None / Low / High / Max 设置 DeepSeek V4 Flash 0731 的思考强度：经 OpenRouter 时发送 reasoning.effort。
 
 保存接口和 Key 不会发起请求。以下操作可能联网并产生费用，而且都需要你自己点击：
 

@@ -482,6 +482,47 @@ function searchSelect(options, attrs = {}) {
   return wrap;
 }
 
+function renderDraftEffortCapsules(assignment) {
+  const allowed = ["none", "low", "high", "max"];
+  const current = String(assignment?.reasoning_effort || "high").toLowerCase();
+  const state = { value: allowed.includes(current) ? current : "high" };
+  const row = el("div", "assign-extra");
+  row.append(el("span", "assign-extra-label", "思考强度"));
+  const caps = el("div", "seg-capsules");
+  caps.setAttribute("role", "radiogroup");
+  caps.setAttribute("aria-label", "正文生成思考强度");
+  const labels = { none: "None", low: "Low", high: "High", max: "Max" };
+  allowed.forEach((effort) => {
+    const button = el("button", `seg-cap${effort === state.value ? " active" : ""}`, labels[effort]);
+    button.type = "button";
+    button.dataset.effort = effort;
+    button.setAttribute("aria-pressed", effort === state.value ? "true" : "false");
+    button.addEventListener("click", () => {
+      state.value = effort;
+      caps.querySelectorAll("button").forEach((item) => {
+        const on = item.dataset.effort === effort;
+        item.classList.toggle("active", on);
+        item.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    });
+    caps.append(button);
+  });
+  row.append(caps);
+  row.append(
+    el(
+      "p",
+      "studio-note",
+      "仅对 DeepSeek V4 Flash 0731 的正文生成生效。None 关闭思考，其余发送 reasoning.effort。"
+    )
+  );
+  Object.defineProperty(row, "value", {
+    get() {
+      return state.value;
+    },
+  });
+  return row;
+}
+
 function renderAssignPage() {
   const wrap = el("div", "studio-form");
   const options = enabledModelOptions();
@@ -514,7 +555,13 @@ function renderAssignPage() {
     const row = el("div", "assign-row");
     row.append(el("strong", "", feature.label), mode, model);
     wrap.append(row);
-    rows[feature.id] = { mode, model };
+    const entry = { mode, model };
+    if (feature.id === "draft_generation") {
+      const effort = renderDraftEffortCapsules(assignment);
+      wrap.append(effort);
+      entry.effort = effort;
+    }
+    rows[feature.id] = entry;
   });
   const save = el("button", "btn primary", "保存功能分配");
   save.type = "button";
@@ -525,6 +572,9 @@ function renderAssignPage() {
         mode: row.mode.value,
         model_ref: row.mode.value === "model" ? row.model.value : "",
       };
+      if (featureId === "draft_generation" && row.effort) {
+        assignments[featureId].reasoning_effort = row.effort.value;
+      }
     });
     try {
       studio.model = await call("save_assignments", {

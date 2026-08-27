@@ -300,7 +300,7 @@ async function switchWritingModel(modelRef) {
   const assignments = { ...(model.feature_assignments || {}) };
   const draft = assignments.draft_generation || { mode: "inherit", model_ref: "" };
   if (draft.mode === "model") {
-    assignments.draft_generation = { mode: "model", model_ref: modelRef };
+    assignments.draft_generation = { ...draft, mode: "model", model_ref: modelRef };
   }
   const currentPrimary = model.primary_model_ref || "";
   const primaryValid = (model.models || []).some(

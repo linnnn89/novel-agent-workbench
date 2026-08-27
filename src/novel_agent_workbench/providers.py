@@ -5,13 +5,18 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Callable
 from urllib.parse import urlparse
 from uuid import uuid4
 
 from .config import default_model_role
-from .model_settings import FEATURE_IDS, resolve_model_role_mapping
+from .model_settings import (
+    FEATURE_IDS,
+    draft_reasoning_effort_from_settings,
+    is_deepseek_v4_flash_0731,
+    resolve_model_role_mapping,
+)
 from .storage import ProjectStore, utc_stamp
 
 
@@ -202,6 +207,7 @@ class ProviderRequest:
     stream_callback: Callable[[str], None] | None = field(default=None, repr=False, compare=False)
     reasoning_callback: Callable[[str], None] | None = field(default=None, repr=False, compare=False)
     feature_id: str = ""
+    extra_body: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         validate_role(self.role)
@@ -712,6 +718,14 @@ def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> Pro
     client: ProviderClient | None = None
     try:
         client = create_provider_client(store, request.role, feature_id=request.feature_id)
+        extra = {}
+        if request.feature_id == "draft_generation":
+            extra = v4_flash_0731_thinking_payload(
+                client.role_config,
+                draft_reasoning_effort_from_settings(store.read_config()),
+            )
+        if extra:
+            request = replace(request, extra_body={**dict(request.extra_body or {}), **extra})
         response = client.generate(request)
         append_provider_call_log(
             store,
@@ -1066,7 +1080,7 @@ def send_openai_compatible_chat_completion(
 ) -> tuple[int, dict[str, Any]]:
     endpoint = chat_completions_url(role_config.base_url)
     stream_response = should_stream_response(request, role_config)
-    supported_sampling_keys = provider_supported_sampling_keys(role_config)
+    supported_sampling_keys = provider_supported_sampling_keys(role_config, request)
     payload = {
         "model": role_config.model,
         "messages": openai_compatible_messages(request),
@@ -1079,6 +1093,9 @@ def send_openai_compatible_chat_completion(
         payload["temperature"] = request.temperature
     payload.update(openai_compatible_sampling_payload(request, role_config))
     payload.update(provider_format_payload(role_config))
+    extra = request.extra_body if isinstance(request.extra_body, dict) else {}
+    if extra:
+        payload.update(extra)
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     http_request = urllib.request.Request(
         endpoint,
@@ -1282,6 +1299,19 @@ def provider_format_payload(role_config: ModelRoleConfig) -> dict[str, Any]:
     return {}
 
 
+def v4_flash_0731_thinking_payload(role_config: ModelRoleConfig, effort: str) -> dict[str, Any]:
+    if not is_deepseek_v4_flash_0731(role_config.model):
+        return {}
+    level = str(effort or "high").strip().lower()
+    if level not in {"none", "low", "high", "max"}:
+        level = "high"
+    if role_config.provider == DEEPSEEK_PROVIDER_ID:
+        if level == "none":
+            return {"thinking": {"type": "disabled"}}
+        return {"thinking": {"type": "enabled"}, "reasoning_effort": level}
+    return {"reasoning": {"effort": level}}
+
+
 def deepseek_thinking_payload(role_config: ModelRoleConfig) -> dict[str, Any]:
     raw = role_config.settings.get("thinking")
     if isinstance(raw, dict):
@@ -1299,9 +1329,26 @@ def deepseek_thinking_payload(role_config: ModelRoleConfig) -> dict[str, Any]:
     return {"type": "disabled"}
 
 
-def provider_supported_sampling_keys(role_config: ModelRoleConfig) -> set[str]:
+def thinking_mode_restricts_sampling(request: ProviderRequest, role_config: ModelRoleConfig) -> bool:
+    extra = request.extra_body if isinstance(getattr(request, "extra_body", None), dict) else {}
+    if str(extra.get("reasoning_effort") or "").strip().lower() in {"low", "high", "max"}:
+        return True
+    reasoning = extra.get("reasoning")
+    if isinstance(reasoning, dict) and str(reasoning.get("effort") or "").strip().lower() in {"low", "high", "max"}:
+        return True
+    thinking = extra.get("thinking")
+    if isinstance(thinking, dict) and str(thinking.get("type") or "").strip().lower() == "enabled":
+        return True
+    if role_config.provider == DEEPSEEK_PROVIDER_ID:
+        return deepseek_thinking_payload(role_config).get("type") == "enabled"
+    return False
+
+
+def provider_supported_sampling_keys(role_config: ModelRoleConfig, request: ProviderRequest | None = None) -> set[str]:
     provider = role_config.provider
     keys = {"temperature", "top_p", "max_tokens", "stream"}
+    if request is not None and thinking_mode_restricts_sampling(request, role_config):
+        return {"max_tokens", "stream"}
     if provider == DEEPSEEK_PROVIDER_ID:
         if deepseek_thinking_payload(role_config).get("type") == "enabled":
             return {"max_tokens", "stream"}
@@ -1328,29 +1375,33 @@ def request_sampling_values(request: ProviderRequest) -> dict[str, Any]:
 
 
 def provider_sent_parameter_keys(request: ProviderRequest, role_config: ModelRoleConfig) -> list[str]:
-    supported = provider_supported_sampling_keys(role_config)
+    supported = provider_supported_sampling_keys(role_config, request)
     keys = [key for key, value in request_sampling_values(request).items() if value is not None and key in supported]
     if role_config.provider == DEEPSEEK_PROVIDER_ID:
         keys.append("thinking")
+    extra = request.extra_body if isinstance(getattr(request, "extra_body", None), dict) else {}
+    keys.extend(str(key) for key in extra)
     return sorted(set(keys))
 
 
 def provider_ignored_parameter_keys(request: ProviderRequest, role_config: ModelRoleConfig) -> list[str]:
-    supported = provider_supported_sampling_keys(role_config)
+    supported = provider_supported_sampling_keys(role_config, request)
     return sorted(key for key, value in request_sampling_values(request).items() if value is not None and key not in supported)
 
 
 def openai_compatible_sampling_payload(request: ProviderRequest, role_config: ModelRoleConfig) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     provider = role_config.provider
-    supported = provider_supported_sampling_keys(role_config)
+    supported = provider_supported_sampling_keys(role_config, request)
     if request.top_p is not None and "top_p" in supported:
         payload["top_p"] = request.top_p
     if request.presence_penalty is not None and "presence_penalty" in supported:
         payload["presence_penalty"] = request.presence_penalty
     if request.frequency_penalty is not None and "frequency_penalty" in supported:
         payload["frequency_penalty"] = request.frequency_penalty
-    if provider in {LOCAL_OPENAI_COMPATIBLE_PROVIDER_ID, OPENROUTER_PROVIDER_ID}:
+    if provider in {LOCAL_OPENAI_COMPATIBLE_PROVIDER_ID, OPENROUTER_PROVIDER_ID} and not thinking_mode_restricts_sampling(
+        request, role_config
+    ):
         if request.top_k is not None:
             payload["top_k"] = request.top_k
         if request.min_p is not None:
