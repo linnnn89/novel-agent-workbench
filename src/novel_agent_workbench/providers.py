@@ -1391,6 +1391,21 @@ def safe_usage(value: dict[str, Any]) -> dict[str, int]:
     return safe
 
 
+def format_prompt_cache_usage(usage: object) -> str:
+    source = usage if isinstance(usage, dict) else {}
+    hit = source.get("prompt_cache_hit_tokens")
+    miss = source.get("prompt_cache_miss_tokens")
+    if not isinstance(hit, int) and not isinstance(miss, int):
+        return ""
+    hit_n = hit if isinstance(hit, int) else 0
+    miss_n = miss if isinstance(miss, int) else 0
+    total = hit_n + miss_n
+    if total <= 0:
+        return ""
+    percent = 100.0 * hit_n / total
+    return f"cache={hit_n}/{total} ({percent:.0f}%)"
+
+
 def resolve_project_secret(store: ProjectStore, api_key_ref: str) -> str:
     if not api_key_ref:
         raise ProviderError("Provider config is missing api_key_ref.", error_type="missing_secret_ref")

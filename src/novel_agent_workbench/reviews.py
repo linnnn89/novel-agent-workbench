@@ -9,7 +9,7 @@ from .chapters import ChapterWorkflowService
 from .config import DEFAULT_REVIEW_SYSTEM_PROMPT, DEFAULT_REVIEW_TASK_PROMPT, effective_generation_settings
 from .drafts import (
     DraftGenerationService,
-    render_context_materials,
+    render_shared_context_block,
     sanitize_provider_draft_text,
     stream_sanitizer_callback,
     validate_chapter_id,
@@ -904,33 +904,37 @@ def render_ai_review_prompt(
     *,
     review_prompt: str = "",
 ) -> str:
-    context_text = render_review_context_materials(render)
+    package = render.get("context_package") if isinstance(render.get("context_package"), dict) else {}
+    sections = package.get("sections") if isinstance(package.get("sections"), list) else []
     chapter_id = str(draft.get("chapter_id") or "")
     title = str(draft.get("title") or "")
     version_label = str(draft.get("version_label") or "")
     task_text = str(review_prompt or "").strip() or ai_review_task_prompt(chapter_id=chapter_id, title=title)
-    lines = [
-        "【上下文与资料】",
-        context_text or "无额外上下文。",
-        "",
-        "【审稿任务】",
-        task_text,
-        "",
-        "【目标章节】",
-        f"章节 ID：{chapter_id}",
-        f"标题：{title or chapter_id}",
-        f"草稿版本：{version_label or '-'}",
-        "",
-        "【待审草稿正文】",
-        draft_text or "（空草稿）",
-    ]
+    lines: list[str] = []
+    context_block = render_shared_context_block(sections)
+    if context_block:
+        lines.extend([context_block, ""])
+    lines.extend(
+        [
+            "【审稿任务】",
+            task_text,
+            "",
+            "【目标章节】",
+            f"章节 ID：{chapter_id}",
+            f"标题：{title or chapter_id}",
+            f"草稿版本：{version_label or '-'}",
+            "",
+            "【待审草稿正文】",
+            draft_text or "（空草稿）",
+        ]
+    )
     return "\n".join(lines).strip()
 
 
 def render_review_context_materials(render: dict[str, Any]) -> str:
     package = render.get("context_package") if isinstance(render.get("context_package"), dict) else {}
     sections = package.get("sections") if isinstance(package.get("sections"), list) else []
-    return render_context_materials(sections)
+    return render_shared_context_block(sections)
 
 
 def render_context_stats(render: dict[str, Any]) -> dict[str, int]:

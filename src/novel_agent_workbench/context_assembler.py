@@ -6,7 +6,7 @@ from math import ceil
 from typing import Any
 
 from .config import FORMAL_CONTEXT_PRIORITY_ORDER, effective_generation_settings
-from .drafts import DraftGenerationService
+from .drafts import DraftGenerationService, context_items_in_render_order
 from .formal_context import FormalContextPlanService
 from .planning_library import item_id as planning_item_id
 from .planning_library import normalize_library
@@ -138,10 +138,9 @@ class ContextAssemblerService:
                 include_text=include_text,
             )
         )
-        sections: list[dict[str, Any]] = []
+        eligible: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
-        used_tokens = 0
-        for item in sorted(package_items, key=candidate_sort_key):
+        for item in package_items:
             estimated_tokens = safe_int(item.get("estimated_tokens"), default=0)
             if item.get("enabled") is False:
                 skipped.append({**item, "selection_status": "skipped", "skip_reason": disabled_skip_reason(item)})
@@ -155,8 +154,15 @@ class ContextAssemblerService:
             if estimated_tokens <= 0:
                 skipped.append({**item, "selection_status": "skipped", "skip_reason": "empty_or_metadata_only"})
                 continue
-            if used_tokens + estimated_tokens > budget:
+            eligible.append(item)
+        sections: list[dict[str, Any]] = []
+        used_tokens = 0
+        budget_exhausted = False
+        for item in context_items_in_render_order(eligible):
+            estimated_tokens = safe_int(item.get("estimated_tokens"), default=0)
+            if budget_exhausted or used_tokens + estimated_tokens > budget:
                 skipped.append({**item, "selection_status": "skipped", "skip_reason": "token_budget_exceeded"})
+                budget_exhausted = True
                 continue
             sections.append({**item, "selection_status": "selected", "skip_reason": ""})
             used_tokens += estimated_tokens

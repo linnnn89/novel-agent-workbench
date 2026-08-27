@@ -29,8 +29,8 @@ from .corpus_samples import CorpusSampleService
 from .drafts import (
     DraftGenerationRequest,
     DraftGenerationService,
-    render_context_materials,
     render_context_prompt,
+    render_shared_context_block,
     sanitize_provider_draft_text,
     stream_sanitizer_callback,
 )
@@ -1835,37 +1835,39 @@ def render_ai_refinement_prompt(
 ) -> str:
     package = render.get("context_package") if isinstance(render.get("context_package"), dict) else {}
     sections = package.get("sections") if isinstance(package.get("sections"), list) else []
-    context_text = render_context_materials(sections)
+    context_block = render_shared_context_block(sections)
     draft_text = sanitize_provider_draft_text(str(draft.get("content") or ""))["content"]
     review_text = str(review.get("comment") or "").strip()
     chapter_id = str(draft.get("chapter_id") or "")
     title = str(draft.get("title") or "")
     version_label = str(draft.get("version_label") or "")
-    lines = [
-        "【上下文与资料】",
-        context_text or "无额外上下文。",
-        "",
-        "【精修任务】",
-        "你将根据 AI 审稿意见，把当前草稿改成一个新的修订版。",
-        "AI 审稿意见是本次精修的主要执行清单；必须优先落实，不要只做普通续写或表层润色。",
-        "只输出小说正文，不要输出修改说明。",
-        "",
-        "【目标章节】",
-        f"章节 ID：{chapter_id}",
-        f"标题：{title or chapter_id}",
-        f"源草稿版本：{version_label or '-'}",
-        "",
-        "【必须落实的 AI 审稿意见】",
-        review_text or "（无审稿意见）",
-        "",
-        "【落实规则】",
-        "1. 优先修复上方审稿意见明确指出的问题。",
-        "2. 保留未被审稿意见否定的主线、人物关系、信息量和关键场景。",
-        "3. 如果某条审稿意见与上下文或草稿事实冲突，用正文方式化解冲突，不要在输出中解释。",
-        "",
-        "【当前草稿正文】",
-        draft_text or "（空草稿）",
-    ]
+    lines: list[str] = []
+    if context_block:
+        lines.extend([context_block, ""])
+    lines.extend(
+        [
+            "【精修任务】",
+            "你将根据 AI 审稿意见，把当前草稿改成一个新的修订版。",
+            "AI 审稿意见是本次精修的主要执行清单；必须优先落实，不要只做普通续写或表层润色。",
+            "只输出小说正文，不要输出修改说明。",
+            "",
+            "【目标章节】",
+            f"章节 ID：{chapter_id}",
+            f"标题：{title or chapter_id}",
+            f"源草稿版本：{version_label or '-'}",
+            "",
+            "【必须落实的 AI 审稿意见】",
+            review_text or "（无审稿意见）",
+            "",
+            "【落实规则】",
+            "1. 优先修复上方审稿意见明确指出的问题。",
+            "2. 保留未被审稿意见否定的主线、人物关系、信息量和关键场景。",
+            "3. 如果某条审稿意见与上下文或草稿事实冲突，用正文方式化解冲突，不要在输出中解释。",
+            "",
+            "【当前草稿正文】",
+            draft_text or "（空草稿）",
+        ]
+    )
     if str(instruction or "").strip():
         lines.extend(["", "【用户额外要求】", str(instruction or "").strip()])
     lines.extend(

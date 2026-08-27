@@ -1079,6 +1079,9 @@ def new_draft_id() -> str:
     return f"{utc_stamp()}_{uuid4().hex[:12]}"
 
 
+CONTEXT_MATERIALS_HEADING = "【创作资料】"
+
+
 def render_context_prompt(render: dict[str, Any]) -> str:
     package = render.get("context_package") if isinstance(render.get("context_package"), dict) else {}
     sections = package.get("sections") if isinstance(package.get("sections"), list) else []
@@ -1101,10 +1104,9 @@ def render_context_prompt(render: dict[str, Any]) -> str:
     )
     target_chapter = str(target_message.get("content") or "").strip()
     lines: list[str] = []
-    context_text = render_context_materials(sections)
-    if context_text:
-        lines.append("【创作资料】")
-        lines.append(context_text)
+    context_block = render_shared_context_block(sections)
+    if context_block:
+        lines.append(context_block)
     if target_chapter:
         if lines:
             lines.append("")
@@ -1119,6 +1121,13 @@ def render_context_prompt(render: dict[str, Any]) -> str:
         lines.append("【用户本次要求】")
         lines.append(prompt)
     return "\n".join(lines).strip()
+
+
+def render_shared_context_block(sections: list[object]) -> str:
+    body = render_context_materials(sections)
+    if not body:
+        return ""
+    return f"{CONTEXT_MATERIALS_HEADING}\n{body}"
 
 
 def render_context_materials(sections: list[object]) -> str:
@@ -1157,13 +1166,41 @@ def partition_context_sections(sections: list[object]) -> tuple[list[object], li
     return stable, volatile
 
 
+def context_items_in_render_order(sections: list[object]) -> list[dict[str, Any]]:
+    stable, volatile = partition_context_sections(sections)
+    ordered: list[dict[str, Any]] = []
+    for group in grouped_context_items(stable):
+        ordered.extend(group["items"])
+    for group in grouped_context_items(volatile):
+        ordered.extend(group["items"])
+    return ordered
+
+
+def context_section_labels_in_render_order(sections: list[object]) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
+    for item in context_items_in_render_order(sections):
+        label = str(item.get("section_label") or item.get("category_id") or "").strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        labels.append(label)
+    return labels
+
+
 def grouped_context_sections(sections: list[object]) -> list[dict[str, Any]]:
+    with_text = [
+        item
+        for item in sections
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    ]
+    return grouped_context_items(with_text)
+
+
+def grouped_context_items(sections: list[object]) -> list[dict[str, Any]]:
     groups: dict[str, dict[str, Any]] = {}
     for item in sections:
         if not isinstance(item, dict):
-            continue
-        text = str(item.get("text") or "").strip()
-        if not text:
             continue
         label = str(item.get("section_label") or item.get("category_id") or "补充资料")
         order = safe_group_order(item.get("section_order"))

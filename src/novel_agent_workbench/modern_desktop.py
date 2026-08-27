@@ -42,6 +42,7 @@ from .desktop_app import (
 )
 from .memory_bank import normalize_memory_target_tokens
 from .model_settings import FEATURE_DEFINITIONS
+from .providers import format_prompt_cache_usage
 from .reviews import REVIEW_TRUNCATED_NOTICE, review_output_truncated
 from .storage import utc_stamp
 
@@ -902,14 +903,20 @@ class WorkbenchBridge:
                 keys = item.get("request_summary") if isinstance(item.get("request_summary"), dict) else {}
                 meta = keys.get("metadata_keys") if isinstance(keys.get("metadata_keys"), list) else []
                 error = str(item.get("error_type") or "").strip()
-                lines.append(
-                    f"{item.get('timestamp') or '-'}  {item.get('status') or '-'}  "
-                    f"{item.get('provider') or '-'} / {item.get('model') or '-'}  "
-                    f"role={item.get('role') or '-'}  "
-                    f"{error or 'ok'}  "
-                    f"prompt={keys.get('prompt_chars') or 0}  "
-                    f"{', '.join(str(key) for key in meta)}"
-                )
+                cache = format_prompt_cache_usage(item.get("usage"))
+                parts = [
+                    str(item.get("timestamp") or "-"),
+                    str(item.get("status") or "-"),
+                    f"{item.get('provider') or '-'} / {item.get('model') or '-'}",
+                    f"role={item.get('role') or '-'}",
+                    error or "ok",
+                    f"prompt={keys.get('prompt_chars') or 0}",
+                ]
+                if cache:
+                    parts.append(cache)
+                if meta:
+                    parts.append(", ".join(str(key) for key in meta))
+                lines.append("  ".join(parts))
         return _ok({"details": "\n".join(lines), "calls": _jsonable(recent)})
 
     def records_state(self, kind: str = "connection", project_id: str = "") -> dict[str, Any]:

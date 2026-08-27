@@ -5696,13 +5696,22 @@ def format_prompt_preview(render: dict[str, Any]) -> str:
         "",
         "用户消息结构",
         "----------",
-        "【用户本次要求】",
-        str(user.get("content") or "（未填写）").strip(),
+        "【创作资料】（总纲/人设等稳定资料在前，章节大纲/记忆/前文在后）",
     ]
     for label in ordered_section_labels(sections):
         lines.append("")
         lines.append(f"【{label}】")
         lines.append("（生成时会填入该类已选资料；空资料会自动忽略）")
+    lines.extend(
+        [
+            "",
+            "【目标章节】",
+            "（生成时填入当前章节 ID）",
+            "",
+            "【用户本次要求】",
+            str(user.get("content") or "（未填写）").strip(),
+        ]
+    )
     if not sections:
         lines.extend(["", "（当前没有可加入上下文的资料段）"])
     lines.extend(
@@ -5820,16 +5829,9 @@ def format_memory_generation_manual_prompt(preview: dict[str, Any]) -> str:
 
 
 def ordered_section_labels(sections: list[object]) -> list[str]:
-    groups: dict[str, int] = {}
-    for item in sections:
-        if not isinstance(item, dict):
-            continue
-        label = str(item.get("section_label") or item.get("category_id") or "").strip()
-        if not label:
-            continue
-        order = item.get("section_order")
-        groups[label] = min(groups.get(label, 999), order if isinstance(order, int) and not isinstance(order, bool) else 999)
-    return [label for label, _ in sorted(groups.items(), key=lambda item: (item[1], item[0]))]
+    from .drafts import context_section_labels_in_render_order
+
+    return context_section_labels_in_render_order(sections)
 
 
 def label_for_value(options: tuple[tuple[str, str], ...], value: str) -> str:
