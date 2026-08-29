@@ -313,6 +313,8 @@ class ModelSettingsDialog:
         self.provider_timeout_var.set(str(provider.get("timeout_seconds") or 300))
         if provider.get("has_api_key"):
             self.provider_key_status_var.set(f"Key：{provider.get('masked_api_key') or MASK_PLACEHOLDER}")
+        elif provider.get("requires_secret") is False:
+            self.provider_key_status_var.set("尚未保存 Key（可留空）")
         else:
             self.provider_key_status_var.set("尚未保存 Key")
         self.delete_provider_button.state(["disabled"] if provider.get("built_in") else ["!disabled"])

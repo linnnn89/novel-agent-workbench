@@ -40,6 +40,7 @@ from .desktop_app import (
     suggest_next_chapter_id,
     visible_chapter_record_rows,
 )
+from .config import default_generation_settings
 from .memory_bank import normalize_memory_target_tokens
 from .model_settings import FEATURE_DEFINITIONS
 from .providers import format_prompt_cache_usage
@@ -77,6 +78,59 @@ USER_GUIDE_TEXT = """基本流程
 保存设置不会联网。
 测试连接、真实生成和导出动作都需要你主动触发。
 API Key 只保存在软件级本地密钥文件，不写入作品配置或运行记录。"""
+
+
+class WindowCloseSaveCoordinator:
+    """Delay native window destruction until the editor's final save finishes."""
+
+    def __init__(self, window: Any) -> None:
+        self._window = window
+        self._lock = threading.RLock()
+        self._close_in_progress = False
+        self._allow_close = False
+
+    def on_closing(self) -> bool:
+        with self._lock:
+            if self._allow_close:
+                return True
+            if self._close_in_progress:
+                return False
+            self._close_in_progress = True
+        try:
+            self._window.evaluate_js(
+                "window.__workbenchFlushBeforeClose()",
+                callback=self._after_flush,
+            )
+        except Exception as exc:
+            self._cancel_close(f"关闭前保存未能启动：{exc}")
+        return False
+
+    def _after_flush(self, result: Any) -> None:
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            self._cancel_close("")
+            return
+        with self._lock:
+            self._allow_close = True
+            self._close_in_progress = False
+        try:
+            self._window.destroy()
+        except Exception as exc:
+            with self._lock:
+                self._allow_close = False
+            self._cancel_close(f"窗口关闭失败：{exc}")
+
+    def _cancel_close(self, message: str) -> None:
+        with self._lock:
+            self._allow_close = False
+            self._close_in_progress = False
+        try:
+            self._window.run_js(
+                f"window.__workbenchCancelClose({json.dumps(str(message or ''), ensure_ascii=False)});"
+            )
+        except Exception:
+            pass
+
+
 DEFAULT_PREFS = {
     "theme": "system",
     "fontFamily": "literary",
@@ -158,6 +212,7 @@ def _normalize_generation_payload(raw: dict[str, Any]) -> dict[str, Any]:
     sampling = raw.get("sampling") if isinstance(raw.get("sampling"), dict) else {}
     context = raw.get("context") if isinstance(raw.get("context"), dict) else {}
     review = raw.get("review") if isinstance(raw.get("review"), dict) else {}
+    memory = raw.get("memory") if isinstance(raw.get("memory"), dict) else {}
     return {
         "prompting": {
             "system_prompt": str(prompting.get("system_prompt") or ""),
@@ -192,6 +247,12 @@ def _normalize_generation_payload(raw: dict[str, Any]) -> dict[str, Any]:
             "manual_review_when_disabled": True,
             "system_prompt": str(review.get("system_prompt") or ""),
             "task_prompt": str(review.get("task_prompt") or ""),
+        },
+        "memory": {
+            "generation_system_prompt": str(memory.get("generation_system_prompt") or ""),
+            "generation_task_prompt": str(memory.get("generation_task_prompt") or ""),
+            "compression_system_prompt": str(memory.get("compression_system_prompt") or ""),
+            "compression_task_prompt": str(memory.get("compression_task_prompt") or ""),
         },
     }
 
@@ -1313,13 +1374,14 @@ class WorkbenchBridge:
                 if not project_id:
                     return _fail("请先选择作品。")
                 state = self.app.project_generation_settings_state(project_id)
-                return _ok(_jsonable({**state, "scope": "project"}))
+                return _ok(_jsonable({**state, "scope": "project", "defaults": default_generation_settings()}))
             return _ok(
                 {
                     "scope": "global",
                     "source": "global",
                     "has_project_override": False,
                     "settings": _jsonable(self.app.global_generation_settings()),
+                    "defaults": _jsonable(default_generation_settings()),
                     "global_settings_path": str(self.app._global_settings_path()),
                 }
             )
@@ -1467,6 +1529,8 @@ def main() -> int:
         confirm_close=False,
     )
     api.bind_window(window)
+    close_coordinator = WindowCloseSaveCoordinator(window)
+    window.events.closing += close_coordinator.on_closing
     webview.start(debug=False, gui="edgechromium")
     return 0
 

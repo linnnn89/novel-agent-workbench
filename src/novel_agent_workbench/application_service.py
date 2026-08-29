@@ -75,6 +75,7 @@ from .providers import (
     ModelRoleConfig,
     ProviderRequest,
     SECRET_REF_PREFIX,
+    adapter_requires_secret_value,
     get_provider_adapter,
     configure_provider_role,
     generate_with_provider,
@@ -586,7 +587,7 @@ class WorkbenchApplicationService:
         if settings:
             updates["settings"] = dict(settings)
         role_config = ModelRoleConfig.from_mapping(role, updates)
-        if adapter.requires_secret and not role_config.api_key_ref:
+        if adapter_requires_secret_value(adapter, base_url=role_config.base_url) and not role_config.api_key_ref:
             raise ValueError(f"Provider {provider!r} requires api_key_ref.")
         validate_model_role_config(role_config, self._read_global_secrets(), require_secret_value=False)
         global_settings = self._read_global_settings()
@@ -606,6 +607,7 @@ class WorkbenchApplicationService:
             normalized = normalize_provider_profile(str(profile_id), profile)
             secret_name = self._secret_name_from_ref(str(normalized.get("api_key_ref") or ""))
             secret_value = str(secrets.get(secret_name) or "") if secret_name else ""
+            adapter_info = get_provider_adapter(str(normalized.get("adapter") or ""))
             cached = (
                 cache.get("providers", {}).get(profile_id, {})
                 if isinstance(cache.get("providers"), dict)
@@ -616,6 +618,9 @@ class WorkbenchApplicationService:
                     **normalized,
                     "has_api_key": bool(secret_value),
                     "masked_api_key": mask_secret(secret_value),
+                    "requires_secret": adapter_requires_secret_value(
+                        adapter_info, base_url=str(normalized.get("base_url") or "")
+                    ),
                     "catalog_refreshed_at": str(cached.get("refreshed_at") or ""),
                     "catalog_model_count": len(cached.get("models") or [])
                     if isinstance(cached.get("models"), list)
@@ -734,7 +739,7 @@ class WorkbenchApplicationService:
         secret_name = self._secret_name_from_ref(str(profile.get("api_key_ref") or ""))
         api_key = str(self._read_global_secrets().get(secret_name) or "") if secret_name else ""
         adapter = get_provider_adapter(str(profile.get("adapter") or ""))
-        if adapter and adapter.requires_secret and not api_key:
+        if adapter_requires_secret_value(adapter, base_url=str(profile.get("base_url") or "")) and not api_key:
             raise ValueError("请先保存该接入商的 API Key。")
         models = fetch_model_catalog(
             provider_profile_id=profile_id,
@@ -1729,7 +1734,11 @@ class WorkbenchApplicationService:
         if str(global_settings.get("primary_model_ref") or "") or model_roles_have_config(global_roles):
             runtime_roles = merged_writer_sampling_settings(global_roles, settings)
             runtime_secrets = self._read_global_secrets()
-            runtime_model_settings = {**global_settings, "model_roles": runtime_roles}
+            runtime_model_settings = {
+                **global_settings,
+                "generation_settings": settings,
+                "model_roles": runtime_roles,
+            }
         else:
             legacy_roles = config.get("model_roles") if isinstance(config.get("model_roles"), dict) else {}
             runtime_roles = merged_writer_sampling_settings(legacy_roles, settings)

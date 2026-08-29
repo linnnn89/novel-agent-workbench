@@ -9,6 +9,7 @@ from typing import Any
 
 from .providers import (
     ModelRoleConfig,
+    adapter_requires_secret_value,
     get_model_role_config,
     get_provider_adapter,
     safe_url_host,
@@ -2427,7 +2428,8 @@ def audit_provider_adapter_config(
                     message=f"Role {role} uses disabled provider adapter {role_config.provider!r}; audit did not test network.",
                 )
             )
-        if adapter.requires_secret and not role_config.api_key_ref:
+        secret_required = adapter_requires_secret_value(adapter, base_url=role_config.base_url)
+        if secret_required and not role_config.api_key_ref:
             findings.append(
                 AuditFinding(
                     code="provider_missing_secret_ref",
@@ -2447,7 +2449,7 @@ def audit_provider_adapter_config(
                     )
                 )
                 continue
-            if secret_name not in secrets or not str(secrets.get(secret_name) or ""):
+            if secret_required and (secret_name not in secrets or not str(secrets.get(secret_name) or "")):
                 findings.append(
                     AuditFinding(
                         code="provider_missing_secret",
