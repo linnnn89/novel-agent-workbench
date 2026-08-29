@@ -24,7 +24,11 @@ from .memory_bank import (
     normalize_memory_target_tokens,
 )
 from .model_settings_ui import open_model_settings_dialog
-from .providers import DEFAULT_PROVIDER_TIMEOUT_SECONDS
+from .providers import (
+    DEFAULT_PROVIDER_TIMEOUT_SECONDS,
+    adapter_requires_secret_value,
+    get_provider_adapter,
+)
 from .storage import DEFAULT_PROJECTS_DIRNAME
 
 
@@ -4168,21 +4172,45 @@ class WorkbenchDesktopApp(tk.Tk):
         prompt_tab = ttk.Frame(notebook)
         params_tab = ttk.Frame(notebook)
         review_tab = ttk.Frame(notebook)
+        memory_tab = ttk.Frame(notebook)
         notebook.add(prompt_tab, text="提示词")
         notebook.add(params_tab, text="采样参数与上下文")
         notebook.add(review_tab, text="审稿")
+        notebook.add(memory_tab, text="记忆")
+
+        factory = default_generation_settings()
+        factory_prompting = factory.get("prompting") if isinstance(factory.get("prompting"), dict) else {}
+        factory_review = factory.get("review") if isinstance(factory.get("review"), dict) else {}
+        factory_memory = factory.get("memory") if isinstance(factory.get("memory"), dict) else {}
+
+        def restore_prompt_box(box: tk.Text, value: object, after: Callable[..., None] | None = None) -> None:
+            box.delete("1.0", tk.END)
+            box.insert("1.0", str(value or ""))
+            if after is not None:
+                after()
+
+        def prompt_side_label(parent: ttk.Frame, text: str, box: tk.Text, default: object, row: int) -> None:
+            head = ttk.Frame(parent)
+            head.grid(row=row, column=0, sticky="ne", padx=(14, 10), pady=(14, 6) if row == 0 else 8)
+            ttk.Label(head, text=text).pack(anchor="e")
+            ttk.Button(
+                head,
+                text="恢复默认",
+                width=10,
+                command=lambda current=box, source=default: restore_prompt_box(current, source),
+            ).pack(anchor="e", pady=(6, 0))
 
         prompt_tab.columnconfigure(1, weight=1)
         prompt_tab.rowconfigure(1, weight=1)
         prompt_tab.rowconfigure(3, weight=1)
-        ttk.Label(prompt_tab, text="系统提示词").grid(row=0, column=0, sticky="ne", padx=(14, 10), pady=(14, 6))
         system_box = tk.Text(prompt_tab, wrap="word", height=10)
         self._style_text_widget(system_box)
         system_box.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(0, 14), pady=(14, 8))
-        ttk.Label(prompt_tab, text="默认写作要求").grid(row=2, column=0, sticky="ne", padx=(14, 10), pady=8)
+        prompt_side_label(prompt_tab, "系统提示词", system_box, factory_prompting.get("system_prompt"), 0)
         user_box = tk.Text(prompt_tab, wrap="word", height=8)
         self._style_text_widget(user_box)
         user_box.grid(row=2, column=1, rowspan=2, sticky="nsew", padx=(0, 14), pady=8)
+        prompt_side_label(prompt_tab, "默认写作要求", user_box, factory_prompting.get("default_user_prompt"), 2)
 
         params_tab.columnconfigure(1, weight=1)
         field_vars: dict[str, tk.StringVar] = {}
@@ -4250,7 +4278,18 @@ class WorkbenchDesktopApp(tk.Tk):
             foreground="#6b7280",
             justify="left",
         ).grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
-        ttk.Label(review_tab, text="审稿系统提示词").grid(row=3, column=0, sticky="w", padx=18, pady=(0, 4))
+        review_system_head = ttk.Frame(review_tab)
+        review_system_head.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 4))
+        review_system_head.columnconfigure(0, weight=1)
+        ttk.Label(review_system_head, text="审稿系统提示词").grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            review_system_head,
+            text="恢复默认",
+            width=10,
+            command=lambda: restore_prompt_box(
+                review_system_box, factory_review.get("system_prompt"), refresh_review_prompt_status
+            ),
+        ).grid(row=0, column=1, sticky="e")
         review_system_frame = ttk.Frame(review_tab)
         review_system_frame.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 10))
         review_system_frame.columnconfigure(0, weight=1)
@@ -4260,10 +4299,21 @@ class WorkbenchDesktopApp(tk.Tk):
         review_system_box.configure(yscrollcommand=review_system_scrollbar.set)
         review_system_box.grid(row=0, column=0, sticky="ew")
         review_system_scrollbar.grid(row=0, column=1, sticky="ns")
+        review_task_head = ttk.Frame(review_tab)
+        review_task_head.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 4))
+        review_task_head.columnconfigure(0, weight=1)
         ttk.Label(
-            review_tab,
+            review_task_head,
             text="AI审稿提示词（可使用 {chapter_heading}、{chapter_id}、{title}）",
-        ).grid(row=5, column=0, sticky="w", padx=18, pady=(0, 4))
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            review_task_head,
+            text="恢复默认",
+            width=10,
+            command=lambda: restore_prompt_box(
+                review_prompt_box, factory_review.get("task_prompt"), refresh_review_prompt_status
+            ),
+        ).grid(row=0, column=1, sticky="e")
         review_prompt_frame = ttk.Frame(review_tab)
         review_prompt_frame.grid(row=6, column=0, rowspan=2, sticky="nsew", padx=18, pady=(0, 8))
         review_prompt_frame.columnconfigure(0, weight=1)
@@ -4288,11 +4338,53 @@ class WorkbenchDesktopApp(tk.Tk):
         review_system_box.bind("<KeyRelease>", refresh_review_prompt_status)
         review_prompt_box.bind("<KeyRelease>", refresh_review_prompt_status)
 
+        memory_tab.columnconfigure(0, weight=1)
+        memory_tab.rowconfigure(2, weight=1)
+        memory_tab.rowconfigure(4, weight=1)
+        memory_tab.rowconfigure(6, weight=1)
+        memory_tab.rowconfigure(8, weight=1)
+        ttk.Label(
+            memory_tab,
+            text="这里改的是记忆银行真正发给模型的提示词。更新记忆可用 {target_tokens}、{current_memory}、{chapter_count}、{chapters}；缩写可用 {target_tokens}、{current_memory}。",
+            wraplength=720,
+            foreground="#6b7280",
+            justify="left",
+        ).grid(row=0, column=0, sticky="ew", padx=18, pady=(14, 8))
+
+        def _memory_box(parent, row, label, default):
+            head = ttk.Frame(parent)
+            head.grid(row=row, column=0, sticky="ew", padx=18, pady=(0, 4))
+            head.columnconfigure(0, weight=1)
+            ttk.Label(head, text=label).grid(row=0, column=0, sticky="w")
+            frame = ttk.Frame(parent)
+            frame.grid(row=row + 1, column=0, sticky="nsew", padx=18, pady=(0, 8))
+            frame.columnconfigure(0, weight=1)
+            frame.rowconfigure(0, weight=1)
+            box = tk.Text(frame, wrap="word", height=6, undo=True)
+            self._style_text_widget(box)
+            scroll = ttk.Scrollbar(frame, orient="vertical", command=box.yview)
+            box.configure(yscrollcommand=scroll.set)
+            box.grid(row=0, column=0, sticky="nsew")
+            scroll.grid(row=0, column=1, sticky="ns")
+            ttk.Button(
+                head,
+                text="恢复默认",
+                width=10,
+                command=lambda current=box, source=default: restore_prompt_box(current, source),
+            ).grid(row=0, column=1, sticky="e")
+            return box
+
+        memory_gen_system_box = _memory_box(memory_tab, 1, "更新记忆 · 系统提示词", factory_memory.get("generation_system_prompt"))
+        memory_gen_task_box = _memory_box(memory_tab, 3, "更新记忆 · 发送提示词", factory_memory.get("generation_task_prompt"))
+        memory_zip_system_box = _memory_box(memory_tab, 5, "缩写记忆 · 系统提示词", factory_memory.get("compression_system_prompt"))
+        memory_zip_task_box = _memory_box(memory_tab, 7, "缩写记忆 · 发送提示词", factory_memory.get("compression_task_prompt"))
+
         def load(value: dict[str, Any]) -> None:
             prompting = value.get("prompting") if isinstance(value.get("prompting"), dict) else {}
             sampling = value.get("sampling") if isinstance(value.get("sampling"), dict) else {}
             context = value.get("context") if isinstance(value.get("context"), dict) else {}
             review = value.get("review") if isinstance(value.get("review"), dict) else {}
+            memory = value.get("memory") if isinstance(value.get("memory"), dict) else {}
             system_box.configure(state="normal")
             user_box.configure(state="normal")
             review_system_box.configure(state="normal")
@@ -4305,6 +4397,14 @@ class WorkbenchDesktopApp(tk.Tk):
             review_system_box.insert("1.0", str(review.get("system_prompt") or ""))
             review_prompt_box.delete("1.0", tk.END)
             review_prompt_box.insert("1.0", str(review.get("task_prompt") or ""))
+            memory_gen_system_box.delete("1.0", tk.END)
+            memory_gen_system_box.insert("1.0", str(memory.get("generation_system_prompt") or ""))
+            memory_gen_task_box.delete("1.0", tk.END)
+            memory_gen_task_box.insert("1.0", str(memory.get("generation_task_prompt") or ""))
+            memory_zip_system_box.delete("1.0", tk.END)
+            memory_zip_system_box.insert("1.0", str(memory.get("compression_system_prompt") or ""))
+            memory_zip_task_box.delete("1.0", tk.END)
+            memory_zip_task_box.insert("1.0", str(memory.get("compression_task_prompt") or ""))
             for key in (
                 "temperature",
                 "top_p",
@@ -4358,6 +4458,12 @@ class WorkbenchDesktopApp(tk.Tk):
                     "manual_review_when_disabled": True,
                     "system_prompt": review_system_box.get("1.0", tk.END).strip(),
                     "task_prompt": review_prompt_box.get("1.0", tk.END).strip(),
+                },
+                "memory": {
+                    "generation_system_prompt": memory_gen_system_box.get("1.0", tk.END).strip(),
+                    "generation_task_prompt": memory_gen_task_box.get("1.0", tk.END).strip(),
+                    "compression_system_prompt": memory_zip_system_box.get("1.0", tk.END).strip(),
+                    "compression_task_prompt": memory_zip_task_box.get("1.0", tk.END).strip(),
                 },
             }
             return value
@@ -5037,7 +5143,12 @@ class WorkbenchDesktopApp(tk.Tk):
             current_provider = str(current.get("provider") or "")
             global_provider = str(global_current.get("provider") or "")
             reusable_api_key_ref = global_api_key_ref if global_provider == provider else ""
-            if bool(preset["secret_required"]) and not api_key and not reusable_api_key_ref:
+            adapter_info = get_provider_adapter(provider)
+            if (
+                adapter_requires_secret_value(adapter_info, base_url=base_url)
+                and not api_key
+                and not reusable_api_key_ref
+            ):
                 messagebox.showerror(APP_TITLE, "这个接入方式需要填写 API Key。")
                 return
             secret_name = model_secret_name(role, provider)
@@ -6198,7 +6309,7 @@ def format_provider_summary(health: dict[str, Any]) -> str:
             "已设置"
             if provider.get("has_api_key")
             else "本地可留空"
-            if provider_id in {"local_openai_compatible", "mock"}
+            if provider_id in {"openai_compatible", "local_openai_compatible", "mock"}
             else "未设置"
         )
         if uses_writer_fallback and (provider_id or provider.get("model")):

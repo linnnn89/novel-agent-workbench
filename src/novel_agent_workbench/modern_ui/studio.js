@@ -21,7 +21,15 @@ function requireProject() {
 
 function closeStudio() {
   $("studio").hidden = true;
+  $("studioBody").innerHTML = "";
+  $("studioTabs").innerHTML = "";
+  setStudioStatus("");
   studio.mode = "";
+  studio.creating = false;
+  studio.createType = "";
+  studio.selectedPlanning = "";
+  studio.planning = null;
+  studio.planForm = null;
   studio.memoryBox = null;
   studio.memoryEditor = null;
   studio.memoryTarget = null;
@@ -98,6 +106,18 @@ function providerById(id) {
   return (studio.model?.providers || []).find((item) => item.profile_id === id) || null;
 }
 
+function providerKeyPill(provider) {
+  if (provider?.has_api_key) return "已保存 Key";
+  if (provider?.requires_secret === false) return "Key 可选";
+  return "无 Key";
+}
+
+function providerKeyPlaceholder(provider) {
+  if (provider?.has_api_key) return "已保存（留空则保持不变）";
+  if (!provider || provider.requires_secret === false) return "本地可留空";
+  return "尚未保存 Key";
+}
+
 function renderProviderPage() {
   const wrap = el("div", "studio-grid");
   const list = el("div", "studio-list");
@@ -106,7 +126,7 @@ function renderProviderPage() {
   (studio.model.providers || []).forEach((provider) => {
     const button = el("button", `choice${provider.profile_id === studio.selectedProvider ? " active" : ""}`);
     button.type = "button";
-    button.innerHTML = `<span class="tree-title">${escapeHtml(provider.display_name)}</span><span class="pill">${provider.has_api_key ? "已保存 Key" : "无 Key"}</span>`;
+    button.innerHTML = `<span class="tree-title">${escapeHtml(provider.display_name)}</span><span class="pill">${providerKeyPill(provider)}</span>`;
     button.addEventListener("click", () => {
       studio.selectedProvider = provider.profile_id;
       renderModelStudio();
@@ -130,10 +150,10 @@ function renderProviderPage() {
     options: (studio.model.adapters || []).map((item) => [item.id, item.label]),
   });
   const base = input(provider?.base_url || "", { placeholder: "https://api.example.com/v1" });
-  const key = input("", { type: "password", placeholder: provider?.has_api_key ? "已保存（留空则保持不变）" : "尚未保存 Key" });
+  const key = input("", { type: "password", placeholder: providerKeyPlaceholder(provider) });
   const timeout = input(String(provider?.timeout_seconds || 300));
   form.append(
-    el("p", "studio-note", "接入商保存后不会自动联网。只有“刷新模型”会请求对应 API。"),
+    el("p", "studio-note", "接入商保存后不会自动联网。只有“刷新模型”会请求对应 API。本地 LM Studio / Ollama 可不填 API Key。"),
     field("名称", name),
     field("适配器", adapter),
     field("API 地址", base),
@@ -865,7 +885,7 @@ function finishMemoryJob(payload) {
   toast("记忆正文已生成，尚未保存。");
 }
 
-async function openPlanningStudio(kind) {
+async function openPlanningStudio(kind, options = {}) {
   if (!requireProject()) return;
   studio.mode = kind;
   studio.creating = false;
@@ -876,8 +896,12 @@ async function openPlanningStudio(kind) {
   });
   $("studioTabs").innerHTML = "";
   studio.planning = await call("planning_state", state.projectId, kind);
+  if (options.create) {
+    await startPlanning(options.itemType || defaultPlanningCreateType(kind));
+    return;
+  }
   const first = studio.planning.items?.[0];
-  if (first) studio.selectedPlanning = first.planning_id;
+  studio.selectedPlanning = first ? first.planning_id : "";
   renderPlanningStudio();
 }
 
@@ -885,13 +909,47 @@ function planningItem(id) {
   return (studio.planning?.items || []).find((item) => item.planning_id === id) || null;
 }
 
+function planningItems() {
+  return studio.planning?.items || [];
+}
+
+function planningIsIdle() {
+  return !studio.creating && !planningItems().length;
+}
+
+function defaultPlanningCreateType(kind) {
+  return kind === "world" ? "world_plan" : "outline";
+}
+
+function planningIdleCopy(kind) {
+  if (kind === "outline") {
+    return {
+      list: "还没有总纲或章节计划。",
+      banner: "还没有总纲或章节计划。先新建总纲，再开始写。",
+      button: "新建总纲",
+      saveHint: "请先新建总纲。",
+    };
+  }
+  return {
+    list: "还没有人物设定、世界观或写作约束。",
+    banner: "还没有人物设定、世界观或写作约束。先新建设定，再开始写。",
+    button: "新建设定",
+    saveHint: "请先新建设定。",
+  };
+}
+
 function renderPlanningStudio() {
   const kind = studio.mode;
+  const items = planningItems();
+  if (!studio.creating && items.length && !planningItem(studio.selectedPlanning)) {
+    studio.selectedPlanning = items[0].planning_id;
+  }
+  const idle = planningIsIdle();
   const wrap = el("div", "studio-grid");
   const list = el("div", "studio-list");
   list.append(el("h3", "", kind === "outline" ? "阶段资料" : "资料条目"));
   const scroll = el("div", "studio-scroll");
-  (studio.planning.items || []).forEach((item) => {
+  items.forEach((item) => {
     const active = item.enabled !== false && Boolean(item.active);
     const typeLabel = (studio.planning.types || []).find((entry) => entry.id === item.item_type)?.label || item.item_type;
     const button = el("button", `choice${item.planning_id === studio.selectedPlanning && !studio.creating ? " active" : ""}`);
@@ -904,7 +962,10 @@ function renderPlanningStudio() {
     });
     scroll.append(button);
   });
-  if (!(studio.planning.items || []).length) scroll.append(el("p", "studio-note", "还没有资料。右侧可以直接新建。"));
+  const idleCopy = planningIdleCopy(kind);
+  if (!items.length) {
+    scroll.append(el("p", "studio-note", idleCopy.list));
+  }
   list.append(scroll);
 
   const actions = el("div", "side-actions");
@@ -916,41 +977,74 @@ function renderPlanningStudio() {
   });
   list.append(actions);
 
-  const form = el("div", "studio-form");
-  const current = studio.creating ? { item_type: studio.createType, adherence_level: "balanced", enabled: true, active: true } : planningItem(studio.selectedPlanning) || {};
+  const form = el("div", `studio-form${idle ? " is-idle" : ""}`);
+  if (idle) {
+    const banner = el("div", "studio-idle-banner");
+    banner.append(el("p", "", idleCopy.banner));
+    const create = el("button", "btn primary", idleCopy.button);
+    create.type = "button";
+    create.addEventListener("click", () => startPlanning(defaultPlanningCreateType(kind)));
+    banner.append(create);
+    form.append(banner);
+  }
+
+  const current = idle
+    ? { item_type: defaultPlanningCreateType(kind) }
+    : studio.creating
+      ? {
+          item_type: studio.createType,
+          planning_id: studio.selectedPlanning,
+          adherence_level: "balanced",
+          enabled: true,
+          active: true,
+        }
+      : planningItem(studio.selectedPlanning) || {};
   const typeBox = input(current.item_type || studio.planning.types[0].id, {
     select: true,
     options: (studio.planning.types || []).map((item) => [item.id, item.label]),
   });
-  typeBox.disabled = !studio.creating;
+  typeBox.disabled = idle || !studio.creating;
   const title = input(current.title || "");
+  title.disabled = idle;
   const ident = input(current.planning_id || "");
   ident.readOnly = true;
-  const range = input(current.chapter_range || "", { placeholder: "例如 01-05" });
+  ident.disabled = idle;
+  const range = input(current.chapter_range || "", { placeholder: idle ? "" : "例如 01-05" });
+  range.disabled = idle;
   const adherence = input(current.adherence_level || "balanced", {
     select: true,
     options: (studio.planning.adherence || []).map((item) => [item.id, item.label]),
   });
+  adherence.disabled = idle;
   const active = document.createElement("input");
   active.type = "checkbox";
   active.checked = current.enabled !== false && current.active !== false;
+  active.disabled = idle;
   const activeRow = el("label", "check-row");
   activeRow.append(active, document.createTextNode("加入生成上下文"));
   const editor = document.createElement("textarea");
   editor.className = "studio-editor";
   editor.value = current.text || "";
+  editor.disabled = idle;
+  editor.readOnly = idle;
+  editor.placeholder = idle ? "" : "在这里写正文。";
   studio.planForm = { typeBox, title, ident, range, adherence, active, editor };
   const save = el("button", "btn primary", "保存当前");
   save.type = "button";
+  save.disabled = idle;
   save.addEventListener("click", () => savePlanningStudio());
   const remove = el("button", "btn quiet", "删除");
   remove.type = "button";
-  remove.disabled = studio.creating || !studio.selectedPlanning;
+  remove.disabled = idle || studio.creating || !studio.selectedPlanning;
   remove.addEventListener("click", () => deletePlanningStudio());
   const row = el("div", "side-actions");
   row.append(save, remove);
+  if (!idle) {
+    form.append(
+      el("p", "studio-note", kind === "outline" ? "这里只管理总纲和章节计划。保存资料本身不会调用模型。" : "人物、世界观和约束可以逐条编辑。保存不会调用模型。")
+    );
+  }
   form.append(
-    el("p", "studio-note", kind === "outline" ? "这里只管理总纲和章节计划。保存资料本身不会调用模型。" : "人物、世界观和约束可以逐条编辑。保存不会调用模型。"),
     field("资料类型", typeBox),
     field("标题", title),
     field("内部编号", ident),
@@ -967,7 +1061,7 @@ function renderPlanningStudio() {
 }
 
 async function startPlanning(itemType) {
-  const existing = (studio.planning.items || []).find((item) => item.item_type === itemType);
+  const existing = planningItems().find((item) => item.item_type === itemType);
   if ((itemType === "outline" || itemType === "world_plan") && existing) {
     studio.creating = false;
     studio.selectedPlanning = existing.planning_id;
@@ -979,12 +1073,23 @@ async function startPlanning(itemType) {
   studio.createType = itemType;
   studio.selectedPlanning = created.planning_id;
   renderPlanningStudio();
-  if (studio.planForm) studio.planForm.ident.value = created.planning_id;
+  if (studio.planForm) {
+    studio.planForm.ident.value = created.planning_id;
+    studio.planForm.title.focus();
+  }
 }
 
 async function savePlanningStudio() {
   const form = studio.planForm;
   if (!form) return;
+  if (planningIsIdle()) {
+    toast(planningIdleCopy(studio.mode).saveHint);
+    return;
+  }
+  if (!studio.creating && !studio.selectedPlanning) {
+    toast("请先选择一条资料。");
+    return;
+  }
   try {
     const result = await call("save_planning", {
       project_id: state.projectId,
@@ -1072,11 +1177,13 @@ function renderGenSettings() {
   const sampling = settings.sampling || {};
   const context = settings.context || {};
   const review = settings.review || {};
+  const memory = settings.memory || {};
   renderTabs(
     [
       ["prompt", "提示词"],
       ["sample", "采样与上下文"],
       ["review", "审稿"],
+      ["memory", "记忆"],
     ],
     studio.genTab,
     (tab) => {
@@ -1088,6 +1195,10 @@ function renderGenSettings() {
   const body = $("studioBody");
   body.innerHTML = "";
   const form = el("div", "studio-form");
+  const defaults = studio.gen.defaults || {};
+  const defaultPrompting = defaults.prompting || {};
+  const defaultReview = defaults.review || {};
+  const defaultMemory = defaults.memory || {};
   if (studio.genTab === "prompt") {
     const system = input(prompting.system_prompt || "", { area: true });
     const user = input(prompting.default_user_prompt || "", { area: true });
@@ -1097,8 +1208,8 @@ function renderGenSettings() {
     user.style.minHeight = "120px";
     form.append(
       el("p", "studio-note", studio.genScope === "project" ? "保存到当前作品，优先于全局默认。" : "全局默认。某本小说要单独设置时，在作品上右键打开“项目专属设置”。"),
-      field("系统提示词", system),
-      field("默认写作要求", user)
+      promptField("系统提示词", system, defaultPrompting.system_prompt),
+      promptField("默认写作要求", user, defaultPrompting.default_user_prompt)
     );
     studio.genFields = { system, user };
   } else if (studio.genTab === "sample") {
@@ -1133,7 +1244,7 @@ function renderGenSettings() {
     form.append(row1, row2, el("p", "studio-note", "这些只影响写作采样。API 地址和 Key 在模型设置里。"));
     studio.genFields.stream = stream;
     studio.genFields.include_recent_chapters = recent;
-  } else {
+  } else if (studio.genTab === "review") {
     const enabled = document.createElement("input");
     enabled.type = "checkbox";
     enabled.checked = Boolean(review.scorer_enabled);
@@ -1146,10 +1257,34 @@ function renderGenSettings() {
     form.append(
       row,
       el("p", "studio-note", "关闭时确认稿不需要评分模型。开启后，AI 审稿会调用模型设置里的审稿角色。"),
-      field("审稿系统提示词", system),
-      field("AI审稿提示词（可用 {chapter_heading}、{chapter_id}、{title}）", task)
+      promptField("审稿系统提示词", system, defaultReview.system_prompt),
+      promptField("AI审稿提示词（可用 {chapter_heading}、{chapter_id}、{title}）", task, defaultReview.task_prompt)
     );
     studio.genFields = { enabled, system, task };
+  } else if (studio.genTab === "memory") {
+    const genSystem = input(memory.generation_system_prompt || "", { area: true });
+    const genTask = input(memory.generation_task_prompt || "", { area: true });
+    const zipSystem = input(memory.compression_system_prompt || "", { area: true });
+    const zipTask = input(memory.compression_task_prompt || "", { area: true });
+    [genSystem, genTask, zipSystem, zipTask].forEach((box) => {
+      box.className = "studio-editor";
+    });
+    genSystem.style.minHeight = "120px";
+    zipSystem.style.minHeight = "120px";
+    genTask.style.minHeight = "180px";
+    zipTask.style.minHeight = "180px";
+    form.append(
+      el(
+        "p",
+        "studio-note",
+        "这里改的是记忆银行真正发给模型的提示词。更新记忆可用 {target_tokens}、{current_memory}、{chapter_count}、{chapters}；缩写可用 {target_tokens}、{current_memory}。保存后立即生效。"
+      ),
+      promptField("更新记忆 · 系统提示词", genSystem, defaultMemory.generation_system_prompt),
+      promptField("更新记忆 · 发送提示词", genTask, defaultMemory.generation_task_prompt),
+      promptField("缩写记忆 · 系统提示词", zipSystem, defaultMemory.compression_system_prompt),
+      promptField("缩写记忆 · 发送提示词", zipTask, defaultMemory.compression_task_prompt)
+    );
+    studio.genFields = { genSystem, genTask, zipSystem, zipTask };
   }
   const actions = el("div", "side-actions");
   const save = el("button", "btn primary", studio.genScope === "project" ? "保存项目设置" : "保存全局设置");
@@ -1163,6 +1298,23 @@ function renderGenSettings() {
   body.append(form);
 }
 
+function promptField(label, control, defaultValue) {
+  const wrap = el("div", "field");
+  const head = el("div", "field-head");
+  head.append(el("span", "", label));
+  const reset = el("button", "btn quiet compact", "恢复默认");
+  reset.type = "button";
+  reset.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    control.value = defaultValue || "";
+    control.focus();
+  });
+  head.append(reset);
+  wrap.append(head, control);
+  return wrap;
+}
+
 function collectGenForm() {
   if (!studio.gen || !studio.genFields) return;
   if (!studio.gen.settings) studio.gen.settings = studio.gen;
@@ -1171,6 +1323,7 @@ function collectGenForm() {
   settings.sampling = settings.sampling || {};
   settings.context = settings.context || {};
   settings.review = settings.review || {};
+  settings.memory = settings.memory || {};
   const fields = studio.genFields;
   if (fields.system && studio.genTab === "prompt") {
     settings.prompting.system_prompt = fields.system.value;
@@ -1198,6 +1351,12 @@ function collectGenForm() {
     settings.review.scorer_enabled = fields.enabled.checked;
     settings.review.system_prompt = fields.system.value;
     settings.review.task_prompt = fields.task.value;
+  }
+  if (fields.genSystem && studio.genTab === "memory") {
+    settings.memory.generation_system_prompt = fields.genSystem.value;
+    settings.memory.generation_task_prompt = fields.genTask.value;
+    settings.memory.compression_system_prompt = fields.zipSystem.value;
+    settings.memory.compression_task_prompt = fields.zipTask.value;
   }
 }
 

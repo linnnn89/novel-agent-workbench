@@ -393,8 +393,8 @@ PROVIDER_ADAPTER_REGISTRY: dict[str, ProviderAdapterInfo] = {
         adapter_id="openai_compatible",
         enabled=True,
         network_allowed=True,
-        requires_secret=True,
-        description="OpenAI-compatible HTTP adapter. Network is used only when the user starts a connection test or generation.",
+        requires_secret=False,
+        description="OpenAI-compatible HTTP adapter. API Key is optional so local LM Studio/Ollama-style endpoints can omit it. Network is used only when the user starts a connection test or generation.",
     ),
     LOCAL_OPENAI_COMPATIBLE_PROVIDER_ID: ProviderAdapterInfo(
         adapter_id=LOCAL_OPENAI_COMPATIBLE_PROVIDER_ID,
@@ -509,7 +509,7 @@ def configure_provider_role(
     if settings:
         updates["settings"] = dict(settings)
     role_config = ModelRoleConfig.from_mapping(role, {**default_model_role(role), **updates})
-    if adapter.requires_secret and not role_config.api_key_ref:
+    if adapter_requires_secret_value(adapter, base_url=role_config.base_url) and not role_config.api_key_ref:
         raise ProviderConfigError(f"Provider {provider!r} requires api_key_ref.")
     validate_model_role_config(role_config, store.read_secrets(), require_secret_value=False)
     return set_model_role_config_without_secret_value_requirement(store, role, role_config)
@@ -580,38 +580,21 @@ def fake_test_model_role(store: ProjectStore, role: str) -> ProviderConnectionRe
             network_allowed=False,
             error_type="unsupported_provider",
         )
-    secret_name = role_config.secret_name()
-    secret_value = ""
-    if secret_name:
-        try:
-            secret_value = resolve_project_secret(store, role_config.api_key_ref)
-        except ProviderError as exc:
-            return ProviderConnectionResult(
-                ok=False,
-                role=role,
-                provider=role_config.provider,
-                model=role_config.model,
-                mode="fake",
-                message=exc.message,
-                has_api_key=False,
-                masked_key="",
-                adapter_enabled=adapter.enabled,
-                network_allowed=adapter.network_allowed,
-                error_type=exc.error_type,
-            )
-    elif adapter.requires_secret:
+    try:
+        secret_value = resolve_provider_secret(store, role_config, adapter=adapter)
+    except ProviderError as exc:
         return ProviderConnectionResult(
             ok=False,
             role=role,
             provider=role_config.provider,
             model=role_config.model,
             mode="fake",
-            message=f"Provider {role_config.provider!r} requires api_key_ref.",
+            message=exc.message,
             has_api_key=False,
             masked_key="",
             adapter_enabled=adapter.enabled,
             network_allowed=adapter.network_allowed,
-            error_type="missing_secret_ref",
+            error_type=exc.error_type,
         )
     if role_config.provider in REAL_NETWORK_PROVIDER_IDS:
         return ProviderConnectionResult(
@@ -692,11 +675,7 @@ def validate_real_generation_request(store: ProjectStore, role_config: ModelRole
     if not role_config.base_url:
         raise ProviderError("Provider requires base_url.", error_type="missing_base_url")
     adapter = get_provider_adapter(role_config.provider)
-    if adapter and adapter.requires_secret:
-        secret_value = resolve_project_secret(store, role_config.api_key_ref)
-    else:
-        secret_value = resolve_project_secret(store, role_config.api_key_ref) if role_config.api_key_ref else ""
-    return secret_value
+    return resolve_provider_secret(store, role_config, adapter=adapter)
 
 
 def real_generation_blocking_audit_codes(store: ProjectStore) -> list[str]:
@@ -770,8 +749,10 @@ def validate_model_role_config(
     provider_timeout_seconds(config)
     if config.api_key_ref:
         secret_name = config.secret_name()
-        if require_secret_value and (secret_name not in secrets or not str(secrets.get(secret_name) or "")):
-            raise ProviderConfigError(f"Missing project secret: {secret_name}")
+        adapter = get_provider_adapter(config.provider)
+        if require_secret_value and adapter_requires_secret_value(adapter, base_url=config.base_url):
+            if secret_name not in secrets or not str(secrets.get(secret_name) or ""):
+                raise ProviderConfigError(f"Missing project secret: {secret_name}")
 
 
 def validate_mock_role_config(store: ProjectStore, config: ModelRoleConfig) -> None:
@@ -791,6 +772,64 @@ def get_provider_adapter(provider_id: str) -> ProviderAdapterInfo | None:
     if not provider_id:
         return None
     return PROVIDER_ADAPTER_REGISTRY.get(provider_id)
+
+
+LOOPBACK_PROVIDER_HOSTS = {
+    "localhost",
+    "localhost.localdomain",
+    "127.0.0.1",
+    "::1",
+    "0.0.0.0",
+}
+OPTIONAL_SECRET_ERROR_TYPES = {"missing_secret_ref", "missing_secret", "empty_secret"}
+
+
+def is_loopback_provider_url(base_url: str) -> bool:
+    raw = str(base_url or "").strip()
+    if not raw:
+        return False
+    parsed = urlparse(raw if "://" in raw else f"http://{raw}")
+    host = (parsed.hostname or "").strip().lower()
+    if host in LOOPBACK_PROVIDER_HOSTS:
+        return True
+    return host.startswith("127.")
+
+
+def adapter_requires_secret_value(
+    adapter: ProviderAdapterInfo | None,
+    *,
+    base_url: str = "",
+) -> bool:
+    """Keep loopback OpenAI-compatible endpoints usable without a dummy API key."""
+    if adapter is None or not adapter.requires_secret:
+        return False
+    if is_loopback_provider_url(base_url):
+        return False
+    return True
+
+
+def resolve_provider_secret(
+    store: ProjectStore,
+    role_config: ModelRoleConfig,
+    *,
+    adapter: ProviderAdapterInfo | None = None,
+) -> str:
+    """Resolve configured credentials while preserving genuinely key-free providers."""
+    info = adapter if adapter is not None else get_provider_adapter(role_config.provider)
+    required = adapter_requires_secret_value(info, base_url=role_config.base_url)
+    if not role_config.api_key_ref:
+        if required:
+            raise ProviderError(
+                f"Provider {role_config.provider!r} requires api_key_ref.",
+                error_type="missing_secret_ref",
+            )
+        return ""
+    try:
+        return resolve_project_secret(store, role_config.api_key_ref)
+    except ProviderError as exc:
+        if not required and exc.error_type in OPTIONAL_SECRET_ERROR_TYPES:
+            return ""
+        raise
 
 
 def list_provider_adapters() -> list[dict[str, Any]]:
@@ -830,35 +869,21 @@ def provider_dry_run(store: ProjectStore, request: ProviderRequest) -> ProviderD
             error_type="unsupported_provider",
             request_summary={},
         )
-    if adapter.requires_secret and not role_config.api_key_ref:
+    try:
+        resolve_provider_secret(store, role_config, adapter=adapter)
+    except ProviderError as exc:
         return ProviderDryRunResult(
             ok=False,
             role=request.role,
             provider=role_config.provider,
             model=role_config.model,
             mode="dry_run",
-            message=f"Provider {role_config.provider!r} requires api_key_ref.",
+            message=exc.message,
             adapter_enabled=adapter.enabled,
             network_allowed=adapter.network_allowed,
-            error_type="missing_secret_ref",
+            error_type=exc.error_type,
             request_summary={},
         )
-    if role_config.api_key_ref:
-        try:
-            resolve_project_secret(store, role_config.api_key_ref)
-        except ProviderError as exc:
-            return ProviderDryRunResult(
-                ok=False,
-                role=request.role,
-                provider=role_config.provider,
-                model=role_config.model,
-                mode="dry_run",
-                message=exc.message,
-                adapter_enabled=adapter.enabled,
-                network_allowed=adapter.network_allowed,
-                error_type=exc.error_type,
-                request_summary={},
-            )
     if role_config.provider == MOCK_PROVIDER_ID:
         return ProviderDryRunResult(
             ok=True,
@@ -909,10 +934,7 @@ def provider_real_test(store: ProjectStore, request: ProviderRequest, *, timeout
     if not role_config.base_url:
         raise ProviderError("Provider real test requires base_url.", error_type="missing_base_url")
     adapter = get_provider_adapter(role_config.provider)
-    if adapter and adapter.requires_secret:
-        secret_value = resolve_project_secret(store, role_config.api_key_ref)
-    else:
-        secret_value = resolve_project_secret(store, role_config.api_key_ref) if role_config.api_key_ref else ""
+    secret_value = resolve_provider_secret(store, role_config, adapter=adapter)
     try:
         status_code, data = send_openai_compatible_chat_completion(
             role_config=role_config,

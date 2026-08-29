@@ -30,11 +30,14 @@ const state = {
   lastSavedAt: 0,
   projectId: "",
   chapterId: "",
+  closeEditorWasReadOnly: false,
+  closing: false,
   draftId: "",
   draftIds: [],
   draftIndex: -1,
   generating: false,
   follow: true,
+  saveQueue: Promise.resolve(),
   saveTimer: 0,
   streamProjectId: "",
   streamChapterId: "",
@@ -620,7 +623,7 @@ async function refreshWorkspace(keepSelection = true) {
 async function flushSave() {
   clearTimeout(state.saveTimer);
   state.saveTimer = 0;
-  await saveDraft();
+  return saveDraft();
 }
 
 function blockIfGenerating() {
@@ -634,6 +637,14 @@ async function selectProject(projectId) {
   if (projectId !== state.projectId) {
     if (blockIfGenerating()) return false;
     await flushSave();
+    if (studio.mode) closeStudio();
+    ["outline", "world"].forEach((kind) => {
+      const pane = $(`pane-${kind}`);
+      if (pane) {
+        pane.dataset.selected = "";
+        pane.dataset.projectId = "";
+      }
+    });
   }
   if (window.ThinkTrace && ThinkTrace.isIdle()) ThinkTrace.dispose();
   state.projectId = projectId;
@@ -721,14 +732,26 @@ function scheduleSave() {
 }
 
 async function saveDraft() {
-  if (!state.projectId || !state.draftId || $("editor").readOnly) return;
+  if (!state.projectId || !state.draftId || $("editor").readOnly) return { ok: true };
+  const projectId = state.projectId;
+  const draftId = state.draftId;
+  const text = $("editor").value;
+  // Serialize writes so a slower earlier request cannot overwrite newer editor text.
+  const queuedSave = state.saveQueue
+    .catch(() => {})
+    .then(() => call("save_draft", projectId, draftId, text));
+  state.saveQueue = queuedSave.catch(() => {});
   try {
-    await call("save_draft", state.projectId, state.draftId, $("editor").value);
-    state.lastSavedAt = Date.now();
-    refreshSavePill();
+    await queuedSave;
+    if (projectId === state.projectId && draftId === state.draftId && text === $("editor").value) {
+      state.lastSavedAt = Date.now();
+      refreshSavePill();
+    }
+    return { ok: true };
   } catch (error) {
     $("savePill").textContent = "保存失败";
     toast(error.message);
+    return { ok: false, error: error.message || "保存失败" };
   }
 }
 
@@ -1113,10 +1136,28 @@ async function renderPlanningPane(kind) {
   }
   if (state.inspectorTab !== kind) return;
   const items = data.items || [];
-  const selectedId = pane.dataset.selected || items[0]?.planning_id || "";
+  if (pane.dataset.projectId !== state.projectId) {
+    pane.dataset.selected = "";
+    pane.dataset.projectId = state.projectId;
+  }
+  const selectedId = items.find((item) => item.planning_id === pane.dataset.selected)?.planning_id || items[0]?.planning_id || "";
   pane.dataset.selected = selectedId;
   pane.innerHTML = "";
-  pane.append(elNote(kind === "outline" ? "对照大纲写正文。需要新建或删条目时，打开完整编辑。" : "对照人物与世界观写正文。"));
+  pane.append(elNote(kind === "outline" ? "对照大纲写正文。需要新建或删条目时，打开完整编辑。" : "对照人物、世界观和写作约束写正文。"));
+  if (!items.length) {
+    const copy = planningIdleCopy(kind);
+    const banner = document.createElement("div");
+    banner.className = "studio-idle-banner";
+    banner.append(elNote(copy.banner));
+    const create = document.createElement("button");
+    create.type = "button";
+    create.className = "btn primary";
+    create.textContent = copy.button;
+    create.addEventListener("click", () => openPlanningStudio(kind, { create: true }).catch((error) => toast(error.message)));
+    banner.append(create);
+    pane.append(banner);
+    return;
+  }
   const list = document.createElement("div");
   list.className = "stack";
   items.forEach((item) => {
@@ -1130,7 +1171,6 @@ async function renderPlanningPane(kind) {
     });
     list.append(button);
   });
-  if (!items.length) list.append(elNote("还没有资料。"));
   pane.append(list);
   const current = items.find((item) => item.planning_id === selectedId);
   if (current) {
@@ -1823,6 +1863,32 @@ window.__workbenchPush = function workbenchPush(event, payload) {
   if (event === "draft_done") finishDraft(payload);
   if (event === "review_done") finishReview(payload);
   handleStudioPush(event, payload);
+};
+
+window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose() {
+  if (state.generating) {
+    const error = "请等待当前生成完成后再关闭。";
+    toast(error);
+    return { ok: false, error };
+  }
+  const editor = $("editor");
+  state.closeEditorWasReadOnly = Boolean(editor?.readOnly);
+  state.closing = true;
+  const pendingSave = flushSave();
+  if (editor) editor.readOnly = true;
+  const result = await pendingSave;
+  if (!result?.ok) {
+    state.closing = false;
+    if (editor) editor.readOnly = state.closeEditorWasReadOnly;
+  }
+  return result || { ok: true };
+};
+
+window.__workbenchCancelClose = function workbenchCancelClose(message = "") {
+  state.closing = false;
+  const editor = $("editor");
+  if (editor) editor.readOnly = state.closeEditorWasReadOnly;
+  if (message) toast(message);
 };
 
 async function boot() {

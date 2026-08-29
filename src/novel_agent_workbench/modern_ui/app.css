@@ -710,6 +710,13 @@ h3 {
 .sheet-foot { display: flex; justify-content: flex-end; gap: 8px; }
 .field { display: grid; gap: 6px; }
 .field span { color: var(--muted); font-size: 12px; }
+.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.field-head span { color: var(--muted); font-size: 12px; }
 .field textarea { min-height: 160px; line-height: 1.6; }
 
 .studio {
@@ -787,6 +794,44 @@ h3 {
 .table tr { cursor: pointer; user-select: none; -webkit-user-select: none; }
 .table tr.active { background: var(--accent-soft); }
 .studio-note { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0; }
+.studio-idle-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  border: 1px dashed rgba(148, 163, 184, 0.45);
+}
+.inspector-pane .studio-idle-banner {
+  flex-direction: column;
+  align-items: stretch;
+}
+.inspector-pane .studio-idle-banner .btn {
+  width: 100%;
+}
+.studio-idle-banner p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.studio-idle-banner .btn { flex: 0 0 auto; }
+.studio-form.is-idle .field input,
+.studio-form.is-idle .field select,
+.studio-form.is-idle .check-row,
+.studio-form.is-idle .studio-editor {
+  opacity: 0.5;
+  cursor: default;
+  background: rgba(148, 163, 184, 0.08);
+}
+.field input:disabled,
+.field select:disabled,
+.studio-editor:disabled {
+  cursor: default;
+}
 .studio-records {
   margin: 0;
   flex: 1;
