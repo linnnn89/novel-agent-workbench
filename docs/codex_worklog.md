@@ -48,3 +48,15 @@
 - 正向/反向验证：18 个 Python 测试和 3 个 JavaScript 测试通过；覆盖正常排序与快照、未知章节丢弃、非法 token 回退、超过 5 章的摘要截断，以及独立导入不得加载 `tkinter`。Python `compileall`、JavaScript 语法检查和 `git diff --check` 通过。
 - 文件结果：`desktop_app.py` 从 5,343 行降至 5,330 行；主窗口类从 4,620 行降至 4,601 行；记忆库窗口从约 796 行降至 777 行。方法数仍为 121，说明没有以增加同类方法掩盖复杂度。
 - 阶段门禁结论：纯状态边界已稳定，可独立测试；线程命令拆分延后到具备窗口事件测试时再评估，避免为了文件变小而引入额外抽象。
+
+### 阶段 4：记忆库窗口职责模块
+
+- 回退准备：确认本地 `main` 与 `origin/main` 同为 `cc3b057`，建立本地回退分支 `backup/pre-memory-window-split-2026-08-30` 后才创建工作分支。回退点不包含本阶段任何修改。
+- 爆炸半径：全仓只有经典入口 `show_memory_bank()` 调用目标窗口；现代界面、应用服务和存储层均无反向引用。目标代码对宿主只使用应用服务、子窗口、文本样式、日志、健康检查、Tk 调度和文本预览能力；主要结构风险是新模块反向导入 `desktop_app` 形成循环。
+- GitHub 复核：CPython IDLE 将大型配置窗口放入独立 [`configdialog.py`](https://github.com/python/cpython/blob/main/Lib/idlelib/configdialog.py)，[`editor.py`](https://github.com/python/cpython/blob/main/Lib/idlelib/editor.py) 保留调用入口；pywebview 的 [`window.py`](https://github.com/r0x0r/pywebview/blob/master/webview/window.py) 将同一窗口的事件和窗口状态集中在窗口对象。本阶段采用“整体迁移一个内聚窗口、调用者保留薄入口”，不把 35 个共享闭包拆成浅层模块。
+- TDD 红灯：先建立真实隐藏 Tk 行为测试，要求新模块能打开现有记忆并从保存按钮写回应用服务；生产模块不存在时，以 `ModuleNotFoundError` 按预期失败。
+- 实现：新增 `memory_bank_window.py`，运行时保持单向 `desktop_app -> memory_bank_window`；应用标题由调用者显式传入，避免反向导入。原 `show_memory_bank_window()` 缩为 3 行兼容入口，旧的 `wrapped_row_positions` 与 `format_memory_compression_prompt` 导入名继续重导出。注释解释循环导入门禁、标题传递、提示词归属和暂不拆散窗口闭包的理由。
+- 无损核对：从回退分支直接读取拆分前源码；迁移前后的 777 行窗口主体（忽略新增接口说明和标题别名）、26 行布局算法、34 行压缩提示词 AST 均完全一致。
+- 正向/反向验证：新增 4 项测试，覆盖现有正文读取与编辑保存、取消未保存关闭时窗口和文本保留、经典兼容入口、独立进程导入不得加载 `desktop_app` 以及旧辅助函数身份兼容。全套 22 个 Python 测试、3 个 JavaScript 测试、Python `compileall`、JavaScript 语法、CLI `--help` 和 `git diff --check` 通过。
+- 文件结果：`desktop_app.py` 从 5,330 行降至 4,491 行；主窗口类从 4,601 行降至 3,827 行；方法数仍为 121。新模块 884 行，明确表示复杂度被按窗口职责隔离，而不是伪称已消失；主文件当前最大方法变为 404 行的生成设置窗口。
+- 限制：真实隐藏 Tk 已覆盖打开、编辑、保存和取消关闭；未触发真实模型 API、流式线程完成回调或 EXE 打包。
