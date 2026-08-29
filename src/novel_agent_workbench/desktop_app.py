@@ -36,6 +36,12 @@ from .memory_bank import (
     DEFAULT_MEMORY_TARGET_TOKENS,
     normalize_memory_target_tokens,
 )
+from .memory_bank_ui_state import (
+    checked_memory_chapter_ids,
+    checked_memory_chapters_label,
+    memory_chapter_row_label,
+    memory_editor_snapshot,
+)
 from .model_settings_ui import open_model_settings_dialog
 from .providers import (
     DEFAULT_PROVIDER_TIMEOUT_SECONDS,
@@ -3016,32 +3022,13 @@ class WorkbenchDesktopApp(tk.Tk):
             window.title(f"记忆银行{marker}")
 
         def chapter_label(chapter: dict[str, Any]) -> str:
-            chapter_id = str(chapter.get("chapter_id") or "")
-            title = str(chapter.get("title") or "").strip()
-            committed_at = str(chapter.get("committed_at") or "").strip()
-            prefix = "✓" if chapter_id in checked_chapter_ids else "□"
-            parts = [prefix, readable_chapter_label(chapter_id)]
-            if title:
-                parts.append(title)
-            if committed_at:
-                parts.append(committed_at[:8])
-            return "  ".join(parts)
+            return memory_chapter_row_label(chapter, checked_chapter_ids)
 
         def checked_ids_in_order() -> list[str]:
-            return [
-                str(chapter.get("chapter_id") or "")
-                for chapter in confirmed_chapters
-                if str(chapter.get("chapter_id") or "") in checked_chapter_ids
-            ]
+            return checked_memory_chapter_ids(confirmed_chapters, checked_chapter_ids)
 
         def checked_label() -> str:
-            ids = checked_ids_in_order()
-            if not ids:
-                return "尚未勾选章节"
-            labels = [readable_chapter_label(chapter_id) for chapter_id in ids]
-            if len(labels) <= 5:
-                return "、".join(labels)
-            return "、".join(labels[:5]) + f" 等 {len(labels)} 章"
+            return checked_memory_chapters_label(checked_ids_in_order())
 
         def current_target_tokens(*, normalize_entry: bool = False) -> int:
             target_tokens = normalize_memory_target_tokens(token_target_var.get())
@@ -3050,12 +3037,12 @@ class WorkbenchDesktopApp(tk.Tk):
             return target_tokens
 
         def editor_snapshot() -> dict[str, Any]:
-            return {
-                "text": text_box.get("1.0", tk.END).strip(),
-                "include_context": include_context_var.get(),
-                "target_tokens": current_target_tokens(),
-                "checked_chapter_ids": checked_ids_in_order(),
-            }
+            return memory_editor_snapshot(
+                text=text_box.get("1.0", tk.END),
+                include_context=include_context_var.get(),
+                target_tokens=current_target_tokens(),
+                chapter_ids=checked_ids_in_order(),
+            )
 
         def has_unsaved_changes() -> bool:
             return bool(saved_snapshot) and editor_snapshot() != saved_snapshot
