@@ -19,3 +19,13 @@
 - 冷导入中位数（5 次独立进程）：`application_service` 398.19 ms / 9.45 MiB / 不加载 Tk；`desktop_app` 422.88 ms / 11.30 MiB / 加载 Tk；`modern_desktop` 427.12 ms / 11.46 MiB / 加载 Tk。
 - 特征测试：新增 5 个公开行为测试，覆盖草稿排序/标签、确认与计划章节可见性、记忆进度、数值解析的非法输入、空失败章节的重试编号；正向与反向边界均通过。
 - 阶段结论：第一步只解除现代 UI 对经典 Tk 入口的纯展示函数依赖；预期收益是降低耦合与导入内存，不承诺显著降低运行期峰值内存。大型窗口方法暂不移动。
+
+### 阶段 1：共享展示函数叶模块
+
+- GitHub 复核：CPython IDLE 的 [`run.py`](https://github.com/python/cpython/blob/main/Lib/idlelib/run.py) 在测试场景刻意避免 Tk 初始化副作用；[`idlelib/README.txt`](https://github.com/python/cpython/blob/main/Lib/idlelib/README.txt) 同时警告循环导入并允许有理由的延迟导入；pywebview 的[窗口 API](https://github.com/r0x0r/pywebview/blob/master/docs/api/README.md)保持显式 JS API/事件边界。本阶段据此采用单向依赖 `desktop_app/modern_desktop -> ui_presenters`。
+- TDD 红灯：新增独立进程测试，证明修改前导入 `modern_desktop` 会把 `tkinter` 加入 `sys.modules`。
+- 实现：新增无 Tk 的 `ui_presenters.py`，迁移 47 个共享函数及两组展示常量；现代入口直接导入新模块；经典入口保留原有函数名并重导出同一函数对象。只添加模块职责、兼容桥和独立进程原因等必要注释。
+- 等价性核对：46/47 个迁移函数与合并前版本 AST 完全一致；唯一因列表写法收敛而产生 AST 差异的 `format_review_details`，用空结果、普通评分、截断且含结构化/文本问题 3 组输入逐字比较通过。
+- 正向/反向验证：12 个 Python 测试和 3 个 JavaScript 测试通过；覆盖 29 个原公开名称的经典入口兼容性、非法数值输入、确认章节可见性和 Tk 导入边界。
+- 冷导入中位数（5 次独立进程）：`modern_desktop` 从 427.12 ms / 11.46 MiB / 加载 Tk，变为 391.05 ms / 9.59 MiB / 不加载 Tk；峰值下降约 1.87 MiB（约 16%）。经典 Tk 入口仍为 420.43 ms / 11.32 MiB，符合预期。
+- 文件结果：`desktop_app.py` 从 6,423 行降至 5,662 行；主窗口类仍是 4,914 行、121 个方法，说明本阶段没有伪装成类拆分。

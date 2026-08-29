@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .application_service import WorkbenchApplicationService
-from .desktop_app import (
+from .ui_presenters import (
     default_planning_id,
     default_projects_root,
     default_repo_root,
