@@ -38,3 +38,13 @@
 - 等价性核对：动态还原合并前 `_configure_style()`，在两个独立隐藏 Tk 解释器中比较 17 类样式的 `configure/map`、根背景和菜单 option database，全部一致；Tk 8.6.15。
 - 正向/反向验证：14 个 Python 测试和 3 个 JavaScript 测试通过；真实隐藏 Tk 根窗口验证主题色、主按钮、确认按钮和 Treeview 行高；独立进程验证主题导入不加载经典桌面入口。
 - 文件结果：`desktop_app.py` 5,343 行；主窗口类从 4,914 行降至 4,620 行；原 297 行主题方法缩为 3 行，方法数仍为 121，业务行为未改。
+
+### 阶段 3：记忆库窗口纯状态边界
+
+- GitHub 复核：CPython IDLE 的 [`configdialog.py`](https://github.com/python/cpython/blob/main/Lib/idlelib/configdialog.py) 将配置页拆为 `FontPage`、`HighPage`、`KeysPage` 等具体职责类，而 [`editor.py`](https://github.com/python/cpython/blob/main/Lib/idlelib/editor.py) 继续负责窗口与事件编排。本阶段只采用“先分离稳定状态变换”的原则，不照搬多页面层级或控制器框架。
+- 风险审计：`show_memory_bank_window()` 拆分前约 796 行，包含 35 个直接局部函数；其中生成与压缩命令分别约 150 行和 148 行，并共同依赖线程回调、窗口生命周期及多个控件闭包。缺少真实事件自动化时直接迁移这些命令，回归风险高于当前收益，因此本阶段不动网络和线程编排。
+- TDD 红灯：先新增状态模块测试；生产模块尚不存在时，3 项测试均以 `ModuleNotFoundError` 按预期失败。
+- 实现：新增无 Tk 的 `memory_bank_ui_state.py`，提取章节行标签、按持久化章节顺序筛选勾选项、紧凑选择摘要和编辑器规范快照；原窗口内函数保留为薄委托，控件读取、保存和事件副作用仍由窗口编排。注释仅解释“持久化顺序”和“脏状态规范快照”等不直观约束。
+- 正向/反向验证：18 个 Python 测试和 3 个 JavaScript 测试通过；覆盖正常排序与快照、未知章节丢弃、非法 token 回退、超过 5 章的摘要截断，以及独立导入不得加载 `tkinter`。Python `compileall`、JavaScript 语法检查和 `git diff --check` 通过。
+- 文件结果：`desktop_app.py` 从 5,343 行降至 5,330 行；主窗口类从 4,620 行降至 4,601 行；记忆库窗口从约 796 行降至 777 行。方法数仍为 121，说明没有以增加同类方法掩盖复杂度。
+- 阶段门禁结论：纯状态边界已稳定，可独立测试；线程命令拆分延后到具备窗口事件测试时再评估，避免为了文件变小而引入额外抽象。
