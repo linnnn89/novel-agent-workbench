@@ -29,3 +29,12 @@
 - 正向/反向验证：12 个 Python 测试和 3 个 JavaScript 测试通过；覆盖 29 个原公开名称的经典入口兼容性、非法数值输入、确认章节可见性和 Tk 导入边界。
 - 冷导入中位数（5 次独立进程）：`modern_desktop` 从 427.12 ms / 11.46 MiB / 加载 Tk，变为 391.05 ms / 9.59 MiB / 不加载 Tk；峰值下降约 1.87 MiB（约 16%）。经典 Tk 入口仍为 420.43 ms / 11.32 MiB，符合预期。
 - 文件结果：`desktop_app.py` 从 6,423 行降至 5,662 行；主窗口类仍是 4,914 行、121 个方法，说明本阶段没有伪装成类拆分。
+
+### 阶段 2：经典 UI 主题模块
+
+- GitHub 复核：Thonny 的 [`clean_ui_themes.py`](https://github.com/thonny/thonny/blob/master/thonny/plugins/clean_ui_themes.py) 与[主题说明](https://github.com/thonny/thonny/wiki/Theming)把 ttk 主题定义独立于 Workbench；CPython IDLE 的 [`config.py`](https://github.com/python/cpython/blob/main/Lib/idlelib/config.py)集中管理主题颜色，编辑窗口只消费配置。这里仅采用“主题令牌 + 单一应用函数”，不引入动态主题注册或插件系统。
+- TDD 红灯：先新增主题应用和反向依赖测试，生产模块尚不存在时两项均按预期失败。
+- 实现：新增 `classic_ui_theme.py`，迁移全部颜色/字体令牌和 ttk/Tk option 配置；经典窗口的 `_configure_style()` 保持为 3 行兼容钩子。主题模块只依赖 Tk，不反向导入 `desktop_app` 或业务服务；必要注释说明了原生 Tk 控件不继承 ttk 样式的原因。
+- 等价性核对：动态还原合并前 `_configure_style()`，在两个独立隐藏 Tk 解释器中比较 17 类样式的 `configure/map`、根背景和菜单 option database，全部一致；Tk 8.6.15。
+- 正向/反向验证：14 个 Python 测试和 3 个 JavaScript 测试通过；真实隐藏 Tk 根窗口验证主题色、主按钮、确认按钮和 Treeview 行高；独立进程验证主题导入不加载经典桌面入口。
+- 文件结果：`desktop_app.py` 5,343 行；主窗口类从 4,914 行降至 4,620 行；原 297 行主题方法缩为 3 行，方法数仍为 121，业务行为未改。
