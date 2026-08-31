@@ -36,6 +36,7 @@ const state = {
   draftIds: [],
   draftIndex: -1,
   generating: false,
+  importing: false,
   follow: true,
   saveQueue: Promise.resolve(),
   saveTimer: 0,
@@ -725,14 +726,15 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
 
 function scheduleSave() {
   updateCountPill();
-  if (!state.draftId || $("editor").readOnly) return;
+  if (!state.draftId || $("editor").readOnly || state.importing) return;
   $("savePill").textContent = "保存中…";
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(saveDraft, 700);
 }
 
 async function saveDraft() {
-  if (!state.projectId || !state.draftId || $("editor").readOnly) return { ok: true };
+  // importing 与 readOnly 都必须挡住：saveDraft 原先只认 readOnly，覆盖导入后旧缓冲会写回磁盘。
+  if (!state.projectId || !state.draftId || $("editor").readOnly || state.importing) return { ok: true };
   const projectId = state.projectId;
   const draftId = state.draftId;
   const text = $("editor").value;
@@ -1445,6 +1447,8 @@ function menuItemsFor(target) {
     { label: "记录与诊断", onClick: () => openRecordsStudio("connection") },
     { label: "模型服务", onClick: () => openModelStudio() },
     { label: "打开作品文件夹", onClick: () => call("open_folder", "project", projectId) },
+    // 树上只导出被右键的这一部；导入不挂在这里，避免以为会覆盖这一行。
+    { label: "导出作品包…", onClick: () => exportProjectPackage(projectId) },
     "-",
     { label: "删除作品", danger: true, onClick: () => deleteProject(target.project) },
   ];
@@ -1702,6 +1706,219 @@ async function emptyTrash() {
   });
 }
 
+function draftInWorkspace(projectId, draftId) {
+  if (!projectId || !draftId) return false;
+  const project = (state.workspace || []).find((item) => item.project_id === projectId);
+  return Boolean(
+    project?.chapters?.some((chapter) => (chapter.drafts || []).some((draft) => draft.draft_id === draftId))
+  );
+}
+
+function clearEditorBuffer() {
+  state.draftId = "";
+  state.chapterId = "";
+  state.draftIds = [];
+  state.draftIndex = -1;
+  $("editor").value = "";
+  $("draftTitle").textContent = "开始写作";
+  $("draftHint").textContent = "";
+  $("versionLabel").textContent = "—";
+  state.hasReview = false;
+  state.reviewText = "";
+  setReviewBadge(false);
+  updateCountPill();
+  updateDock();
+}
+
+async function exportProjectPackage(projectId) {
+  if (blockIfGenerating()) return;
+  if (!projectId) {
+    toast("请先选择作品。");
+    return;
+  }
+  if (projectId === state.projectId) await flushSave();
+  try {
+    await call("export_project_package", projectId);
+    toast("作品包已导出。");
+  } catch (error) {
+    if (!error.cancelled) toast(error.message);
+  }
+}
+
+function openPackageSheet() {
+  const body = document.createElement("div");
+  body.className = "stack";
+  const exportCurrent = document.createElement("button");
+  exportCurrent.type = "button";
+  exportCurrent.className = "btn quiet block";
+  exportCurrent.textContent = "导出当前作品包…";
+  exportCurrent.addEventListener("click", async () => {
+    if (!state.projectId) {
+      toast("请先选择作品。");
+      return;
+    }
+    closeModal();
+    await exportProjectPackage(state.projectId);
+  });
+  const importPkg = document.createElement("button");
+  importPkg.type = "button";
+  importPkg.className = "btn quiet block";
+  importPkg.textContent = "导入作品包…";
+  importPkg.addEventListener("click", async () => {
+    closeModal();
+    await importProjectPackage();
+  });
+  body.append(exportCurrent, importPkg);
+  openModal({
+    title: "导入导出",
+    desc: "把整部作品打包带走，或从作品包恢复到当前项目库。作品包包含草稿、大纲、人物、记忆和审稿，不含 API Key。「导出 TXT」仍然只导出已确认章节正文。",
+    body,
+    actions: [{ label: "取消", onClick: closeModal }],
+  });
+}
+
+async function importProjectPackage() {
+  if (blockIfGenerating()) return;
+  let inspect;
+  try {
+    inspect = await call("pick_and_inspect_project_package");
+  } catch (error) {
+    if (!error.cancelled) toast(error.message);
+    return;
+  }
+  openImportConfirmModal(inspect);
+}
+
+function openImportConfirmModal(inspect) {
+  const conflict = Boolean(inspect.conflict);
+  const valid = Boolean(inspect.source_project_id_valid);
+  const canKeep = valid && !conflict;
+  const canOverwrite = conflict && valid;
+  const suggested = inspect.suggested_new_project_id || "";
+  const inventory = inspect.inventory || {};
+  const defaultMode = canKeep ? "keep_id" : "new_id";
+  const body = document.createElement("div");
+  body.className = "stack";
+  const summary = document.createElement("p");
+  summary.style.whiteSpace = "pre-wrap";
+  summary.textContent = [
+    `作品：《${inspect.title || inspect.source_project_id}》`,
+    `原编号：${inspect.source_project_id}`,
+    `导出时间：${inspect.exported_at || "—"}`,
+    `内容：定稿 ${inventory.confirmed_chapter_count || 0} · 草稿 ${inventory.draft_count || 0} · 审稿 ${inventory.review_count || 0} · 资料 ${inventory.planning_item_count || 0} · 记忆 ${inventory.memory_bank_item_count || 0}`,
+  ].join("\n");
+  const list = document.createElement("div");
+  list.className = "choice-list";
+  const radios = [];
+  function addChoice(mode, label) {
+    const wrap = document.createElement("label");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "import-mode";
+    radio.value = mode;
+    radio.checked = mode === defaultMode;
+    const text = document.createElement("span");
+    text.textContent = label;
+    wrap.append(radio, text);
+    list.append(wrap);
+    radios.push(radio);
+    radio.addEventListener("change", syncOverwrite);
+  }
+  if (canKeep) addChoice("keep_id", "沿用原编号导入");
+  addChoice("new_id", `作为新作品导入（编号将为 ${suggested}）`);
+  if (canOverwrite) {
+    addChoice(
+      "overwrite",
+      `覆盖已有作品「${inspect.existing_title || inspect.source_project_id}」（编号 ${inspect.source_project_id}）`
+    );
+  }
+  const confirmWrap = document.createElement("div");
+  confirmWrap.hidden = true;
+  const box = input("", { placeholder: "确认覆盖" });
+  const note = document.createElement("p");
+  note.textContent = "请输入：确认覆盖";
+  confirmWrap.append(note, field("确认语句", box));
+  function selectedMode() {
+    return radios.find((item) => item.checked)?.value || defaultMode;
+  }
+  function syncOverwrite() {
+    confirmWrap.hidden = selectedMode() !== "overwrite";
+  }
+  syncOverwrite();
+  body.append(summary, list, confirmWrap);
+  openModal({
+    title: "导入作品包",
+    desc: "",
+    body,
+    actions: [
+      { label: "取消", onClick: closeModal },
+      {
+        label: "开始导入",
+        style: "success",
+        onClick: async () => {
+          const mode = selectedMode();
+          const confirmText = mode === "overwrite" ? box.value.trim() : "";
+          if (mode === "overwrite" && confirmText !== "确认覆盖") {
+            toast("未输入「确认覆盖」，已取消。");
+            return;
+          }
+          closeModal();
+          await runImportPackage(inspect, mode, confirmText);
+        },
+      },
+    ],
+  });
+}
+
+async function runImportPackage(inspect, mode, confirmText) {
+  if (blockIfGenerating()) return;
+  const previousProjectId = state.projectId;
+  const previousDraftId = state.draftId;
+  await flushSave();
+  clearTimeout(state.saveTimer);
+  state.saveTimer = 0;
+  state.importing = true;
+  $("editor").readOnly = true;
+  try {
+    const result = await call(
+      "import_project_package",
+      inspect.path,
+      mode,
+      confirmText || "",
+      mode === "new_id" ? inspect.suggested_new_project_id || "" : ""
+    );
+    const imported = result.imported || {};
+    state.workspace = result.workspace || [];
+    renderTree();
+    const importedId = imported.project_id || "";
+    // 同 id 覆盖：必须 force 重载磁盘正文。不同 id：先清空再 select，避免旧 draftId 写到新作品。
+    if (importedId && importedId === previousProjectId) {
+      if (previousDraftId && draftInWorkspace(importedId, previousDraftId)) {
+        try {
+          await loadDraft(importedId, previousDraftId, { force: true });
+        } catch (error) {
+          clearEditorBuffer();
+          toast(error.message || "加载失败");
+        }
+      } else {
+        clearEditorBuffer();
+      }
+    } else {
+      clearEditorBuffer();
+      if (importedId) await selectProject(importedId);
+    }
+    if (importedId) await loadOverview(importedId);
+    const title = imported.title || importedId;
+    if (mode === "overwrite") toast(`已导入作品《${title}》。`);
+    else toast(`已导入作品《${title}》。请在模型设置中重新填写 API Key。`);
+  } catch (error) {
+    if (!error.cancelled) toast(error.message);
+  } finally {
+    state.importing = false;
+    if (!state.generating) $("editor").readOnly = false;
+  }
+}
+
 async function applyWorkspaceResult(result, projectId) {
   state.workspace = result.workspace || [];
   if (state.draftId && state.projectId === projectId) {
@@ -1789,6 +2006,7 @@ function bindEvents() {
       if (!error.cancelled) toast(error.message);
     }
   });
+  $("packageBtn").addEventListener("click", () => openPackageSheet());
   $("prevBtn").addEventListener("click", async () => {
     if (state.draftIndex > 0) {
       await saveDraft();

@@ -718,6 +718,16 @@ h3 {
 }
 .field-head span { color: var(--muted); font-size: 12px; }
 .field textarea { min-height: 160px; line-height: 1.6; }
+.choice-list { display: grid; gap: 8px; }
+.choice-list label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
 
 .studio {
   position: fixed;

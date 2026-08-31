@@ -561,6 +561,19 @@ def build_parser() -> argparse.ArgumentParser:
     enable_memory_item.add_argument("memory_id")
     enable_memory_item.add_argument("--reason-code", default="")
 
+    export_project_package = subparsers.add_parser("export-project-package")
+    export_project_package.add_argument("project_id")
+    export_project_package.add_argument("output_path")
+
+    inspect_project_package = subparsers.add_parser("inspect-project-package")
+    inspect_project_package.add_argument("path")
+
+    import_project_package = subparsers.add_parser("import-project-package")
+    import_project_package.add_argument("path")
+    import_project_package.add_argument("--mode", required=True, choices=["keep_id", "new_id", "overwrite"])
+    import_project_package.add_argument("--confirm-text", default="")
+    import_project_package.add_argument("--new-project-id", default="")
+
     list_confirmed = subparsers.add_parser("list-confirmed")
     list_confirmed.add_argument("project_id")
 
@@ -987,6 +1000,17 @@ def run_command(args: argparse.Namespace) -> Any:
             args.memory_id,
             enabled=True,
             reason_code=args.reason_code,
+        )
+    if command == "export-project-package":
+        return app.export_project_package(args.project_id, args.output_path)
+    if command == "inspect-project-package":
+        return app.inspect_project_package(args.path)
+    if command == "import-project-package":
+        return app.import_project_package(
+            args.path,
+            mode=args.mode,
+            confirm_text=args.confirm_text,
+            new_project_id=args.new_project_id,
         )
     if command == "list-confirmed":
         return app.list_confirmed_chapters(args.project_id)

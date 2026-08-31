@@ -45,7 +45,7 @@ from .memory_bank import normalize_memory_target_tokens
 from .model_settings import FEATURE_DEFINITIONS
 from .providers import format_prompt_cache_usage
 from .reviews import REVIEW_TRUNCATED_NOTICE, review_output_truncated
-from .storage import utc_stamp
+from .storage import ProjectLockError, utc_stamp
 
 
 
@@ -72,6 +72,7 @@ USER_GUIDE_TEXT = """基本流程
 5. 点击“生成新章节”，需要时可先预览将发送给模型的结构，再生成草稿。
 6. 草稿经过审稿、改写、确认后，才会进入后续上下文和定稿流程。
 7. 记忆库可查看已保存记忆、预览发送结构，再按勾选章节生成或压缩。
+8. 右侧「导入导出」可以把整部作品打包为作品包（.nawpkg）带走或恢复，不含 API Key。导出 TXT 仍然只导出已确认章节正文。
 
 安全边界
 --------
@@ -1171,7 +1172,7 @@ class WorkbenchBridge:
                 "导出设置",
                 "--------",
                 "TXT: 可用。导出范围为当前作品的已确认章节，不包含草稿、审稿记录、API Key 或本地私密设置。",
-                "DOCX/ZIP: 开发中。",
+                "DOCX：开发中。整部作品的打包迁移请用右侧「导入导出」，不要与 TXT 文稿混淆。",
                 "",
                 f"TXT设置: {settings.get('txt_enabled', '默认启用')}",
                 f"ZIP: {settings.get('zip_enabled', '-')}",
@@ -1293,6 +1294,99 @@ class WorkbenchBridge:
             return _fail(f"导出失败: {exc}")
         self._log(f"导出TXT: project={project_id} chapters={result.get('chapter_count')} path={result.get('path')}")
         return _ok(_jsonable(result))
+
+    def _is_busy(self) -> bool:
+        with self._busy_lock:
+            return self._busy
+
+    def export_project_package(self, project_id: str) -> dict[str, Any]:
+        if self._is_busy():
+            return _fail("已有任务正在进行，请等待完成。")
+        try:
+            import webview
+        except ImportError:
+            return _fail("当前环境还没有安装 pywebview。")
+        if _ACTIVE_WINDOW is None:
+            return _fail("窗口尚未就绪。")
+        title = next(
+            (str(item.get("title") or project_id) for item in self.app.list_projects() if item.get("project_id") == project_id),
+            project_id,
+        )
+        safe_name = re.sub(r'[<>:"/\\|?*]+', "_", title).strip() or project_id
+        selected = _ACTIVE_WINDOW.create_file_dialog(
+            webview.SAVE_DIALOG,
+            save_filename=f"{safe_name}.nawpkg",
+            file_types=("作品包 (*.nawpkg)", "ZIP 文件 (*.zip)"),
+        )
+        if not selected:
+            return _fail("已取消。", cancelled=True)
+        path = selected[0] if isinstance(selected, (list, tuple)) else selected
+        try:
+            result = self.app.export_project_package(project_id, path)
+        except ProjectLockError:
+            return _fail("作品正在保存或生成，请稍后重试。")
+        except Exception as exc:
+            self._log(f"导出作品包失败: project={project_id} error={exc}")
+            return _fail(str(exc))
+        inventory = result.get("inventory") if isinstance(result.get("inventory"), dict) else {}
+        self._log(
+            "导出作品包: "
+            f"project={result.get('project_id')} files={result.get('file_count')} "
+            f"zip_bytes={result.get('bytes_written')} uncompressed={inventory.get('bytes')} path={result.get('path')}"
+        )
+        return _ok(_jsonable(result))
+
+    def pick_and_inspect_project_package(self) -> dict[str, Any]:
+        if self._is_busy():
+            return _fail("已有任务正在进行，请等待完成。")
+        try:
+            import webview
+        except ImportError:
+            return _fail("当前环境还没有安装 pywebview。")
+        if _ACTIVE_WINDOW is None:
+            return _fail("窗口尚未就绪。")
+        selected = _ACTIVE_WINDOW.create_file_dialog(
+            webview.OPEN_DIALOG,
+            file_types=("作品包 (*.nawpkg;*.zip)", "所有文件 (*.*)"),
+        )
+        if not selected:
+            return _fail("已取消。", cancelled=True)
+        path = selected[0] if isinstance(selected, (list, tuple)) else selected
+        try:
+            result = self.app.inspect_project_package(path)
+        except Exception as exc:
+            self._log(f"导入作品包失败: path={path} error={exc}")
+            return _fail(str(exc))
+        return _ok(_jsonable(result))
+
+    def import_project_package(
+        self,
+        package_path: str,
+        mode: str,
+        confirm_text: str = "",
+        new_project_id: str = "",
+    ) -> dict[str, Any]:
+        if self._is_busy():
+            return _fail("已有任务正在进行，请等待完成。")
+        try:
+            imported = self.app.import_project_package(
+                package_path,
+                mode=mode,
+                confirm_text=confirm_text,
+                new_project_id=new_project_id,
+            )
+        except ProjectLockError:
+            return _fail("作品正在保存或生成，请稍后重试。")
+        except Exception as exc:
+            self._log(f"导入作品包失败: path={package_path} error={exc}")
+            return _fail(str(exc))
+        self._log(
+            "导入作品包: "
+            f"mode={imported.get('mode')} source={imported.get('source_project_id')} "
+            f"target={imported.get('project_id')}"
+        )
+        # workspace must live inside data — JS call() drops top-level extra keys.
+        return _ok({"imported": _jsonable(imported), "workspace": build_workspace_tree(self.app)})
 
     def choose_data_root(self) -> dict[str, Any]:
         try:

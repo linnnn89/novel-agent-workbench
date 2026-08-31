@@ -3453,7 +3453,7 @@ class WorkbenchDesktopApp(tk.Tk):
                 "导出设置",
                 "--------",
                 "TXT: 可用。导出范围为当前作品的已确认章节，不包含草稿、审稿记录、API Key 或本地私密设置。",
-                "DOCX/ZIP: 开发中。",
+                "DOCX：开发中。整部作品的打包迁移请用现代界面右侧「导入导出」，不要与 TXT 文稿混淆。",
                 "",
                 f"TXT设置: {settings.get('txt_enabled', '默认启用')}",
                 f"ZIP: {settings.get('zip_enabled', '-')}",

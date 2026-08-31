@@ -2476,3 +2476,25 @@ Returns provider smoke-test index metadata. Optional `status` can filter `passed
 ### read_provider_smoke_test(project_id, smoke_test_id)
 
 Returns one provider smoke-test artifact. The artifact is metadata-only and must not return prompt text, response text, raw request bodies, or plaintext secrets.
+
+## Manuscript TXT export
+
+### export_confirmed_chapters_txt(project_id, output_path)
+
+Exports confirmed chapters of one project as a UTF-8-SIG TXT manuscript. Delegates to `TxtManuscriptExportService`. Fails when the project has no confirmed chapters. Does not include drafts, reviews, API keys, or workbench metadata.
+
+## Project package import/export
+
+Delegates to `ProjectPackageService`. Must not call `_runtime_store` or serialize config in the facade. Keys are never packed. This is not TXT export and not an internal checkpoint.
+
+### export_project_package(project_id, output_path)
+
+Packs one project as `.nawpkg` (ZIP + `package_manifest.json`). Returns path, project_id, title, file_count, bytes_written, inventory.
+
+### inspect_project_package(package_path)
+
+Validates a package without writing project files. Returns source id, title, conflict, suggested_new_project_id, warnings.
+
+### import_project_package(package_path, mode, confirm_text="", new_project_id="")
+
+`mode` is `keep_id` | `new_id` | `overwrite`. Overwrite requires `confirm_text == "确认覆盖"`. Returns mode, project_id, title, source_project_id, checkpoint.

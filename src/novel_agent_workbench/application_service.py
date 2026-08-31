@@ -67,6 +67,7 @@ from .model_settings import (
     sync_legacy_model_roles,
 )
 from .planning_library import PlanningLibraryService
+from .project_packages import ProjectPackageService
 from .project_state import public_project_state
 from .project_health import project_health
 from .provider_smoke_tests import ProviderSmokeTestService
@@ -1551,6 +1552,25 @@ class WorkbenchApplicationService:
 
     def export_confirmed_chapters_txt(self, project_id: str, output_path: str | Path) -> dict[str, Any]:
         return TxtManuscriptExportService(self._open_store(project_id)).export_confirmed_chapters(output_path).to_dict()
+
+    def export_project_package(self, project_id: str, output_path: str | Path) -> dict[str, Any]:
+        # Dedicated ZIP packer — do not route through _runtime_store (it overlays global secrets).
+        return ProjectPackageService(self.registry).pack(project_id, output_path).to_dict()
+
+    def inspect_project_package(self, package_path: str | Path) -> dict[str, Any]:
+        return ProjectPackageService(self.registry).inspect(package_path).to_dict()
+
+    def import_project_package(
+        self,
+        package_path: str | Path,
+        *,
+        mode: str,
+        confirm_text: str = "",
+        new_project_id: str = "",
+    ) -> dict[str, Any]:
+        return ProjectPackageService(self.registry).unpack(
+            package_path, mode=mode, confirm_text=confirm_text, new_project_id=new_project_id
+        ).to_dict()
 
     def audit_project(self, project_id: str) -> dict[str, Any]:
         return audit_project(self._runtime_store(project_id))

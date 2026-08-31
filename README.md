@@ -54,7 +54,7 @@
 
 ### 数据放在哪里
 
-EXE 版的作品、设置和密钥保存在程序旁边的 `用户数据` 文件夹中。重新打包时，构建脚本只替换程序和运行依赖，不会删除这份目录。
+EXE 版的作品、设置和密钥保存在程序旁边的 `用户数据` 文件夹中。重新打包时，构建脚本只替换程序和运行依赖，不会删除这份目录。右侧「导入导出」可以把一部作品打包为 `.nawpkg`；作品包不含 API Key 和 `backups/`。
 
 源码运行时，作品默认放在仓库的 `workspace_projects`。这些目录以及 `.venv`、`dist`、API Key 和小说正文都不应提交到 GitHub。
 
@@ -136,7 +136,7 @@ Opening a project, editing text, and saving settings do not call a model. Networ
 
 For DeepSeek requests, low-change project context is kept in a stable order and the current instruction is placed later in the prompt when possible. Cache hit/miss figures returned by the service are preserved, but no fixed cache hit rate is promised.
 
-In the packaged app, projects, settings, and secrets live in the `用户数据` folder beside the executable. Rebuilding replaces the program files, not this data folder.
+In the packaged app, projects, settings, and secrets live in the `用户数据` folder beside the executable. Rebuilding replaces the program files, not this data folder. Use 导入导出 to pack one novel as `.nawpkg`; the package omits API keys and `backups/`.
 
 ### Build on Windows
 

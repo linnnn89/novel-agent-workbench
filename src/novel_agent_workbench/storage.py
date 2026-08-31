@@ -441,21 +441,7 @@ class ProjectStore:
         atomic_write_json_file(path, data)
 
     def _atomic_write_bytes(self, path: Path, data: bytes, *, retire_existing: bool = False) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-        temp_path = Path(temp_name)
-        try:
-            with os.fdopen(fd, "wb") as file:
-                file.write(data)
-                file.flush()
-                os.fsync(file.fileno())
-            if path.exists() and retire_existing:
-                retire_path(path)
-            os.replace(temp_path, path)
-        except Exception:
-            if temp_path.exists():
-                retire_path(temp_path)
-            raise
+        atomic_write_bytes_file(path, data, root=self.root, retire_existing=retire_existing)
 
     def _backup_path_for(self, path: Path) -> Path:
         relative = path.relative_to(self.root)
@@ -475,7 +461,7 @@ class ProjectStore:
             if not path.is_file():
                 continue
             relative = path.relative_to(self.root)
-            if self._should_exclude_from_checkpoint(relative, include_secrets=include_secrets):
+            if is_excluded_from_checkpoint(relative, include_secrets=include_secrets):
                 continue
             data = path.read_bytes()
             entries.append(
@@ -488,16 +474,7 @@ class ProjectStore:
         return entries
 
     def _should_exclude_from_checkpoint(self, relative: Path, *, include_secrets: bool) -> bool:
-        parts = relative.parts
-        if not parts:
-            return True
-        if parts[0] in {"backups", "locks"}:
-            return True
-        if relative.name.endswith(TRASH_SUFFIX):
-            return True
-        if not include_secrets and relative.as_posix() == "data/secrets.local.json":
-            return True
-        return False
+        return is_excluded_from_checkpoint(relative, include_secrets=include_secrets)
 
     def _read_checkpoint_manifest(self, archive: zipfile.ZipFile) -> dict[str, Any]:
         names = set(archive.namelist())
@@ -513,12 +490,10 @@ class ProjectStore:
         return manifest
 
     def _safe_checkpoint_relative_path(self, value: str) -> Path:
-        if not value or value.startswith("/") or value.startswith("\\") or ":" in value:
-            raise StorageError(f"Unsafe checkpoint path: {value!r}")
-        relative = Path(value)
-        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
-            raise StorageError(f"Unsafe checkpoint path: {value!r}")
-        return relative
+        try:
+            return safe_archive_relative_path(value)
+        except StorageError as exc:
+            raise StorageError(f"Unsafe checkpoint path: {value!r}") from exc
 
     def _assert_project_root_safe(self) -> None:
         self._assert_path_inside_root(self.root.resolve())
@@ -543,6 +518,63 @@ def validate_project_id(project_id: str) -> None:
         raise InvalidProjectIdError(f"Unsafe project id: {project_id!r}")
     if not all(character.isalnum() or character in {"_", "-"} for character in project_id):
         raise InvalidProjectIdError(f"Unsafe project id: {project_id!r}")
+
+
+def safe_archive_relative_path(value: str) -> Path:
+    """Reject zip-slip / absolute / drive-letter members before any extract or write."""
+    if not value or value.startswith("/") or value.startswith("\\") or ":" in value:
+        raise StorageError(f"Unsafe archive path: {value!r}")
+    relative = Path(value)
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        raise StorageError(f"Unsafe archive path: {value!r}")
+    return relative
+
+
+def is_excluded_from_checkpoint(relative: Path, *, include_secrets: bool) -> bool:
+    parts = relative.parts
+    if not parts:
+        return True
+    if parts[0] in {"backups", "locks"}:
+        return True
+    if relative.name.endswith(TRASH_SUFFIX):
+        return True
+    if not include_secrets and relative.as_posix() == "data/secrets.local.json":
+        return True
+    return False
+
+
+def atomic_write_bytes_file(
+    path: Path,
+    data: bytes,
+    *,
+    root: Path,
+    retire_existing: bool = False,
+) -> None:
+    """Same-directory tempfile + fsync + os.replace.
+
+    `root` is the jail: used for `.importing_*` staging as well as a real
+    project, because ProjectStore.open() rejects staging names (leading dot).
+    """
+    target = path.resolve()
+    try:
+        target.relative_to(root.resolve())
+    except ValueError as exc:
+        raise StorageError(f"Path escapes projects root: {target}") from exc
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as file:
+            file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
+        if target.exists() and retire_existing:
+            retire_path(target)
+        os.replace(temp_path, target)
+    except Exception:
+        if temp_path.exists():
+            retire_path(temp_path)
+        raise
 
 
 def retire_path(path: str | Path) -> Path:
