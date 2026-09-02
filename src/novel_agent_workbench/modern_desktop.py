@@ -84,11 +84,16 @@ API Key 只保存在软件级本地密钥文件，不写入作品配置或运行
 class WindowCloseSaveCoordinator:
     """Delay native window destruction until the editor's final save finishes."""
 
-    def __init__(self, window: Any) -> None:
+    def __init__(self, window: Any, *, close_timeout_seconds: float = 8.0) -> None:
+        if close_timeout_seconds <= 0:
+            raise ValueError("close_timeout_seconds must be greater than zero")
         self._window = window
+        self._close_timeout_seconds = float(close_timeout_seconds)
         self._lock = threading.RLock()
         self._close_in_progress = False
         self._allow_close = False
+        self._attempt_id = 0
+        self._watchdog: threading.Timer | None = None
 
     def on_closing(self) -> bool:
         with self._lock:
@@ -97,36 +102,74 @@ class WindowCloseSaveCoordinator:
             if self._close_in_progress:
                 return False
             self._close_in_progress = True
-        try:
-            self._window.evaluate_js(
-                "window.__workbenchFlushBeforeClose()",
-                callback=self._after_flush,
+            self._attempt_id += 1
+            attempt_id = self._attempt_id
+            watchdog = threading.Timer(
+                self._close_timeout_seconds,
+                self._cancel_close,
+                args=(attempt_id, f"关闭前保存超时（{self._close_timeout_seconds:g} 秒），请重试。"),
             )
+            watchdog.daemon = True
+            self._watchdog = watchdog
+        try:
+            watchdog.start()
+            threading.Thread(
+                target=self._flush_before_close,
+                args=(attempt_id,),
+                name="NovelCloseSave",
+                daemon=True,
+            ).start()
         except Exception as exc:
-            self._cancel_close(f"关闭前保存未能启动：{exc}")
+            self._cancel_close(attempt_id, f"关闭前保存未能启动：{exc}")
         return False
 
-    def _after_flush(self, result: Any) -> None:
+    def _flush_before_close(self, attempt_id: int) -> None:
+        try:
+            self._window.evaluate_js(
+                f"window.__workbenchFlushBeforeClose({attempt_id})",
+                callback=lambda result: self._after_flush(attempt_id, result),
+            )
+        except Exception as exc:
+            self._cancel_close(attempt_id, f"关闭前保存未能启动：{exc}")
+
+    def _after_flush(self, attempt_id: int, result: Any) -> None:
+        with self._lock:
+            if attempt_id != self._attempt_id or not self._close_in_progress:
+                return
         if not isinstance(result, dict) or result.get("ok") is not True:
-            self._cancel_close("")
+            self._cancel_close(attempt_id, "")
             return
         with self._lock:
             self._allow_close = True
             self._close_in_progress = False
+            watchdog = self._watchdog
+            self._watchdog = None
+        if watchdog is not None:
+            watchdog.cancel()
         try:
             self._window.destroy()
         except Exception as exc:
             with self._lock:
+                if attempt_id != self._attempt_id:
+                    return
                 self._allow_close = False
-            self._cancel_close(f"窗口关闭失败：{exc}")
+            self._cancel_close(attempt_id, f"窗口关闭失败：{exc}")
 
-    def _cancel_close(self, message: str) -> None:
+    def _cancel_close(self, attempt_id: int, message: str) -> None:
         with self._lock:
+            if attempt_id != self._attempt_id or self._allow_close:
+                return
             self._allow_close = False
             self._close_in_progress = False
+            watchdog = self._watchdog
+            self._watchdog = None
+        if watchdog is not None:
+            watchdog.cancel()
         try:
             self._window.run_js(
-                f"window.__workbenchCancelClose({json.dumps(str(message or ''), ensure_ascii=False)});"
+                "window.__workbenchCancelClose("
+                f"{attempt_id}, {json.dumps(str(message or ''), ensure_ascii=False)}"
+                ");"
             )
         except Exception:
             pass

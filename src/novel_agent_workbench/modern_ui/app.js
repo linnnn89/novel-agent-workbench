@@ -30,6 +30,7 @@ const state = {
   lastSavedAt: 0,
   projectId: "",
   chapterId: "",
+  closeAttempt: 0,
   closeEditorWasReadOnly: false,
   closing: false,
   draftId: "",
@@ -2083,7 +2084,8 @@ window.__workbenchPush = function workbenchPush(event, payload) {
   handleStudioPush(event, payload);
 };
 
-window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose() {
+window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose(attemptId = 0) {
+  state.closeAttempt = Number(attemptId) || 0;
   if (state.generating) {
     const error = "请等待当前生成完成后再关闭。";
     toast(error);
@@ -2102,7 +2104,8 @@ window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose() 
   return result || { ok: true };
 };
 
-window.__workbenchCancelClose = function workbenchCancelClose(message = "") {
+window.__workbenchCancelClose = function workbenchCancelClose(attemptId = 0, message = "") {
+  if ((Number(attemptId) || 0) !== state.closeAttempt) return;
   state.closing = false;
   const editor = $("editor");
   if (editor) editor.readOnly = state.closeEditorWasReadOnly;
