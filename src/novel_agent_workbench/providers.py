@@ -338,6 +338,24 @@ class OpenAICompatibleProviderClient(ProviderClient):
             raise ProviderError("Provider requires a model id.", error_type="missing_model")
         if not self.role_config.base_url:
             raise ProviderError("Provider requires base_url.", error_type="missing_base_url")
+        emitted = False
+        original_content_callback = request.stream_callback
+        original_reasoning_callback = request.reasoning_callback
+
+        def on_content(text: str) -> None:
+            nonlocal emitted
+            emitted = emitted or bool(text)
+            if original_content_callback is not None:
+                original_content_callback(text)
+
+        def on_reasoning(text: str) -> None:
+            nonlocal emitted
+            emitted = emitted or bool(text)
+            if original_reasoning_callback is not None:
+                original_reasoning_callback(text)
+
+        if should_stream_response(request, self.role_config):
+            request = replace(request, stream_callback=on_content, reasoning_callback=on_reasoning)
         retry_delays = TRANSIENT_PROVIDER_RETRY_DELAYS_SECONDS
         for attempt_index in range(len(retry_delays) + 1):
             try:
@@ -351,6 +369,11 @@ class OpenAICompatibleProviderClient(ProviderClient):
             except urllib.error.HTTPError as exc:
                 raise ProviderError(f"HTTP error {int(exc.code)} from provider.", error_type="http_error") from exc
             except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
+                if emitted:
+                    raise ProviderError(
+                        "模型已开始输出后连接中断，未自动重试或保存为完成稿。",
+                        error_type="incomplete_stream",
+                    ) from exc
                 if attempt_index >= len(retry_delays):
                     attempts = attempt_index + 1
                     message = f"{network_error_message('provider generation', exc)} Attempts: {attempts}."
@@ -698,7 +721,7 @@ def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> Pro
     try:
         client = create_provider_client(store, request.role, feature_id=request.feature_id)
         extra = {}
-        if request.feature_id == "draft_generation":
+        if request.feature_id in {"draft_generation", "ai_refinement"}:
             extra = v4_flash_0731_thinking_payload(
                 client.role_config,
                 draft_reasoning_effort_from_settings(store.read_config()),
@@ -1226,6 +1249,7 @@ def read_openai_compatible_stream_response(
         return parse_openai_compatible_json_response(response.read())
     content_parts: list[str] = []
     finish_reason = ""
+    completed = False
     usage: dict[str, Any] = {}
     idle_timeout_cleared = False
     while True:
@@ -1242,6 +1266,7 @@ def read_openai_compatible_stream_response(
             return parse_openai_compatible_json_response(line + remainder)
         data_text = stripped[len(b"data:") :].strip()
         if data_text == b"[DONE]":
+            completed = True
             break
         try:
             chunk = json.loads(data_text.decode("utf-8"))
@@ -1249,6 +1274,8 @@ def read_openai_compatible_stream_response(
             raise ProviderError("Provider stream chunk was not valid JSON.", error_type="invalid_response") from exc
         if not isinstance(chunk, dict):
             raise ProviderError("Provider stream chunk was not a JSON object.", error_type="invalid_response")
+        if chunk.get("error") is not None:
+            raise ProviderError("模型服务在输出期间返回错误，未保存为完成稿。", error_type="stream_error")
         if isinstance(chunk.get("usage"), dict):
             usage = chunk["usage"]
         choice = first_response_choice(chunk)
@@ -1274,6 +1301,11 @@ def read_openai_compatible_stream_response(
                     stream_callback(text)
         if choice.get("finish_reason"):
             finish_reason = str(choice.get("finish_reason") or "")
+            if finish_reason.lower() == "error":
+                raise ProviderError("模型服务未正常完成输出。", error_type="stream_error")
+            completed = True
+    if not completed:
+        raise ProviderError("模型输出提前中断，未收到完成标记，未保存为完成稿。", error_type="incomplete_stream")
     return {
         "choices": [
             {
@@ -1324,14 +1356,16 @@ def provider_format_payload(role_config: ModelRoleConfig) -> dict[str, Any]:
 def v4_flash_0731_thinking_payload(role_config: ModelRoleConfig, effort: str) -> dict[str, Any]:
     if not is_deepseek_v4_flash_0731(role_config.model):
         return {}
-    level = str(effort or "high").strip().lower()
+    level = str(effort or "none").strip().lower()
     if level not in {"none", "low", "high", "max"}:
-        level = "high"
+        level = "none"
     if role_config.provider == DEEPSEEK_PROVIDER_ID:
         if level == "none":
             return {"thinking": {"type": "disabled"}}
         return {"thinking": {"type": "enabled"}, "reasoning_effort": level}
-    return {"reasoning": {"effort": level}}
+    if level == "none":
+        return {"reasoning": {"enabled": False}}
+    return {"reasoning": {"enabled": True, "effort": level}}
 
 
 def deepseek_thinking_payload(role_config: ModelRoleConfig) -> dict[str, Any]:

@@ -1668,6 +1668,8 @@ class WorkbenchDesktopApp(tk.Tk):
         title = str(draft.get("title") or chapter_id)
         self.draft_meta_var.set(f"{chapter_id} · {title or '未命名章节'}")
         self.draft_hint_var.set(f"{version_label} · {draft_status_label(status)} · 编辑会自动保存到当前作品")
+        if draft.get("output_incomplete"):
+            self.draft_hint_var.set(self.draft_hint_var.get() + " · 输出已截断：不完整候选")
         self.current_draft_loading = True
         self.draft_body.configure(state="normal")
         self.draft_body.delete("1.0", tk.END)
@@ -1779,9 +1781,9 @@ class WorkbenchDesktopApp(tk.Tk):
             self.after_cancel(self.current_draft_autosave_job)
         self.current_draft_autosave_job = self.after(900, lambda: self.save_current_draft_edit(silent=True))
 
-    def save_current_draft_edit(self, *, silent: bool = False) -> None:
+    def save_current_draft_edit(self, *, silent: bool = False) -> bool:
         if not self.current_draft_project_id or self.current_draft_index < 0:
-            return
+            return False
         self.current_draft_autosave_job = None
         draft_id = self.current_draft_ids[self.current_draft_index]
         text = self.draft_body.get("1.0", tk.END).rstrip("\n")
@@ -1792,13 +1794,14 @@ class WorkbenchDesktopApp(tk.Tk):
             if not silent:
                 messagebox.showerror(APP_TITLE, f"保存编辑失败:\n{exc}")
             self.write_log(f"保存编辑失败: {exc}")
-            return
+            return False
         if not silent:
             messagebox.showinfo(APP_TITLE, "编辑已保存。")
         self.autosave_status_var.set("已自动保存" if silent else "已保存")
         synced = str(result.get("synced_confirmed_chapter") or "")
         suffix = f" synced_confirmed={synced}" if synced else ""
         self.write_log(f"编辑已保存: draft_id={draft_id}{suffix}")
+        return True
 
     def ai_review_current_draft(self) -> None:
         if not self.current_draft_project_id or self.current_draft_index < 0:
@@ -1806,7 +1809,9 @@ class WorkbenchDesktopApp(tk.Tk):
             return
         project_id = self.current_draft_project_id
         draft_id = self.current_draft_ids[self.current_draft_index]
-        self.save_current_draft_edit(silent=True)
+        if not self.save_current_draft_edit(silent=True):
+            messagebox.showerror(APP_TITLE, "当前编辑保存失败，请先保存成功后重试。")
+            return
         try:
             existing = self.app.find_ai_review_for_draft(project_id, draft_id)
         except Exception:
@@ -2319,14 +2324,16 @@ class WorkbenchDesktopApp(tk.Tk):
             return
         project_id = self.current_draft_project_id
         draft_id = self.current_draft_ids[self.current_draft_index]
-        self.save_current_draft_edit(silent=True)
+        if not self.save_current_draft_edit(silent=True):
+            messagebox.showerror(APP_TITLE, "当前编辑保存失败，请先保存成功后重试。")
+            return
         try:
             ai_review = self.app.find_ai_review_for_draft(project_id, draft_id)
         except Exception as exc:
             messagebox.showerror(APP_TITLE, f"读取 AI 审稿失败:\n{exc}")
             return
         if ai_review is None:
-            messagebox.showinfo(APP_TITLE, "当前草稿还没有 AI 审稿，不能根据审稿精修。")
+            messagebox.showinfo(APP_TITLE, "当前正文没有可用的完整 AI 审稿，或原审稿已过期，请先重新审稿。")
             return
         instruction = simpledialog.askstring(APP_TITLE, "根据审稿精修要求（可留空）:")
         if instruction is None:
@@ -2392,6 +2399,8 @@ class WorkbenchDesktopApp(tk.Tk):
             self.run_project_health(silent=True)
             self.load_project_work_nodes(project_id)
             self.show_draft_workspace(project_id, new_draft_id)
+            if result.get("output_incomplete"):
+                messagebox.showwarning(APP_TITLE, "精修输出已截断，已保存为不完整候选，请核对结尾并补全或提高 Max Tokens 后重试。")
 
         threading.Thread(target=worker, name="NovelAIRefinement", daemon=True).start()
 

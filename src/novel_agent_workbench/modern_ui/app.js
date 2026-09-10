@@ -709,6 +709,9 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
   state.draftIndex = draft.index ?? -1;
   $("draftTitle").textContent = `${draft.chapter_id} · ${draft.title}`;
   $("draftHint").textContent = `${draft.version_label} · ${draft.status_label} · 编辑会自动保存`;
+  if (draft.output_incomplete) {
+    $("draftHint").textContent += " · 输出已截断：这是不完整候选，请核对并补全";
+  }
   $("versionLabel").textContent = draft.version_label;
   $("editor").value = draft.content || "";
   state.hasReview = Boolean(draft.has_review);
@@ -915,7 +918,9 @@ async function finishDraft(payload) {
   await refreshWorkspace();
   if (draftId) {
     await loadDraft(projectId, draftId, { silent: true, force: true });
-    toast("新草稿已写入，尚未成为确认稿。");
+    toast(payload.data?.output_incomplete
+      ? "精修输出达到上限，已保存为不完整候选。请核对结尾、补全或提高 Max Tokens 后重试。"
+      : "新草稿已写入，尚未成为确认稿。");
   }
   state.streamProjectId = "";
   state.streamChapterId = "";
@@ -952,7 +957,16 @@ async function refineDraft() {
     setInspectorTab("review");
     return;
   }
-  await saveDraft();
+  const saved = await saveDraft();
+  if (!saved.ok) return;
+  // Saving may have changed the text after its review was produced.
+  const current = await call("open_draft", state.projectId, state.draftId);
+  state.hasReview = current.has_review;
+  if (!current.has_review) {
+    toast("正文已变化或审稿不完整，请先重新进行 AI 审稿。");
+    setInspectorTab("review");
+    return;
+  }
   promptText({
     title: "根据审稿精修",
     desc: "必须以当前 AI 审稿意见为主约束。没有审稿时不能精修。",
@@ -974,7 +988,8 @@ async function refineDraft() {
 
 async function reviewDraft() {
   if (!requireDraft()) return;
-  await saveDraft();
+  const saved = await saveDraft();
+  if (!saved.ok) return;
   try {
     const result = await call("ai_review", state.projectId, state.draftId);
     if (result?.existing) {

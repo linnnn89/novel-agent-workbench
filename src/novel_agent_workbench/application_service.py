@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -20,7 +21,7 @@ from .config import (
 )
 from .context_previews import ContextUpdatePreviewService
 from .chapters import ChapterWorkflowService
-from .context_assembler import ContextAssemblerService
+from .context_assembler import ContextAssemblerService, DEFAULT_CHARS_PER_TOKEN
 from .context_queue import ContextUpdateQueueService
 from .corpus_boundaries import CorpusBoundaryService
 from .corpus_profiler import profile_corpus
@@ -57,6 +58,7 @@ from .model_catalog import (
 from .model_settings import (
     BUILTIN_PROVIDER_PROFILES,
     FEATURE_IDS,
+    effective_model_ref,
     MODEL_SETTINGS_SCHEMA_VERSION,
     make_model_ref,
     migrate_global_model_settings,
@@ -95,7 +97,10 @@ from .providers import (
 )
 from .review_handoffs import ReviewHandoffService
 from .runbooks import ChutesGenerateOnceRequest, chutes_generate_once
-from .reviews import DraftReviewService, is_ai_review, render_context_stats
+from .reviews import (
+    DraftReviewService, is_ai_review, render_context_stats, ai_review_matches_draft,
+    draft_content_fingerprint, finish_reason_truncated,
+)
 from .revision_candidates import RevisionCandidateService
 from .revisions import RevisionRequestService
 from .self_style import SelfStyleBaselineService
@@ -1081,9 +1086,13 @@ class WorkbenchApplicationService:
             raise RuntimeError("Current draft has no AI review; local/manual review cannot drive AI refinement.")
         if str(review.get("draft_id") or "") != draft_id or not is_ai_review(review):
             raise RuntimeError("Only an AI review for this exact draft can drive AI refinement.")
+        if not ai_review_matches_draft(review, draft):
+            raise RuntimeError("审稿已过期、不完整或缺少正文版本校验，请对当前正文重新进行 AI 审稿。")
         chapter_id = str(draft.get("chapter_id") or "")
         title = str(draft.get("title") or "")
         settings, _ = self._effective_project_generation_settings(store)
+        if max_tokens is None:
+            max_tokens = int(settings.get("sampling", {}).get("max_tokens") or 16)
         prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
         system_prompt = ai_refinement_system_prompt(str(prompting.get("system_prompt") or ""))
         task_prompt = ai_refinement_task_prompt(
@@ -1091,10 +1100,16 @@ class WorkbenchApplicationService:
             title=title,
             instruction=instruction,
         )
+        input_limit = max_context_tokens or settings.get("context", {}).get("max_context_tokens") or 32768
+        input_limit = int(input_limit)
+        mandatory_prompt = render_ai_refinement_prompt({}, draft=draft, review=review, instruction=instruction)
+        mandatory_tokens = estimate_refinement_input_tokens(system_prompt, mandatory_prompt)
+        if mandatory_tokens >= input_limit:
+            raise RuntimeError("原稿、审稿和精修要求的估算长度已达到上下文上限，请提高上下文 Token 上限后重试；未发送请求。")
         render = ContextAssemblerService(store).prompt_render_dry_run(
             prompt=task_prompt,
             system_prompt=system_prompt,
-            max_context_tokens=max_context_tokens,
+            max_context_tokens=input_limit - mandatory_tokens,
             chapter_id=chapter_id,
             include_prompt_text=True,
             include_context_text=True,
@@ -1104,6 +1119,10 @@ class WorkbenchApplicationService:
             store,
             "reviser",
             feature_id="ai_refinement",
+        )
+        capacity = refinement_capacity_check(
+            store.read_config(), provider_prompt, system_prompt,
+            input_limit=input_limit, max_tokens=max_tokens, role=request_role,
         )
         safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
         try:
@@ -1145,6 +1164,8 @@ class WorkbenchApplicationService:
             raise
         context_stats = render_context_stats(render)
         source_sanitized = sanitize_provider_draft_text(str(draft.get("content") or ""))
+        if not sanitize_provider_draft_text(response.text)["content"].strip():
+            raise RuntimeError("精修未返回可用正文，未创建新草稿。")
         result = draft_service.save_provider_draft_version(
             chapter_id=chapter_id,
             title=title,
@@ -1171,11 +1192,14 @@ class WorkbenchApplicationService:
                 ],
                 "source_draft_sanitizer": source_sanitized["summary"],
                 **context_stats,
+                **capacity,
             },
             artifact_metadata={
+                "output_incomplete": finish_reason_truncated(response.finish_reason),
                 "revision": {
                     "mode": "ai_review_refinement",
                     "source_draft_id": draft_id,
+                    "source_content_sha256": draft_content_fingerprint(draft.get("content")),
                     "source_review_id": str(review.get("review_id") or ""),
                     "source_review_type": str(review.get("review_type") or ""),
                     "source_draft_status": str(draft.get("status") or ""),
@@ -1183,7 +1207,10 @@ class WorkbenchApplicationService:
                 }
             },
         )
-        return result.to_dict()
+        return {
+            **result.to_dict(),
+            "output_incomplete": finish_reason_truncated(response.finish_reason),
+        }
 
     def list_revision_candidates(self, project_id: str, revision_request_id: str) -> dict[str, Any]:
         return RevisionCandidateService(self._open_store(project_id)).list_revision_candidates(revision_request_id)
@@ -1829,6 +1856,43 @@ class WorkbenchApplicationService:
 
     def _open_store(self, project_id: str) -> ProjectStore:
         return self.registry.open_project(project_id)
+
+
+def estimate_refinement_input_tokens(system_prompt: str, prompt: str) -> int:
+    # Use the existing estimator consistently; this is not a model tokenizer.
+    return ceil((len(system_prompt) + len(prompt)) / DEFAULT_CHARS_PER_TOKEN) + 16
+
+
+def refinement_capacity_check(
+    config: dict[str, Any], prompt: str, system_prompt: str, *,
+    input_limit: int, max_tokens: int | None, role: str,
+) -> dict[str, Any]:
+    estimated_input = estimate_refinement_input_tokens(system_prompt, prompt)
+    if estimated_input > input_limit:
+        raise RuntimeError(
+            f"精修完整输入估算为 {estimated_input} tokens，超过上下文上限 {input_limit}；"
+            "请提高上限或减少上下文资料。原稿和审稿没有被截断，未发送请求。"
+        )
+    sampling = effective_generation_settings(config).get("sampling", {})
+    output_budget = int(max_tokens if max_tokens is not None else sampling.get("max_tokens") or 16)
+    ref = effective_model_ref(config, "ai_refinement", role)
+    model = config.get("model_profiles", {}).get(ref, {})
+    try:
+        context_limit = int(model.get("context_length") or 0)
+    except (TypeError, ValueError, OverflowError):
+        context_limit = 0
+    if context_limit > 0 and estimated_input + output_budget > context_limit:
+        raise RuntimeError(
+            f"精修输入估算 {estimated_input} 加输出预算 {output_budget} 超过模型上下文容量 "
+            f"{context_limit}；请减少上下文或输出预算，未发送请求。"
+        )
+    return {
+        "estimated_input_tokens": estimated_input,
+        "output_token_budget": output_budget,
+        "estimated_total_tokens": estimated_input + output_budget,
+        "model_context_limit": context_limit or None,
+        "token_estimator": f"ceil(chars / {DEFAULT_CHARS_PER_TOKEN}) + 16; approximate",
+    }
 
 
 def ai_refinement_system_prompt(project_system_prompt: str = "") -> str:

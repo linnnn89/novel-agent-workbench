@@ -20,7 +20,7 @@ ROLE_DEFAULT_FEATURE = {
     "reviser": "ai_refinement",
 }
 DRAFT_REASONING_EFFORTS = ("none", "low", "high", "max")
-DEFAULT_DRAFT_REASONING_EFFORT = "high"
+DEFAULT_DRAFT_REASONING_EFFORT = "none"
 
 BUILTIN_PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
     "siliconflow": {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -361,6 +362,7 @@ class DraftReviewService:
             artifact = {
                 "schema_version": 1,
                 "review_type": AI_REVIEW_TYPE,
+                "source_content_sha256": draft_content_fingerprint(raw_content),
                 "review_id": review_id,
                 "draft_id": draft_id,
                 "chapter_id": chapter_id,
@@ -387,6 +389,7 @@ class DraftReviewService:
                     "logical_role": "scorer",
                     "max_tokens": review_max_tokens,
                     "output_truncated": truncated,
+                    "output_empty": not bool(response_sanitized["content"].strip()),
                     "metadata_keys": ["ai_review", "chapter_id", "context_aware_review", "draft_id"],
                     "manual_rewrite_review_gate": gate,
                     "draft_text_sanitizer": draft_sanitized["summary"],
@@ -774,6 +777,7 @@ class DraftReviewService:
         return self.read_review(review_id)
 
     def find_ai_review_for_draft(self, draft_id: str) -> dict[str, Any] | None:
+        draft = DraftGenerationService(self.store).read_draft(draft_id)
         for entry in reversed(self.list_reviews()):
             if entry.get("draft_id") != draft_id:
                 continue
@@ -781,7 +785,7 @@ class DraftReviewService:
             if not review_id:
                 continue
             review = self.read_review(review_id)
-            if is_ai_review(review):
+            if ai_review_matches_draft(review, draft):
                 return review
         return None
 
@@ -951,6 +955,24 @@ def render_context_stats(render: dict[str, Any]) -> dict[str, int]:
 
 def is_ai_review(review: dict[str, Any]) -> bool:
     return str(review.get("review_type") or "") == AI_REVIEW_TYPE
+
+
+def draft_content_fingerprint(content: object) -> str:
+    return sha256(str(content or "").encode("utf-8")).hexdigest()
+
+
+def ai_review_matches_draft(review: dict[str, Any], draft: dict[str, Any]) -> bool:
+    # Legacy reviews lack a content snapshot and must be regenerated, not guessed current.
+    summary = review.get("request_summary")
+    summary = summary if isinstance(summary, dict) else {}
+    return (
+        is_ai_review(review)
+        and review.get("draft_id") == draft.get("draft_id")
+        and bool(str(review.get("comment") or "").strip())
+        and not review_output_truncated(review)
+        and not summary.get("output_empty", False)
+        and review.get("source_content_sha256") == draft_content_fingerprint(draft.get("content"))
+    )
 
 
 def contains_reasoning_leak(content: str) -> bool:

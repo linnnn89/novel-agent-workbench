@@ -503,43 +503,46 @@ function searchSelect(options, attrs = {}) {
 }
 
 function renderDraftEffortCapsules(assignment) {
-  const allowed = ["none", "low", "high", "max"];
-  const current = String(assignment?.reasoning_effort || "high").toLowerCase();
-  const state = { value: allowed.includes(current) ? current : "high" };
+  const allowed = ["low", "high", "max"];
+  const current = String(assignment?.reasoning_effort || "none").toLowerCase();
   const row = el("div", "assign-extra");
-  row.append(el("span", "assign-extra-label", "思考强度"));
+  const toggleLabel = el("label", "assign-extra-label");
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggle.setAttribute("role", "switch");
+  toggle.setAttribute("aria-label", "正文生成与 AI 精修思考模式");
+  toggle.checked = allowed.includes(current);
+  const status = el("span", "", "");
+  toggleLabel.append(toggle, status);
   const caps = el("div", "seg-capsules");
   caps.setAttribute("role", "radiogroup");
-  caps.setAttribute("aria-label", "正文生成思考强度");
-  const labels = { none: "None", low: "Low", high: "High", max: "Max" };
-  allowed.forEach((effort) => {
-    const button = el("button", `seg-cap${effort === state.value ? " active" : ""}`, labels[effort]);
-    button.type = "button";
-    button.dataset.effort = effort;
-    button.setAttribute("aria-pressed", effort === state.value ? "true" : "false");
-    button.addEventListener("click", () => {
-      state.value = effort;
-      caps.querySelectorAll("button").forEach((item) => {
-        const on = item.dataset.effort === effort;
-        item.classList.toggle("active", on);
-        item.setAttribute("aria-pressed", on ? "true" : "false");
-      });
+  caps.setAttribute("aria-label", "正文生成与 AI 精修思考强度");
+  let effort = allowed.includes(current) ? current : "high";
+  const labels = { low: "低", high: "高", max: "最高" };
+  function sync() {
+    status.textContent = toggle.checked ? "思考模式：已开启" : "思考模式：已关闭";
+    caps.hidden = !toggle.checked;
+    caps.querySelectorAll("button").forEach((button) => {
+      const on = button.dataset.effort === effort;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-pressed", String(on));
+      button.disabled = !toggle.checked;
     });
+  }
+  allowed.forEach((level) => {
+    const button = el("button", "seg-cap", labels[level]);
+    button.type = "button";
+    button.dataset.effort = level;
+    button.addEventListener("click", () => { effort = level; sync(); });
     caps.append(button);
   });
-  row.append(caps);
-  row.append(
-    el(
-      "p",
-      "studio-note",
-      "仅对 DeepSeek V4 Flash 0731 的正文生成生效。None 关闭思考，其余发送 reasoning.effort。"
-    )
-  );
+  toggle.addEventListener("change", sync);
+  row.append(toggleLabel, caps);
+  row.append(el("p", "studio-note", "正文生成与 AI 精修共用此开关，仅对 DeepSeek V4 Flash 0731 生效。默认关闭；开启后可选择思考强度。修改后请保存。"));
   Object.defineProperty(row, "value", {
-    get() {
-      return state.value;
-    },
+    get() { return toggle.checked ? effort : "none"; },
   });
+  sync();
   return row;
 }
 

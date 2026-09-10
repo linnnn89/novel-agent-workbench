@@ -590,6 +590,7 @@ class WorkbenchBridge:
                 "status_label": draft_status_label(draft.get("status")),
                 "version_label": str(draft.get("version_label") or draft_version_text(draft, index)),
                 "content": str(draft.get("content") or ""),
+                "output_incomplete": bool(draft.get("output_incomplete")),
                 "draft_ids": draft_ids,
                 "index": index,
                 "has_review": review is not None,
@@ -680,7 +681,7 @@ class WorkbenchBridge:
         except Exception as exc:
             return _fail(f"读取精修所需资料失败: {exc}")
         if review is None:
-            return _fail("当前草稿还没有 AI 审稿，不能根据审稿精修。")
+            return _fail("当前正文没有可用的完整 AI 审稿，或原审稿已过期。请先重新审稿。")
         kwargs = _sampling_kwargs(settings)
         chapter_id = str(draft.get("chapter_id") or "")
 

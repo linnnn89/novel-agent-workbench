@@ -70,3 +70,49 @@
 - TDD 与验证：修改前线程身份回归测试按预期失败；修改后真实隐藏 EdgeChromium 窗口可在关闭请求后退出。Python 测试 38/38、JavaScript 测试 4/4、`compileall`、JavaScript 语法检查、`git diff --check` 和发布前检查均通过；未调用真实模型/API。
 - 打包说明：为避免覆盖仍被无响应旧进程占用的正式 `dist`，曾尝试在独立时间戳目录构建探针；首次因资源相对路径解析失败，第二次按用户指示中止。源码修复和真实 EdgeChromium 集成测试已完成，但正式 EXE 未重建。
 - 保持不变：作品数据格式、模型调用流程、供应商配置和其他功能行为未修改。
+
+## 2026-09-10（北京时间）
+
+### 正文生成思考开关修复与 EXE 重建
+
+- 用户要求：正文生成默认关闭思考，修复 OpenRouter 关闭不生效，改为明确开关并重新构建 EXE。
+- 修改：缺失或非法思考档位默认 none；界面显示思考模式开关，开启后选择低/高/最高，保存仍使用原 reasoning_effort 字段。已保存的合法档位保留。
+- 请求：DeepSeek V4 Flash 0731 正文生成通过 OpenRouter 等兼容接口关闭时发送 reasoning.enabled=false，不再发送 effort=none；开启发送 enabled=true 与 effort。DeepSeek 官方接口继续使用 thinking.type。
+- 验证：scripts/test_reasoning_switch.py 三项测试通过，覆盖默认/保存配置、两个接口四档最终 HTTP 请求体和非目标模型；JavaScript 六种初始状态及开启/选强度/关闭逻辑通过，语法与 diff 检查通过。
+- 构建：复用既有环境，build_windows_exe.ps1 -SkipInstall 成功；核对 EXE 嵌入默认值与关闭代码、打包 studio.js 与源码一致。输出 dist/NovelAgentWorkbench/NovelAgentWorkbench.exe，保留用户数据和原有 ZIP。
+- 反证检查：关闭强度控件时 hidden 有现有 CSS 强制隐藏支持，且控件禁用；旧项目显式保存 high 时仍开启，不静默覆盖用户配置。
+- 限制：未进行付费模型调用、真实窗口视觉验收或默认个人数据库启动测试；原 ZIP 未更新，应直接运行本次 EXE。
+
+
+### AI 精修完整链路重新评估及推理遗漏修复
+
+- 范围：现代界面 refineDraft → WorkbenchBridge.refine_draft → refine_draft_from_ai_review → 上下文/审稿组装 → generate_with_provider → HTTP/SSE → save_provider_draft_version → draft_done。未调用外部模型或上传作品内容。
+- 已确认根因并修复：ai_refinement 未进入正文推理设置分支。现在正文生成和 AI 精修共用现有开关，UI 明示适用范围；其余功能不变。回归测试先在精修 none/high 两种情况失败，修复后四项测试全部通过，包含八种功能/开关组合的调用分派至 HTTP 请求体。
+- P1 待修：app.js refineDraft 忽略 saveDraft 返回的 ok=false；模拟磁盘保存失败后仍打开精修对话框已复现。可能用磁盘旧稿请求，beginStream 又清空当前编辑器。
+- P1 待修：providers.py SSE 解析忽略无 choices 的 error 事件，EOF 未要求完成标记；隔离 BytesIO 探针证实部分正文后错误事件/直接 EOF 都返回 partial 与空 finish_reason。Provider 仅检查正文非空，精修随后可保存为普通新稿。
+- P2 待修：update_draft_content 原位修改正文但保持 draft_id；find_ai_review_for_draft 和精修入口仅验证 ID/type，没有正文版本或摘要一致性验证。审稿后编辑仍会复用旧审稿，且 ai_review 界面入口发现已有审稿直接返回。
+- P2 待修：finish_reason=length 有保存在产物，但精修完成回调没有截断提示，按普通新稿提示成功；隔离 SSE 探针已确认 length 结果正常返回。审稿截断虽有提示，也未阻止用于精修。
+- P2 待修：精修先对上下文做预算估计，再追加完整源稿和审稿意见，未对最终 provider_prompt 重新核算输入与输出容量。此为源码确认的边界缺口，未实测超限请求。
+- 已有保护：审稿须属于同一 draft_id 且为 AI 类型；原文经推理清洗；精修保存新版本及源稿/审稿关联，状态 draft，不自动确认；界面后端单任务互斥。上述保护不代表审稿时效、全文完整性或实际修改质量已验证。
+- USER_DECISION_REQUIRED：旧审稿失效应阻断重审还是允许明确确认后复用；截断结果应作为不完整候选保留并提示还是拒绝生成。建议前者采用重审，后者保留并禁止冒充完整稿；未实施这些策略变更。
+- 构建：SkipInstall 编译成功，候选 build/pyinstaller_dist/NovelAgentWorkbench 中 EXE 的精修分支与 UI 已核对。覆盖 dist 正式 EXE 时 Access denied，疑似运行占用，已停止替换并请求用户退出；没有杀进程或绕过。正式 EXE 此时仍是上一版。
+- 限制：这是当前代理源码审查及隔离探针，不是独立模型审核；未进行真实付费调用和完整 GUI 操作验收。
+
+
+### 精修链路其余问题修复（用户授权全部处理）
+
+- 现代与经典界面：保存编辑失败即停止审稿/精修；现代精修在保存后重新核对审稿有效性，避免磁盘旧稿与编辑区错配。
+- 审稿有效性：新 AI 审稿记录原始正文 SHA-256。复用和精修入口均核对同一草稿及正文摘要；正文改变、旧记录缺少摘要、审稿被截断或仅返回思考内容时要求重新审稿。历史审稿文件不修改、不删除。补充精修源正文摘要作为版本证据。
+- SSE：上游 error 事件、finish_reason=error、无完成标记的 EOF 均抛出错误；保留 stop/length 和仅 DONE 终止的兼容性。收到正文或推理后连接失败不自动重试，防止两次内容混合；未开始输出时仍保留既有有限重试。
+- 输出：精修截断结果保存新版本，并持久化 output_incomplete；两种界面均提示不完整候选，现代界面及经典编辑区重新打开时继续显示警示。空白/仅思考输出不创建精修稿。失败不覆盖源稿、不新增普通成功候选。
+- 容量：先为系统要求、完整原稿与审稿预留输入预算，再组装背景上下文；发送前复核最终完整输入。模型目录有 context_length 时同时核对输入估算与输出预算。原稿与审稿不静默截断。沿用 ceil(chars/4) 并加消息开销估算，非真实 tokenizer；未知模型容量记录 null，不声称已验证。
+- 验证：test_refinement_integrity.py 12 项、test_reasoning_switch.py 4 项通过；test_refinement_ui.cjs 覆盖保存失败、审稿过期、有效分派及完整/截断提示通过。隔离真实项目文件验证新审稿、正文修改后重审、精修产物、错误不落稿与原稿不变。compileall、JS 语法和 diff 检查通过。流式中断/旧审稿测试在修复前按预期失败。
+- 反证自审：补测已经收到流式文本后网络错误，不得自动重试；仅思考文本清洗为空不得落稿；旧审稿缺失摘要不能因 draft_id 相同而复用。未进行独立模型评审或付费 API/真实 GUI 端到端验收。
+- 构建：复用既有 PyInstaller spec/环境，无依赖安装。完整候选位于 build/ai_refinement_repair_dist/NovelAgentWorkbench；嵌入模块及 app.js、studio.js 与修复内容核对通过。EXE SHA-256: 4e7dc276f264433afa04ac0a3026ac9554247634fdfbf4b495c73f5fcf51baf8。
+- 正式目录替换尚待用户选择：先前删除旧程序目录的替换命令被自动审批 blocked by policy 拒绝，未重试。已提出先备份程序文件后覆盖，或用户手动替换两种方式；用户数据和旧 ZIP 均未改动。
+
+
+### GitHub 源码同步
+
+- 用户授权上传至对应 GitHub 仓库；已核对 origin 为 linnnn89/novel-agent-workbench，分支 main，fetch 后本地与远端无分歧。
+- 本次提交范围：精修/推理修复、三份回归测试脚本及本日工作记录。既有安卓迁移记录留在本地；构建文件、个人项目数据和密钥不纳入提交。验证沿用本次修复已通过的 16 项 Python 测试、前端交互及打包核验；正式 EXE 替换仍未完成。
