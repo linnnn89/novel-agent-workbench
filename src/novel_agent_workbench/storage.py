@@ -275,6 +275,7 @@ class ProjectStore:
 
     def initialize(self) -> None:
         self._assert_project_root_safe()
+        self._assert_supported_schema()
         self._ensure_storage_dirs()
         if not self.project_meta_path.exists():
             self.write_project_meta({"project_id": self.project_id, "schema_version": 1})
@@ -300,6 +301,7 @@ class ProjectStore:
         return self.read_json(self.secrets_path, default={})
 
     def write_secrets(self, data: dict[str, Any]) -> None:
+        self._assert_supported_schema()
         target = self._resolve_owned_path(self.secrets_path)
         atomic_write_json_file(target, data)
 
@@ -320,6 +322,7 @@ class ProjectStore:
 
     def migrate_config(self) -> dict[str, Any]:
         self._assert_project_root_safe()
+        self._assert_supported_schema()
         self._ensure_storage_dirs()
         current = self.read_config()
         migrated, changed = merge_project_config(current)
@@ -365,7 +368,18 @@ class ProjectStore:
 
     def write_json(self, path: str | Path, data: Any) -> None:
         target = self._resolve_owned_path(path)
+        self._assert_supported_schema()
+        from .config import require_supported_schema
+        if target == self.config_path:
+            require_supported_schema(data, maximum=CURRENT_CONFIG_SCHEMA_VERSION, label="作品配置")
+        elif target == self.project_meta_path:
+            require_supported_schema(data, maximum=1, label="作品")
         self._atomic_write_json(target, data)
+
+    def _assert_supported_schema(self) -> None:
+        from .config import require_supported_schema
+        require_supported_schema(self.read_project_meta(), maximum=1, label="作品")
+        require_supported_schema(self.read_config(), maximum=CURRENT_CONFIG_SCHEMA_VERSION, label="作品配置")
 
     def create_checkpoint(self, *, label: str = "", include_secrets: bool = False) -> dict[str, Any]:
         self._assert_project_root_safe()
@@ -392,6 +406,7 @@ class ProjectStore:
         return {**manifest, "path": str(checkpoint_path)}
 
     def restore_checkpoint(self, checkpoint_path: str | Path) -> dict[str, Any]:
+        self._assert_supported_schema()
         source = self._resolve_owned_path(checkpoint_path)
         with zipfile.ZipFile(source, "r") as archive:
             manifest = self._read_checkpoint_manifest(archive)
@@ -402,6 +417,13 @@ class ProjectStore:
             files = manifest.get("files")
             if not isinstance(files, list):
                 raise StorageError("Checkpoint manifest has no file list.")
+            from .config import require_supported_schema
+            # Inspect format versions before restoring even the first member.
+            members = {str(item.get("path") or "") for item in files if isinstance(item, dict)}
+            for name, maximum, label in (("project.json", 1, "作品"),
+                                         ("data/config.json", CURRENT_CONFIG_SCHEMA_VERSION, "作品配置")):
+                if name in members:
+                    require_supported_schema(json.loads(archive.read(name)), maximum=maximum, label=label)
             restored: list[str] = []
             for item in files:
                 if not isinstance(item, dict):
@@ -441,6 +463,7 @@ class ProjectStore:
         atomic_write_json_file(path, data)
 
     def _atomic_write_bytes(self, path: Path, data: bytes, *, retire_existing: bool = False) -> None:
+        self._assert_supported_schema()
         atomic_write_bytes_file(path, data, root=self.root, retire_existing=retire_existing)
 
     def _backup_path_for(self, path: Path) -> Path:

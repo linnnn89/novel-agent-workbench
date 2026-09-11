@@ -146,19 +146,17 @@ class MemoryBankService:
         target_token_budget: int | None = None,
     ) -> MemoryBankUpdateResult:
         validate_manual_memory_text(text)
+        source_ids = normalize_source_chapter_ids(source_chapter_ids)
+        target_metadata = {}
+        if target_token_budget is not None:
+            target_metadata["target_token_budget"] = validate_memory_target_tokens(target_token_budget)
         self.store.initialize()
         with self.store.lock():
             memory_bank = self._read_memory_bank()
             if not any(str(item.get("memory_id") or item.get("id") or "") == memory_id for item in memory_bank["items"]):
                 raise MemoryBankError(f"Memory item not found: {memory_id}")
-            checkpoint = self.store.create_checkpoint(label="pre_memory_text_update")
             updated_items: list[dict[str, Any]] = []
             result_item: dict[str, Any] | None = None
-            updated_at = utc_stamp()
-            source_ids = normalize_source_chapter_ids(source_chapter_ids)
-            target_metadata = {}
-            if target_token_budget is not None:
-                target_metadata["target_token_budget"] = validate_memory_target_tokens(target_token_budget)
             for item in memory_bank["items"]:
                 item_id = str(item.get("memory_id") or item.get("id") or "")
                 if item_id == memory_id:
@@ -178,7 +176,6 @@ class MemoryBankService:
                         "text": text.strip(),
                         "status": "ready",
                         "text_status": "manual",
-                        "updated_at": updated_at,
                         "safety": {
                             **(item.get("safety") if isinstance(item.get("safety"), dict) else {}),
                             "manual_text": True,
@@ -187,10 +184,19 @@ class MemoryBankService:
                     }
                     result_item = item
                 updated_items.append(item)
-            memory_bank["items"] = updated_items
-            memory_bank["enabled"] = True
-            memory_bank["updated_at"] = updated_at
-            self.store.write_json(self.store.data_file_path("memory_bank.json"), memory_bank)
+            assert result_item is not None
+            checkpoint = {}
+            changed = updated_items != memory_bank["items"] or memory_bank.get("enabled") is not True
+            if changed:
+                checkpoint = self.store.create_checkpoint(label="pre_memory_text_update")
+                updated_at = utc_stamp()
+                result_item["updated_at"] = updated_at
+                memory_bank["items"] = updated_items
+                memory_bank["enabled"] = True
+                memory_bank["updated_at"] = updated_at
+                self.store.write_json(self.store.data_file_path("memory_bank.json"), memory_bank)
+            else:
+                updated_at = str(result_item.get("updated_at") or "")
             return MemoryBankUpdateResult(
                 memory_id=memory_id,
                 status=str(result_item.get("status") or ""),
@@ -206,6 +212,7 @@ class MemoryBankService:
         enabled: bool,
         reason_code: str = "",
         target_token_budget: int | None = None,
+        checkpoint_before_update: bool = True,
     ) -> MemoryBankLifecycleResult:
         safe_reason_code = validate_memory_reason_code(reason_code)
         target_metadata = {}
@@ -216,7 +223,6 @@ class MemoryBankService:
             memory_bank = self._read_memory_bank()
             if not any(str(item.get("memory_id") or item.get("id") or "") == memory_id for item in memory_bank["items"]):
                 raise MemoryBankError(f"Memory item not found: {memory_id}")
-            checkpoint = self.store.create_checkpoint(label="pre_memory_lifecycle_update")
             updated_items: list[dict[str, Any]] = []
             result_item: dict[str, Any] | None = None
             updated_at = utc_stamp()
@@ -229,13 +235,20 @@ class MemoryBankService:
                         "enabled": enabled,
                         "lifecycle_status": "active" if enabled else "disabled",
                         "lifecycle_reason_code": safe_reason_code,
-                        "updated_at": updated_at,
                     }
                     result_item = item
                 updated_items.append(item)
-            memory_bank["items"] = updated_items
-            memory_bank["updated_at"] = updated_at
-            self.store.write_json(self.store.data_file_path("memory_bank.json"), memory_bank)
+            assert result_item is not None
+            checkpoint = {}
+            if updated_items != memory_bank["items"]:
+                if checkpoint_before_update:
+                    checkpoint = self.store.create_checkpoint(label="pre_memory_lifecycle_update")
+                result_item["updated_at"] = updated_at
+                memory_bank["items"] = updated_items
+                memory_bank["updated_at"] = updated_at
+                self.store.write_json(self.store.data_file_path("memory_bank.json"), memory_bank)
+            else:
+                updated_at = str(result_item.get("updated_at") or "")
             return MemoryBankLifecycleResult(
                 memory_id=memory_id,
                 enabled=bool(result_item.get("enabled")),

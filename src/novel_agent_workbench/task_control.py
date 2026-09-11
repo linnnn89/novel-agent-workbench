@@ -22,6 +22,7 @@ class JobControl:
         self.lock = threading.Lock()
         self.connection = None
         self.saving = False
+        self.warnings: list[str] = []
 
     def check(self):
         if self.event.is_set():

@@ -211,7 +211,6 @@ def default_project_config() -> dict[str, Any]:
         ],
         "active_workflow_preset_id": "manual_studio",
         "generation_settings_scope": GENERATION_SETTINGS_SCOPE_GLOBAL,
-        "generation_settings": default_generation_settings(),
         "context_policy": {
             "recent_confirmed_chapter_count": 2,
             "planning_library_enabled": True,
@@ -401,7 +400,28 @@ def default_data_file(name: str) -> Any:
     return deepcopy(DATA_FILE_DEFAULTS[name])
 
 
+class UnsupportedDataVersionError(ValueError):
+    """The current program must not reinterpret data written by a newer format."""
+
+
+def require_supported_schema(value: object, *, maximum: int, label: str) -> None:
+    if not isinstance(value, dict):
+        return
+    raw = value.get("schema_version")
+    if raw is None:
+        return  # Legacy files without a version retain their existing migration path.
+    try:
+        version = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise UnsupportedDataVersionError(f"无法识别{label}格式版本，请使用对应版本的软件。") from exc
+    if version > maximum:
+        raise UnsupportedDataVersionError(
+            f"{label}使用更新的格式版本 {version}，当前程序仅支持到 {maximum}。请使用新版软件，当前未修改数据。"
+        )
+
+
 def merge_project_config(raw: object) -> tuple[dict[str, Any], bool]:
+    require_supported_schema(raw, maximum=CURRENT_CONFIG_SCHEMA_VERSION, label="作品配置")
     source = raw if isinstance(raw, dict) else {}
     merged = deep_merge(default_project_config(), source)
     if "generation_settings_scope" not in source:

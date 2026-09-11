@@ -8,6 +8,7 @@ from typing import Any
 
 from .application_service import WorkbenchApplicationService
 from .storage import DEFAULT_PROJECTS_DIRNAME
+from .version import __version__
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="novel-agent-workbench", description="Backend-only workbench CLI.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "--projects-root",
         default=DEFAULT_PROJECTS_DIRNAME,

@@ -198,14 +198,19 @@ try {
 
     if (-not $SkipInstall) {
         Write-Host "[3/6] Installing build dependencies"
-        & $VenvPython -m pip install --upgrade pip
-        if ($LASTEXITCODE -ne 0) { throw 'pip upgrade failed.' }
-        & $VenvPython -m pip install pyinstaller pillow "pywebview>=5.0" "deepseek-tokenizer==0.3.0"
+        & $VenvPython -m pip install --no-deps -r (Join-Path $RepoRoot 'requirements-windows-build.txt')
         if ($LASTEXITCODE -ne 0) { throw 'Build dependency installation failed.' }
     }
     else {
         Write-Host "[3/6] Skipping dependency install"
     }
+
+    # SkipInstall must use the same validated versions, not silently build a different environment.
+    # A script file also avoids Windows PowerShell 5.1 native-argument quote rewriting.
+    & $VenvPython (Join-Path $RepoRoot 'scripts/check_build_dependencies.py') (Join-Path $RepoRoot 'requirements-windows-build.txt')
+    if ($LASTEXITCODE -ne 0) { throw 'Build dependency versions do not match the lock file.' }
+    & $VenvPython -m pip check
+    if ($LASTEXITCODE -ne 0) { throw 'Build dependencies are inconsistent.' }
 
     if ($RegenerateIcon -or -not (Test-Path $IconPath)) {
         Write-Host "[4/6] Regenerating Windows icon"
@@ -223,8 +228,10 @@ try {
     $commit = & git rev-parse HEAD
     if ($LASTEXITCODE -ne 0) { $commit = 'unknown' }
     $dirty = [bool](& git status --porcelain)
+    $appVersion = & $VenvPython (Join-Path $RepoRoot 'src/novel_agent_workbench/version.py')
+    if ($LASTEXITCODE -ne 0 -or $appVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid application version.' }
     $BuildInfoPath = Join-Path $RunBuildRoot 'build_info.json'
-    $buildInfo = @{ built_at = (Get-Date -Format 'o'); commit = $commit; local_changes = $dirty } | ConvertTo-Json
+    $buildInfo = @{ version = $appVersion; built_at = (Get-Date -Format 'o'); commit = $commit; local_changes = $dirty } | ConvertTo-Json
     [IO.File]::WriteAllText($BuildInfoPath, $buildInfo, (New-Object Text.UTF8Encoding($false)))
 
     Write-Host "[5/6] Building PyInstaller application"

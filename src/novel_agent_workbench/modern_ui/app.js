@@ -2397,9 +2397,10 @@ window.__workbenchPush = function workbenchPush(event, payload) {
     state.reviewBox.textContent += payload?.text || "";
     state.reviewBox.scrollIntoView({ block: "end", behavior: "smooth" });
   }
-  if (event === "draft_done") finishDraft(payload);
-  if (event === "review_done") finishReview(payload);
+  if (event === "draft_done") finishDraft(payload).then(() => showTaskWarnings(payload));
+  if (event === "review_done") { finishReview(payload); showTaskWarnings(payload); }
   handleStudioPush(event, payload);
+  if (event.endsWith("_done") && event !== "draft_done" && event !== "review_done") showTaskWarnings(payload);
   if (payload?.input_budget) {
     const retry = state.inputBudgetRetry;
     const feature = { generate_draft: "draft_generation", rewrite_draft: "draft_generation",
@@ -2409,6 +2410,12 @@ window.__workbenchPush = function workbenchPush(event, payload) {
   }
   if (event.endsWith("_done")) state.inputBudgetRetry = null;
 };
+
+function showTaskWarnings(payload) {
+  if (!payload?.warnings?.length) return;
+  openDrawer({ kicker: "任务提示", title: payload.ok ? "任务已完成，调用记录未保存" : "调用记录未保存",
+    content: payload.warnings.join("\n") });
+}
 
 window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose(attemptId = 0) {
   state.closeAttempt = Number(attemptId) || 0;

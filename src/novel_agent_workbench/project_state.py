@@ -31,6 +31,24 @@ from .self_style import SelfStyleBaselineService
 from .storage import ProjectStore
 
 
+def project_overview(store: ProjectStore) -> dict[str, Any]:
+    """Daily counts depend only on writing records; advanced diagnostics stay separate."""
+    drafts = DraftGenerationService(store)
+    draft_entries = drafts.list_drafts()
+    confirmed = drafts.list_confirmed_chapters()
+    chapters = ChapterWorkflowService(store).list_chapters()
+    return {
+        "project_id": store.project_id,
+        "chapter_count": len(visible_chapter_summaries(chapters, draft_entries, confirmed)),
+        "draft_count": len(draft_entries),
+        "committed_chapter_count": len(confirmed),
+        "review_count": len(DraftReviewService(store).list_reviews()),
+        "planning_item_count": len(safe_planning_items(store)),
+        "memory_bank_item_count": len(safe_memory_bank_items(store)),
+        "provider_roles": provider_roles_summary(store),
+    }
+
+
 def public_project_state(store: ProjectStore, *, initialize: bool = True) -> dict[str, Any]:
     """Return a UI-safe project summary without prompt, content, or plaintext secrets."""
 

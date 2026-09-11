@@ -20,6 +20,10 @@ It must not directly implement storage internals, Provider HTTP calls, Memory Ba
 
 ## Construction
 
+V1 data rules: generation settings queries and runtime views compute global defaults plus explicit project settings without synchronizing them back to project files. Clearing a project override removes its generation settings; imports keep the existing global/project choice. Newer project, configuration or global-settings schema versions are rejected before migration or writes. Provider call-log failures preserve the response or original provider error; desktop jobs report them separately as warnings.
+
+Desktop entry points own a `LibraryLease` for their current project library. Acquire the destination lease before switching, keep the original lease on failure, and release it after a successful switch or window shutdown. The application facade remains usable independently for CLI and temporary-resource tests.
+
 Default:
 
 ```python
@@ -1658,6 +1662,8 @@ Must not return prompt text, chapter text, raw Provider responses, request bodie
 
 Explicitly writes manual text into one Memory Bank placeholder item.
 
+If the text and supplied metadata are unchanged, the operation preserves the existing timestamp and files and returns an empty `checkpoint` object.
+
 Creates a pre-write checkpoint:
 
 ```text
@@ -1696,6 +1702,8 @@ This method must not call Providers, auto-extract from chapters, update world bo
 ### set_memory_item_enabled(project_id, memory_id, enabled, reason_code="")
 
 Explicitly changes the lifecycle switch for one Memory Bank item.
+
+Unchanged settings preserve files and timestamps and return an empty `checkpoint`. The optional `checkpoint_before_update` defaults to true; desktop callers set it to false only when the preceding text step in the same save already returned a full checkpoint. Text and lifecycle remain separate writes.
 
 Creates a pre-write checkpoint:
 

@@ -1,8 +1,10 @@
-# Novel Agent Workbench
+# Novel Agent Workbench v1.0
 
 ## 小说创作工作台
 
 这是一个在 Windows 上写长篇小说的本地桌面工具。
+
+当前正式版本为 **v1.0.0**（简称 v1.0），继续面向个人 Windows 单机写作，主要适配 DeepSeek Flash 等 OpenAI 兼容接口。
 
 它把作品目录、章节、草稿、人物设定、世界观和长期记忆放在一起。你可以从头到尾自己写，也可以只在需要的时候让模型起草、审稿或改写。模型生成的内容先留在草稿里；只有点下“确认稿件”，它才会成为正式章节。
 
@@ -43,6 +45,10 @@
 
 软件不会替你决定哪一版算正文，也不会因为打开作品或保存设置就在后台调用模型。
 
+模型调用成功后，即使调用日志损坏或无法写入，也会继续处理和保存生成内容。新版界面单独显示调用记录未保存的提示，并在本次运行记录中保留提示；原日志不会因为格式错误被自动清空。正文自身保存失败仍会明确报错。
+
+日常作品概览只读取写作所需的核心记录；高级执行记录的完整检查仍在「记录与诊断」中进行。某份高级记录损坏时，不会连带阻止日常概览显示。
+
 自动带入的前文按章节编号排序，只选目标章节之前最近的 N 章。例如补写第 2 章时不会带入第 3 章。自定义章节编号需要以数字结尾；无法判断顺序时会提示改编号或关闭自动带入前文。
 
 ### 模型怎么接
@@ -70,6 +76,12 @@
 
 ### 数据放在哪里
 
+同一个项目库只允许一个可写桌面实例，新旧两种界面共用这项保护。重复启动或切换到已占用的库时会提示返回原窗口；不同项目库可以分别打开。关闭窗口或进程退出后自动释放占用，切库失败仍保留原库的占用。命令行和外部编辑器仍使用原有文件写入规则，不提供跨编辑器的冲突合并。
+
+v1.0 起会检查作品、作品配置和全局设置的格式版本。不支持的较新格式会在自动迁移、导入、恢复或写入之前被拒绝，提示使用新版软件。应用版本与数据格式版本分别管理；本次应用升到 1.0.0，没有提高现有数据格式版本。v1.0 之前的旧 EXE 无法自动获得这项保护。
+
+全局设置保存默认值；作品专属设置保存在作品里。跟随全局的作品在读取或生成时使用内存中计算的有效设置，不再为了同步全局值改写作品配置。旧作品已有的跟随标记和专属设置继续兼容；明确切回全局时清除作品的生成设置覆盖。作品包保留这一选择：跟随全局的作品导入另一项目库后跟随目标库，专属设置则随作品一起保留。
+
 EXE 版的作品、设置和密钥保存在程序旁边的 `用户数据` 文件夹中。重新打包时，构建脚本只替换程序和运行依赖，不会删除这份目录。右侧「导入导出」可以把一部作品打包为 `.nawpkg`；作品包不含 API Key 和 `backups/`。
 
 「项目库位置」会先将当前正文保存到原项目库，再切换目录并清空旧编辑状态。保存请求绑定原目录，避免两个库里同名的作品互相覆盖。成功切换的位置会记在默认数据目录旁的 `desktop_settings.local.json` 中，下次启动继续使用；该目录不可用时使用默认项目库。
@@ -78,9 +90,13 @@ EXE 版的作品、设置和密钥保存在程序旁边的 `用户数据` 文件
 
 源码运行时，作品默认放在仓库的 `workspace_projects`。这些目录以及 `.venv`、`dist`、API Key 和小说正文都不应提交到 GitHub。
 
+保存未变化的记忆或大纲资料时，不改写正文、时间戳，也不新增备份。一次记忆表单保存中，正文和启用状态仍按原有步骤分别保存，共用正文步骤已建立的完整检查点；仅改启用状态时仍单独创建检查点。这项优化不改变原有保存事务边界。历史备份页显示全部完整检查点的占用，并提供打开项目库手工整理的入口；不会自动清理旧备份，整本恢复格式保持不变。
+
 ### 在 Windows 上构建
 
 构建 EXE 需要 Windows 10/11 和 Python 3.11–3.14。首次构建需要联网安装 PyInstaller、Pillow、pywebview 和上述小型 tokenizer。
+
+构建所需的直接和间接依赖固定在 `requirements-windows-build.txt`，使用普通 pip 安装，无需额外依赖管理工具。`-SkipInstall` 也会核对已安装版本和依赖关系；不匹配时请去掉该参数，按固定版本安装后构建。升级依赖时应一起更新版本文件，并重新验证 EXE 启动。当前实际验证环境为 Python 3.14.5。
 
 ```cmd
 git clone https://github.com/linnnn89/novel-agent-workbench.git
@@ -107,6 +123,8 @@ START_ModernUI.cmd
 
 ### 当前版本
 
+**v1.0.0** 包含调用日志故障隔离、同库桌面单实例保护、数据格式版本检查，以及不再写回作品的全局设置计算。本版本没有新增草稿与模型、参数、材料版本的关联记录。
+
 新版界面已经覆盖从建作品、整理资料、写草稿、审稿和精修，到确认章节和导出 TXT 的日常路径。
 
 审稿与改写总表、模型连接检查、调用记录、运行记录、出稿清单和导出设置等辅助页面，目前仍以经典 Tk 界面中的版本为主。后续迁移不会改变现有作品格式。
@@ -115,6 +133,18 @@ START_ModernUI.cmd
 
 ### 开发入口
 
+版本号统一定义在 `src/novel_agent_workbench/version.py` 的 `__version__`。Python 包、桌面标题与「关于」、作品包清单和 EXE 构建信息都使用同一个值；CLI 可用 `--version` 查看。
+
+后续每轮代码更新，由维护者或编码助手在交付前主动判断变更规模、升级版本，并更新本 README 的当前版本和变更说明，无需用户再次提醒。按 [语义化版本](https://semver.org/lang/zh-CN/) 的原则执行：
+
+| 更新类型 | 升级规则 | 示例 |
+| --- | --- | --- |
+| 兼容的问题修复、小范围性能或内部维护改进 | 修订号加一 | 1.0.0 → 1.0.1 |
+| 兼容的新功能，或一组明显改善使用体验的迭代 | 次版本号加一，修订号归零 | 1.0.1 → 1.1.0 |
+| 不兼容的接口、作品格式或核心使用流程改变 | 主版本号加一，其余归零，并说明迁移方式 | 1.1.0 → 2.0.0 |
+
+同一轮交付按影响最大的变化升级一次。仅审查、纯说明文字修正，以及同一源码的重复打包不额外升级。已经交付的版本号不复用于不同代码；构建时间和提交号用于区分同一版本的打包记录。数据格式号只有结构或解释规则发生实际变化时才单独升级，不随应用版本机械递增。
+
 ```text
 src/novel_agent_workbench/modern_desktop.py   WebView 宿主和桌面接口
 src/novel_agent_workbench/modern_ui/          新版界面的 HTML、CSS 和 JavaScript
@@ -122,12 +152,17 @@ src/novel_agent_workbench/desktop_app.py      经典 Tk 备用界面
 src/novel_agent_workbench/ui_presenters.py    两种界面共用的显示格式
 src/novel_agent_workbench/token_budget.py     本地 token 估算及完整输入预算
 src/novel_agent_workbench/task_control.py     本地任务停止和网络中断
+src/novel_agent_workbench/refinement.py       AI 精修业务及提示词/预算检查
 src/novel_agent_workbench/application_service.py
 src/novel_agent_workbench/storage.py
 src/novel_agent_workbench/providers.py
 ```
 
 接口约定和项目说明在 [`codex_docs/`](codex_docs/) 中。
+
+AI 精修入口仍为 `WorkbenchApplicationService.refine_draft_from_ai_review`，内部委托给 `DraftRefinementService`；提示词、完整材料预算、审稿有效性和新草稿保存规则保持一致。旧的提示词辅助函数导入位置继续兼容。
+
+`.venv\Scripts\python.exe -m unittest discover -s scripts -p test_architecture_integrity.py` 使用临时文件验证记忆/资料的备份数量、无变化保存和概览与高级诊断的隔离；精修回归继续使用 `scripts/test_refinement_integrity.py`。
 
 在 Windows 桌面会话中运行 `.venv\Scripts\python.exe scripts\verify_desktop_iterations.py`，可用独立临时项目库验证保存提示、切库、备份恢复和原生退出；不会调用模型。结果保存在 `work/desktop-iteration-check/ui_results.json`。
 
@@ -170,6 +205,8 @@ In the packaged app, projects, settings, and secrets live in the `用户数据` 
 ### Build on Windows
 
 Building the EXE requires Windows 10/11 and Python 3.11–3.14.
+
+Direct and transitive build dependencies are pinned in `requirements-windows-build.txt`. The build verifies these versions even with `-SkipInstall`; the exercised runtime is Python 3.14.5. Daily overview queries are separate from advanced diagnostics. Unchanged memory/planning saves preserve existing timestamps and backups, and a memory form save reuses its first full checkpoint without changing its two-step save behavior. Historical checkpoints remain compatible and are never automatically deleted.
 
 ```cmd
 git clone https://github.com/linnnn89/novel-agent-workbench.git

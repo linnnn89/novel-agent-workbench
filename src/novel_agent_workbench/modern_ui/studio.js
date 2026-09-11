@@ -1627,6 +1627,16 @@ async function openBackupStudio() {
   const scroll = el("div", "studio-scroll");
   const form = el("div", "studio-form");
   form.append(el("p", "studio-note", "显示最近 200 个完整作品检查点。先校验全部文件，再恢复成新作品副本供你核对；当前作品保持不变，密钥不会复制。"));
+  const backupBytes = Number(data.total_bytes || 0);
+  const backupSize = backupBytes < 1048576 ? `${Math.ceil(backupBytes / 1024)} KiB` : `${(backupBytes / 1048576).toFixed(1)} MiB`;
+  form.append(el("p", "studio-note", `全部 ${data.total_count} 个完整备份共占用 ${backupSize}。列表数量不限制磁盘上的备份总量。`));
+  const manage = el("button", "btn quiet", "打开项目库整理备份");
+  manage.type = "button";
+  manage.addEventListener("click", () => {
+    if (projectsRoot !== state.projectsRoot) return toast("项目库已切换，请重新打开历史备份。");
+    call("open_folder", "library").catch(error => toast(error.message));
+  });
+  form.append(manage, el("p", "studio-note", "完整备份位于各作品的 backups/checkpoints 文件夹；请保留需要的时间点，手工删除后将无法从该备份恢复。"));
   const details = el("pre", "studio-records", "请选择一个备份，查看时间、原因和内容数量。");
   const restore = el("button", "btn primary", "恢复为新作品副本");
   restore.type = "button";

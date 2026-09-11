@@ -1,5 +1,7 @@
 """Core package for the new novel agent workbench."""
 
+from .version import __version__
+
 from .application_service import WorkbenchApplicationService
 from .audit import AuditFinding, audit_project
 from .chapters import ChapterWorkflowEntry, ChapterWorkflowError, ChapterWorkflowService

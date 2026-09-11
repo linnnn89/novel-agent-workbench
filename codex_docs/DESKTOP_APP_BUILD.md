@@ -55,7 +55,11 @@ Direct PowerShell build command:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_windows_exe.ps1
 ```
 
-The scripts create/use project-local `.venv`, require Python 3.11-3.14 for the Windows EXE build, install `pyinstaller`, `pillow`, and `pywebview`, reuse the committed icon by default, and build the Windows EXE. Pass `-RegenerateIcon` to the PowerShell script only when intentionally updating icon assets.
+The scripts create/use project-local `.venv`, require Python 3.11-3.14 for the Windows EXE build, install the direct and transitive versions pinned in `requirements-windows-build.txt`, reuse the committed icon by default, and build the Windows EXE. Pass `-RegenerateIcon` only when intentionally updating icon assets. `-SkipInstall` skips installation but still checks every pinned version and runs `pip check`; mismatches stop before packaging or replacement. The currently exercised build runtime is Python 3.14.5.
+
+Update the pinned file deliberately when upgrading dependencies, then validate a full build and real EXE startup. This uses pip's [repeatable installation pattern](https://pip.pypa.io/en/stable/topics/repeatable-installs/); it does not promise identical binary hashes across machines or Python runtimes.
+
+The application version comes from `src/novel_agent_workbench/version.py`. The Python package uses the same value via setuptools dynamic metadata; the EXE embeds it in `build_info.json` and displays it in its window title and About page. Follow the README release policy before delivering a code update. Rebuilding unchanged source does not increment the application version.
 
 The publish step replaces only `NovelAgentWorkbench.exe` and `_internal`. The `用户数据` directory is never deleted.
 

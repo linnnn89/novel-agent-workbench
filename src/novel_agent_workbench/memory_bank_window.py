@@ -387,6 +387,7 @@ def open_memory_bank_window(
                 enabled=include_context_var.get(),
                 reason_code="desktop_toggle",
                 target_token_budget=target_tokens,
+                checkpoint_before_update=not bool(result.get("checkpoint")),
             )
         except Exception as exc:
             messagebox.showerror(APP_TITLE, f"保存记忆正文失败:\n{exc}", parent=window)
