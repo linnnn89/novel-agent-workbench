@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .application_service import WorkbenchApplicationService
+from .library_lock import LibraryLease, LibraryInUseError, show_startup_message
+from .version import __version__
 from .task_control import JobControl, JobCancelled, current_job, job_scope
 from .token_budget import InputBudgetExceeded
 from .ui_presenters import (
@@ -52,7 +54,7 @@ from .storage import ProjectLockError, atomic_write_json_file, utc_stamp
 
 
 
-APP_TITLE = "小说创作工作台"
+APP_TITLE = f"小说创作工作台 v{__version__}"
 MODEL_ROLE_OPTIONS = (("writer", "正文生成"), ("scorer", "AI审稿"), ("reviser", "AI精修/改写"))
 RECORD_PAGES = (
     ("connection", "连接检查", True),
@@ -394,7 +396,8 @@ def build_project_chapters(app: WorkbenchApplicationService, project_id: str) ->
 
 
 class WorkbenchBridge:
-    def __init__(self, *, projects_root: Path, repo_root: Path, settings_path: Path | None = None) -> None:
+    def __init__(self, *, projects_root: Path, repo_root: Path, settings_path: Path | None = None,
+                 library_lease: LibraryLease | None = None) -> None:
         self.projects_root = projects_root.resolve()
         self.settings_path = settings_path or self.projects_root.parent / "desktop_settings.local.json"
         self.repo_root = repo_root
@@ -406,6 +409,12 @@ class WorkbenchBridge:
         self._job_number = 0
         self._job_flushers: list[Callable[[], None]] = []
         self._close_coordinator: WindowCloseSaveCoordinator | None = None
+        self._library_lease = library_lease
+
+    def _release_library_lease(self) -> None:
+        if self._library_lease is not None:
+            self._library_lease.close()
+            self._library_lease = None
 
     def wait_close_decision(self, attempt_id: int, pending: bool) -> dict[str, Any]:
         if self._close_coordinator is not None:
@@ -495,6 +504,10 @@ class WorkbenchBridge:
                     payload = _ok(_jsonable(result))
                 for flush in self._job_flushers:
                     flush()
+                if control.warnings:
+                    payload["warnings"] = list(control.warnings)
+                    for warning in control.warnings:
+                        self._log(warning)
                 self._end_job()
                 self._push(on_done, payload)
 
@@ -1541,22 +1554,31 @@ class WorkbenchBridge:
             if self._busy:
                 return _fail("当前任务尚未结束，不能切换项目库。")
             self._busy = True
+        new_lease = None
         try:
             selected = _ACTIVE_WINDOW.create_file_dialog(webview.FOLDER_DIALOG, directory=str(self.projects_root))
             if not selected:
                 return _fail("已取消更改项目库。", cancelled=True)
             path = Path(selected[0] if isinstance(selected, (list, tuple)) else selected).expanduser().resolve()
+            if path == self.projects_root:
+                return _ok({"projectsRoot": str(path), "workspace": build_workspace_tree(self.app)})
+            if self._library_lease is not None:
+                new_lease = LibraryLease.acquire(path)
             path.mkdir(parents=True, exist_ok=True)
             candidate = WorkbenchApplicationService.open(path)
             workspace = build_workspace_tree(candidate)
             atomic_write_json_file(self.settings_path, {"projects_root": str(path)})
             with self._busy_lock:
+                self._release_library_lease()
+                self._library_lease, new_lease = new_lease, None
                 self.projects_root = path
                 self.app = candidate
             return _ok({"projectsRoot": str(path), "workspace": workspace})
         except Exception as exc:
             return _fail(f"切换项目库失败: {exc}")
         finally:
+            if new_lease is not None:
+                new_lease.close()
             self._end_job()
 
     def history_backups(self) -> dict[str, Any]:
@@ -1748,7 +1770,7 @@ class WorkbenchBridge:
             {
                 "title": APP_TITLE,
                 "text": (
-                    build_text + f"当前项目库：{self.projects_root}\n\n"
+                    f"版本：v{__version__}\n" + build_text + f"当前项目库：{self.projects_root}\n\n"
                     "本地优先的小说创作工作台。\n\n"
                     "草稿必须由你显式确认，才会成为正文。\n"
                     "保存设置、打开作品、编辑正文不会自动联网。\n"
@@ -1806,8 +1828,29 @@ def main() -> int:
                 projects_root = saved_root.resolve()
         except (OSError, KeyError, TypeError, ValueError):
             pass
-    projects_root.mkdir(parents=True, exist_ok=True)
-    api = WorkbenchBridge(projects_root=projects_root, repo_root=default_repo_root(), settings_path=settings_path)
+    try:
+        lease = LibraryLease.acquire(projects_root)
+    except (LibraryInUseError, OSError) as exc:
+        show_startup_message(str(exc))
+        return 1
+    try:
+        return _run_desktop(projects_root, settings_path, index, lease)
+    finally:
+        lease.close()
+
+
+def _run_desktop(projects_root: Path, settings_path: Path, index: Path, lease: LibraryLease) -> int:
+    import webview
+    api = WorkbenchBridge(projects_root=projects_root, repo_root=default_repo_root(), settings_path=settings_path,
+                          library_lease=lease)
+    try:
+        return _run_window(api, index)
+    finally:
+        api._release_library_lease()
+
+
+def _run_window(api: WorkbenchBridge, index: Path) -> int:
+    import webview
     window = webview.create_window(
         APP_TITLE,
         url=str(index.resolve()),

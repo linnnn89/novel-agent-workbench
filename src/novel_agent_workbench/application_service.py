@@ -362,7 +362,7 @@ class WorkbenchApplicationService:
     def update_global_generation_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         updated = deep_merge(self.global_generation_settings(), settings)
         global_settings = self._read_global_settings()
-        global_settings["schema_version"] = 1
+        global_settings["schema_version"] = MODEL_SETTINGS_SCHEMA_VERSION
         global_settings["generation_settings"] = updated
         self._write_global_settings(global_settings)
         return updated
@@ -370,7 +370,7 @@ class WorkbenchApplicationService:
     def reset_global_generation_settings(self) -> dict[str, Any]:
         defaults = default_generation_settings()
         global_settings = self._read_global_settings()
-        global_settings["schema_version"] = 1
+        global_settings["schema_version"] = MODEL_SETTINGS_SCHEMA_VERSION
         global_settings["generation_settings"] = defaults
         self._write_global_settings(global_settings)
         return defaults
@@ -423,11 +423,12 @@ class WorkbenchApplicationService:
         with store.lock():
             config = store.read_config()
             global_settings = self.global_generation_settings()
-            self._apply_generation_settings_to_config(
-                config,
-                global_settings,
-                scope=GENERATION_SETTINGS_SCOPE_GLOBAL,
-            )
+            config["generation_settings_scope"] = GENERATION_SETTINGS_SCOPE_GLOBAL
+            config.pop("generation_settings", None)
+            policy = dict(config.get("context_policy") or {})
+            policy.pop("max_context_tokens", None)
+            policy.pop("recent_confirmed_chapter_count", None)
+            config["context_policy"] = policy
             store.write_config(config)
             return global_settings
 
@@ -1144,7 +1145,7 @@ class WorkbenchApplicationService:
         return FormalContextPlanService(self._open_store(project_id)).read_formal_context_plan(plan_id)
 
     def context_assembly_dry_run(self, project_id: str, *, max_context_tokens: int | None = None) -> dict[str, Any]:
-        return ContextAssemblerService(self._sync_project_generation_settings_for_runtime(project_id)).dry_run(
+        return ContextAssemblerService(self._runtime_store(project_id)).dry_run(
             max_context_tokens=max_context_tokens,
         ).to_dict()
 
@@ -1156,7 +1157,7 @@ class WorkbenchApplicationService:
         chapter_id: str = "",
         include_text: bool = False,
     ) -> dict[str, Any]:
-        return ContextAssemblerService(self._sync_project_generation_settings_for_runtime(project_id)).package_preview(
+        return ContextAssemblerService(self._runtime_store(project_id)).package_preview(
             max_context_tokens=max_context_tokens,
             chapter_id=chapter_id,
             include_text=include_text,
@@ -1173,7 +1174,7 @@ class WorkbenchApplicationService:
         include_prompt_text: bool = False,
         include_context_text: bool = False,
     ) -> dict[str, Any]:
-        return ContextAssemblerService(self._sync_project_generation_settings_for_runtime(project_id)).prompt_render_dry_run(
+        return ContextAssemblerService(self._runtime_store(project_id)).prompt_render_dry_run(
             prompt=prompt,
             system_prompt=system_prompt,
             max_context_tokens=max_context_tokens,
@@ -1203,7 +1204,7 @@ class WorkbenchApplicationService:
         system_prompt: str = "",
         max_context_tokens: int | None = None,
     ) -> dict[str, Any]:
-        return FinalAssemblyGateService(self._sync_project_generation_settings_for_runtime(project_id)).create_gate(
+        return FinalAssemblyGateService(self._runtime_store(project_id)).create_gate(
             chapter_id=chapter_id,
             prompt=prompt,
             system_prompt=system_prompt,
@@ -1654,6 +1655,8 @@ class WorkbenchApplicationService:
         return normalized
 
     def _write_global_settings(self, settings: dict[str, Any]) -> None:
+        from .config import require_supported_schema
+        require_supported_schema(settings, maximum=MODEL_SETTINGS_SCHEMA_VERSION, label="全局设置")
         self.registry.initialize()
         atomic_write_json_file(self._global_settings_path(), settings)
 
@@ -1678,7 +1681,8 @@ class WorkbenchApplicationService:
         return roles
 
     def _runtime_store(self, project_id: str) -> RuntimeModelSettingsStore | ProjectStore:
-        store = self._sync_project_generation_settings_for_runtime(project_id)
+        store = self._open_store(project_id)
+        store.initialize()
         global_settings = self._read_global_settings()
         global_roles = (
             global_settings.get("model_roles")
@@ -1686,13 +1690,12 @@ class WorkbenchApplicationService:
             else {}
         )
         config = store.read_config()
-        settings, _ = self._effective_project_generation_settings(store, config=config)
+        settings = effective_layered_generation_settings(effective_generation_settings(global_settings), config)
         if str(global_settings.get("primary_model_ref") or "") or model_roles_have_config(global_roles):
             runtime_roles = merged_writer_sampling_settings(global_roles, settings)
             runtime_secrets = self._read_global_secrets()
             runtime_model_settings = {
                 **global_settings,
-                "generation_settings": settings,
                 "model_roles": runtime_roles,
             }
         else:
@@ -1700,6 +1703,14 @@ class WorkbenchApplicationService:
             runtime_roles = merged_writer_sampling_settings(legacy_roles, settings)
             runtime_secrets = store.read_secrets()
             runtime_model_settings = {"model_roles": runtime_roles}
+        # Derive the effective view without copying global defaults back into the project.
+        context = settings.get("context") or {}
+        runtime_model_settings["generation_settings"] = settings
+        runtime_model_settings["context_policy"] = {
+            **(config.get("context_policy") or {}),
+            "max_context_tokens": context["max_context_tokens"],
+            "recent_confirmed_chapter_count": context["recent_confirmed_chapter_count"],
+        }
         return RuntimeModelSettingsStore(store, model_settings=runtime_model_settings, secrets=runtime_secrets)
 
     @staticmethod
@@ -1728,40 +1739,7 @@ class WorkbenchApplicationService:
         global_settings = self.global_generation_settings()
         has_override = project_has_generation_settings_override(source_config)
         settings = effective_layered_generation_settings(global_settings, source_config)
-        if not has_override and config is None:
-            synced = dict(source_config)
-            self._apply_generation_settings_to_config(
-                synced,
-                settings,
-                scope=GENERATION_SETTINGS_SCOPE_GLOBAL,
-            )
-            if synced != source_config:
-                store.write_config(synced)
         return settings, has_override
-
-    def _sync_project_generation_settings_for_runtime(self, project_id: str) -> ProjectStore:
-        store = self._open_store(project_id)
-        store.initialize()
-        self._effective_project_generation_settings(store)
-        return store
-
-    def _apply_generation_settings_to_config(
-        self,
-        config: dict[str, Any],
-        settings: dict[str, Any],
-        *,
-        scope: str,
-    ) -> None:
-        config["generation_settings"] = settings
-        config["generation_settings_scope"] = scope
-        context_settings = settings.get("context") if isinstance(settings.get("context"), dict) else {}
-        context_policy = config.get("context_policy") if isinstance(config.get("context_policy"), dict) else {}
-        if isinstance(context_settings.get("max_context_tokens"), int):
-            context_policy["max_context_tokens"] = context_settings["max_context_tokens"]
-        if isinstance(context_settings.get("recent_confirmed_chapter_count"), int):
-            context_policy["recent_confirmed_chapter_count"] = context_settings["recent_confirmed_chapter_count"]
-        config["context_policy"] = context_policy
-        config["model_roles"] = merged_writer_sampling_settings(config.get("model_roles"), settings)
 
     def _open_store(self, project_id: str) -> ProjectStore:
         return self.registry.open_project(project_id)

@@ -161,6 +161,8 @@ def normalize_model_profile(model_ref: str, value: object) -> dict[str, Any]:
 
 def migrate_global_model_settings(value: object) -> tuple[dict[str, Any], bool]:
     """Return schema-v2 settings while preserving legacy model_roles verbatim."""
+    from .config import require_supported_schema
+    require_supported_schema(value, maximum=MODEL_SETTINGS_SCHEMA_VERSION, label="全局设置")
     source = deepcopy(value) if isinstance(value, dict) else {}
     changed = int(source.get("schema_version") or 0) < MODEL_SETTINGS_SCHEMA_VERSION
     defaults = default_model_settings_fields()

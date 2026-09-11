@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools==82.0.1"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "novel-agent-workbench"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Local AI novel writing workbench / 本地 AI 小说创作工作台。"
 requires-python = ">=3.10"
 dependencies = ["deepseek-tokenizer==0.3.0"]
@@ -15,3 +19,6 @@ novel-agent-workbench-classic = "novel_agent_workbench.desktop_app:main"
 
 [tool.setuptools.package-data]
 novel_agent_workbench = ["assets/*.ico", "assets/*.png", "modern_ui/*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "novel_agent_workbench.version.__version__"}

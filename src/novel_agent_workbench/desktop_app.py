@@ -13,6 +13,8 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .application_service import WorkbenchApplicationService
+from .library_lock import LibraryLease, LibraryInUseError, show_startup_message
+from .version import __version__
 from .chapters import format_chapter_id
 from .classic_ui_theme import (
     FONT_BASE,
@@ -292,12 +294,14 @@ def enable_windows_dpi_awareness() -> None:
 
 
 class WorkbenchDesktopApp(tk.Tk):
-    def __init__(self, *, projects_root: Path | None = None, repo_root: Path | None = None) -> None:
+    def __init__(self, *, projects_root: Path | None = None, repo_root: Path | None = None,
+                 library_lease: LibraryLease | None = None) -> None:
         enable_windows_dpi_awareness()
         super().__init__()
         self.projects_root = projects_root or default_projects_root()
         self.repo_root = repo_root or default_repo_root()
         self.app = WorkbenchApplicationService.open(self.projects_root)
+        self._library_lease = library_lease
         self.projects: list[dict[str, Any]] = []
         self.selected_project_id = ""
         self.current_draft_project_id = ""
@@ -317,7 +321,7 @@ class WorkbenchDesktopApp(tk.Tk):
         self._last_normal_geometry: tuple[int, int, int, int] | None = None
         self._restore_visibility_job: str | None = None
 
-        self.title(APP_TITLE)
+        self.title(f"{APP_TITLE} v{__version__}")
         self.minsize(*WINDOW_MIN_SIZE)
         self.geometry("1180x760")
         self.resizable(True, True)
@@ -1069,10 +1073,28 @@ class WorkbenchDesktopApp(tk.Tk):
             menu.grab_release()
 
     def choose_data_root(self) -> None:
+        if self.current_draft_project_id and self.current_draft_index >= 0 and not self.save_current_draft_edit(silent=True):
+            return
         selected = filedialog.askdirectory(title="选择项目库位置", initialdir=str(self.projects_root))
         if not selected:
             return
-        self.projects_root = Path(selected).resolve()
+        target = Path(selected).resolve()
+        if target == self.projects_root.resolve():
+            return
+        new_lease = None
+        try:
+            if self._library_lease is not None:
+                new_lease = LibraryLease.acquire(target)
+            WorkbenchApplicationService.open(target).list_projects()
+        except Exception as exc:
+            if new_lease is not None:
+                new_lease.close()
+            messagebox.showerror(APP_TITLE, f"切换项目库失败：{exc}")
+            return
+        if self._library_lease is not None:
+            self._library_lease.close()
+        self._library_lease = new_lease
+        self.projects_root = target
         self.root_var.set(str(self.projects_root))
         self.write_log(f"项目库位置: {self.projects_root}")
         self.refresh_projects()
@@ -4516,8 +4538,19 @@ def format_health_log(health: dict[str, Any]) -> str:
 
 
 def main() -> int:
-    app = WorkbenchDesktopApp()
-    app.mainloop()
+    try:
+        lease = LibraryLease.acquire(default_projects_root())
+    except (LibraryInUseError, OSError) as exc:
+        show_startup_message(str(exc))
+        return 1
+    app = None
+    try:
+        app = WorkbenchDesktopApp(projects_root=lease.root, library_lease=lease)
+        app.mainloop()
+    finally:
+        if app is not None and app._library_lease is not None:
+            app._library_lease.close()
+        lease.close()
     return 0
 
 

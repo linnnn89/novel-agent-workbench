@@ -20,9 +20,11 @@ from novel_agent_workbench.application_service import WorkbenchApplicationServic
 from novel_agent_workbench.modern_desktop import WorkbenchBridge, WindowCloseSaveCoordinator, modern_ui_dir
 from novel_agent_workbench.drafts import DraftGenerationService
 from novel_agent_workbench.storage import ProjectStore
+from novel_agent_workbench.library_lock import LibraryLease, LibraryInUseError
 
 LIB_A, LIB_B = DATA / "library-a", DATA / "library-b"
-api = WorkbenchBridge(projects_root=LIB_A, repo_root=ROOT, settings_path=DATA / "desktop_settings.local.json")
+api = WorkbenchBridge(projects_root=LIB_A, repo_root=ROOT, settings_path=DATA / "desktop_settings.local.json",
+                      library_lease=LibraryLease.acquire(LIB_A))
 api.app.create_project("same_id", title="迭代验收作品")
 store_a = ProjectStore.open(LIB_A, "same_id")
 drafts_a = DraftGenerationService(store_a)
@@ -50,6 +52,7 @@ api.bind_window(window)
 closer = WindowCloseSaveCoordinator(window)
 api._close_coordinator = closer
 window.events.closing += closer.on_closing
+window.events.closed += api._release_library_lease
 results = {"isolated_data": str(DATA)}
 completed = threading.Event()
 
@@ -143,10 +146,22 @@ def run():
         rejected = api.save_draft("same_id", draft.draft_id, "迟到请求不得写入 B。", str(LIB_A))
         assert not rejected["ok"]
         evaluate('await loadDraft("same_id",' + json.dumps(draft.draft_id) + ');return true;')
+        with LibraryLease.acquire(LIB_A), patch.object(window, "create_file_dialog", return_value=[str(LIB_A)]):
+            evaluate('''$("dataRootBtn").click();await until(()=>$("toast").textContent.includes("另一个窗口")&&!state.changingRoot);return true;''')
+        assert api.projects_root == LIB_B.resolve()
         with patch.object(window, "create_file_dialog", return_value=[str(LIB_A)]), patch("novel_agent_workbench.modern_desktop.atomic_write_json_file", side_effect=OSError("验收模拟：位置无法保存")):
             evaluate('''$("dataRootBtn").click();await until(()=>$("toast").textContent.includes("位置无法保存")&&!state.changingRoot);return true;''')
         assert api.projects_root == LIB_B.resolve()
         assert window.evaluate_js('$("editor").value') == "B 库同名稿件，不可被 A 覆盖。"
+        with LibraryLease.acquire(LIB_A):
+            pass
+        try:
+            with LibraryLease.acquire(LIB_B):
+                raise AssertionError("Current library ownership was released after a failed switch")
+        except LibraryInUseError:
+            pass
+        results["library_ownership"] = {"occupied_target_rejected": True, "failed_switch_releases_target": True,
+                                        "current_library_still_owned": True}
         results["library_switch"] = {"saves_original_library": True, "same_ids_do_not_overwrite": True, "old_editor_cleared": True, "late_save_rejected": True, "remembered_root": True, "failed_switch_preserves_current": True}
 
         evaluate('''$("historyBackupsBtn").click();await until(()=>studio.mode==="backups");const b=Array.from($("studioBody").querySelectorAll("button.choice")).find(b=>b.textContent.includes("删除章节"));if(!b)throw Error("Expected deletion checkpoint");b.click();await until(()=>!Array.from($("studioBody").querySelectorAll("button")).find(b=>b.textContent==="恢复为新作品副本").disabled);return true;''')
@@ -165,6 +180,19 @@ def run():
         assert "记忆原文。" in recovered.data_file_path("memory_bank.json").read_text(encoding="utf8")
         assert drafts_b.read_draft(draft.draft_id)["content"] == "B 库同名稿件，不可被 A 覆盖。"
         results["backup_restore"] = {"new_project": restored_id, "backup_drafts_and_memory_restored": True, "source_unchanged": True}
+        log_path = recovered.data_dir / "provider_call_log.json"
+        log_path.write_text("{damaged UI fixture", encoding="utf8")
+        generated_id = evaluate('''await generateChapter();await until(()=>!$("modal").hidden&&$("modalTitle").textContent==="生成新章节");
+            const inputs=$("modalBody").querySelectorAll("input");edit(inputs[0],"chapter_3");edit(inputs[1],"日志故障验收");
+            edit($("modalBody").querySelector("textarea"),"生成一段用于验收的小说正文。");press("modalFoot","生成草稿");
+            await until(()=>!state.generating&&state.chapterId==="chapter_3"&&$("drawerTitle").textContent.includes("调用记录未保存"));return state.draftId;''')
+        assert DraftGenerationService(recovered).read_draft(generated_id)["content"].strip()
+        assert log_path.read_text(encoding="utf8") == "{damaged UI fixture"
+        results["log_failure"] = {"draft_saved": True, "damaged_log_preserved": True, "warning_visible": True}
+        results["version"] = api.about()["data"]["text"].splitlines()[0]
+        assert results["version"] == "版本：v1.0.0"
+        phase("log-warning")
+        evaluate('closeDrawer();return true;')
         results["errors"] = window.evaluate_js("window.__uiErrors")
         assert results["errors"] == []
         evaluate('await loadDraft(' + json.dumps(restored_id) + ',' + json.dumps(draft.draft_id) + ''');edit($("editor"),"退出时的最后正文。");await openMemoryStudio();edit(studio.memoryEditor,"退出时的最后记忆。");return true;''')
@@ -186,5 +214,6 @@ def run():
         completed.set()
 
 webview.start(run, gui="edgechromium", debug=False, private_mode=True)
+api._release_library_lease()
 completed.wait(30)
 raise SystemExit(0 if results.get("passed") else 1)

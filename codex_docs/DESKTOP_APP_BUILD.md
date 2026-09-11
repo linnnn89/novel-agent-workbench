@@ -59,6 +59,8 @@ The scripts create/use project-local `.venv`, require Python 3.11-3.14 for the W
 
 Update the pinned file deliberately when upgrading dependencies, then validate a full build and real EXE startup. This uses pip's [repeatable installation pattern](https://pip.pypa.io/en/stable/topics/repeatable-installs/); it does not promise identical binary hashes across machines or Python runtimes.
 
+The application version comes from `src/novel_agent_workbench/version.py`. The Python package uses the same value via setuptools dynamic metadata; the EXE embeds it in `build_info.json` and displays it in its window title and About page. Follow the README release policy before delivering a code update. Rebuilding unchanged source does not increment the application version.
+
 The publish step replaces only `NovelAgentWorkbench.exe` and `_internal`. The `用户数据` directory is never deleted.
 
 ## Icon

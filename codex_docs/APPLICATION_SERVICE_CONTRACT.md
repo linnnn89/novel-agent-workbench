@@ -20,6 +20,10 @@ It must not directly implement storage internals, Provider HTTP calls, Memory Ba
 
 ## Construction
 
+V1 data rules: generation settings queries and runtime views compute global defaults plus explicit project settings without synchronizing them back to project files. Clearing a project override removes its generation settings; imports keep the existing global/project choice. Newer project, configuration or global-settings schema versions are rejected before migration or writes. Provider call-log failures preserve the response or original provider error; desktop jobs report them separately as warnings.
+
+Desktop entry points own a `LibraryLease` for their current project library. Acquire the destination lease before switching, keep the original lease on failure, and release it after a successful switch or window shutdown. The application facade remains usable independently for CLI and temporary-resource tests.
+
 Default:
 
 ```python

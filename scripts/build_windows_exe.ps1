@@ -228,8 +228,10 @@ try {
     $commit = & git rev-parse HEAD
     if ($LASTEXITCODE -ne 0) { $commit = 'unknown' }
     $dirty = [bool](& git status --porcelain)
+    $appVersion = & $VenvPython (Join-Path $RepoRoot 'src/novel_agent_workbench/version.py')
+    if ($LASTEXITCODE -ne 0 -or $appVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid application version.' }
     $BuildInfoPath = Join-Path $RunBuildRoot 'build_info.json'
-    $buildInfo = @{ built_at = (Get-Date -Format 'o'); commit = $commit; local_changes = $dirty } | ConvertTo-Json
+    $buildInfo = @{ version = $appVersion; built_at = (Get-Date -Format 'o'); commit = $commit; local_changes = $dirty } | ConvertTo-Json
     [IO.File]::WriteAllText($BuildInfoPath, $buildInfo, (New-Object Text.UTF8Encoding($false)))
 
     Write-Host "[5/6] Building PyInstaller application"

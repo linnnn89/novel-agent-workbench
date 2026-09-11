@@ -9,7 +9,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from .config import CURRENT_CONFIG_SCHEMA_VERSION
+from .config import CURRENT_CONFIG_SCHEMA_VERSION, require_supported_schema
+from .version import __version__
 from .storage import (
     InvalidProjectIdError,
     ProjectLockError,
@@ -681,6 +682,14 @@ def _validate_open_archive(package_path: Path, archive: zipfile.ZipFile, *, chec
         raise StorageError("作品包缺少 project.json。") from exc
     if not isinstance(project_meta, dict) or not str(project_meta.get("project_id") or "").strip():
         raise StorageError("作品包缺少项目编号。")
+    require_supported_schema(project_meta, maximum=1, label="作品")
+    config_bytes = file_bytes.get("data/config.json")
+    if config_bytes:
+        try:
+            config = json.loads(config_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise StorageError("作品配置无法读取，未导入任何内容。") from exc
+        require_supported_schema(config, maximum=CURRENT_CONFIG_SCHEMA_VERSION, label="作品配置")
     manifest_source = manifest if checkpoint else (manifest.get("source") if isinstance(manifest.get("source"), dict) else {})
     if str(manifest_source.get("project_id") or "") != str(project_meta.get("project_id") or ""):
         raise StorageError("作品包清单与 project.json 的编号不一致。")
@@ -860,12 +869,7 @@ def _inventory_for(store: ProjectStore, entries: list[dict[str, Any]]) -> dict[s
 
 
 def _workbench_version() -> str:
-    try:
-        from importlib.metadata import version
-
-        return version("novel-agent-workbench")
-    except Exception:
-        return "0.1.0"
+    return __version__
 
 
 def _translate_os_error(exc: OSError) -> StorageError:

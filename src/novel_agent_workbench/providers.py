@@ -19,7 +19,7 @@ from .model_settings import (
     supports_deepseek_thinking,
     resolve_model_role_mapping,
 )
-from .storage import ProjectStore, utc_stamp
+from .storage import ProjectStore, StorageError, utc_stamp
 from .token_budget import capacity_check
 from .task_control import check_cancelled, current_job, interruptible_wait, open_request
 
@@ -750,7 +750,7 @@ def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> Pro
         if control:
             control.begin_saving()
         request = replace(request, metadata={**request.metadata, "elapsed_seconds": round(time.monotonic() - started_at, 3)})
-        append_provider_call_log(
+        log_warning = try_append_provider_call_log(
             store,
             provider_call_log_entry(
                 call_id=call_id,
@@ -761,6 +761,8 @@ def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> Pro
                 usage=response.usage,
             ),
         )
+        if log_warning:
+            response = replace(response, raw_metadata={**response.raw_metadata, "log_warning": log_warning})
         return response
     except ProviderError as exc:
         role_config = (
@@ -768,7 +770,7 @@ def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> Pro
             if client
             else get_effective_model_role_config(store, request.role, feature_id=request.feature_id)
         )
-        append_provider_call_log(
+        try_append_provider_call_log(
             store,
             provider_call_log_entry(
                 call_id=call_id,
@@ -1626,12 +1628,25 @@ def simulated_provider_error(value: str) -> ProviderError:
     return ProviderError(allowed[value], error_type=value)
 
 
+def try_append_provider_call_log(store: ProjectStore, entry: dict[str, Any]) -> str:
+    """Diagnostics must not discard provider output or replace the original error."""
+    try:
+        append_provider_call_log(store, entry)
+    except (OSError, ValueError, TypeError, StorageError) as exc:
+        message = f"本次调用记录未保存（{type(exc).__name__}）；请检查项目的 provider_call_log.json。"
+        control = current_job()
+        if control is not None:
+            control.warnings.append(message)
+        return message
+    return ""
+
+
 def append_provider_call_log(store: ProjectStore, entry: dict[str, Any]) -> None:
     path = store.data_dir / PROVIDER_CALL_LOG_FILENAME
     log = store.read_json(path, default={"schema_version": 1, "calls": []})
-    if not isinstance(log, dict):
-        log = {"schema_version": 1, "calls": []}
-    calls = log.get("calls") if isinstance(log.get("calls"), list) else []
+    if not isinstance(log, dict) or not isinstance(log.get("calls", []), list):
+        raise ValueError("Invalid provider call log; original file preserved.")
+    calls = log.get("calls", [])
     calls.append(entry)
     store.write_json(path, {"schema_version": 1, "calls": calls})
 
