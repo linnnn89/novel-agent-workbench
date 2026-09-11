@@ -45,19 +45,24 @@ function refreshStudioSaveStatus() {
   label.textContent = studioHasChanges() ? "有未保存修改" : "已保存";
 }
 
-function lockStudioForm() {
+function lockStudioForm(reason = "正在保存，请稍候。") {
   studio.saving = true;
-  const controls = Array.from($("studioBody").querySelectorAll("input, textarea, select, button"));
+  studio.lockReason = reason;
+  // Tabs can replace the form, so they belong to the same write/read boundary.
+  // The task's cancel button must remain available during a model refresh.
+  const controls = Array.from($("studio").querySelectorAll("input, textarea, select, button"))
+    .filter(control => control.id !== "cancelStudioJobBtn");
   const disabled = controls.map(control => control.disabled);
   controls.forEach(control => { control.disabled = true; });
   return () => {
     controls.forEach((control, index) => { control.disabled = disabled[index]; });
     studio.saving = false;
+    studio.lockReason = "";
   };
 }
 
 async function guardStudioLeave() {
-  if (studio.saving) { toast("正在保存，请稍候。"); return false; }
+  if (studio.saving) { toast(studio.lockReason || "正在保存，请稍候。"); return false; }
   if (studio.memoryBusy) { toast("请先停止或等待记忆任务完成。"); return false; }
   if (studio.leaving) return false;
   if (!studioHasChanges()) return true;
@@ -324,12 +329,15 @@ async function refreshSelectedModels() {
   if (!(await guardStudioLeave())) return;
   const profileId = studio.selectedProvider || studio.model.providers?.[0]?.profile_id;
   if (!profileId) return toast("请先选择接入商。");
+  studio.unlockModelRefresh = lockStudioForm("正在刷新模型目录，请稍候或停止任务。");
   setStudioStatus("正在刷新模型目录…");
   setBusy(true, "正在刷新模型目录…", { lockEditor: false, veil: false });
   try {
     await call("refresh_models", profileId);
   } catch (error) {
     setBusy(false);
+    studio.unlockModelRefresh?.();
+    studio.unlockModelRefresh = null;
     setStudioStatus("刷新失败。");
     toast(error.message);
   }
@@ -918,6 +926,7 @@ function formatSavedMemory(data) {
 async function reloadMemoryStudio() {
   if (!requireProject()) return;
   if (!(await guardStudioLeave())) return;
+  const unlock = lockStudioForm("正在从磁盘读取记忆，请稍候。");
   try {
     const loaded = await call("memory_state", state.projectId);
     studio.memoryEditor = null;
@@ -932,7 +941,7 @@ async function reloadMemoryStudio() {
     toast("已从磁盘重新加载已保存记忆。");
   } catch (error) {
     toast(error.message);
-  }
+  } finally { unlock(); }
 }
 
 async function showSavedMemory() {
@@ -1277,6 +1286,8 @@ async function deletePlanningStudio() {
 function handleStudioPush(event, payload) {
   if (event === "models_done") {
     setBusy(false);
+    studio.unlockModelRefresh?.();
+    studio.unlockModelRefresh = null;
     if (!payload?.ok) {
       setStudioStatus("刷新失败。");
       toast(payload?.error || "刷新模型失败");
@@ -1532,16 +1543,23 @@ async function saveGenSettings() {
     markStudioSaved();
     toast("创作设置已保存。");
     return true;
+  } catch (error) {
+    toast(error.message);
+    return false;
   } finally { unlock(); }
 }
 
 async function resetGenSettings() {
   if (!(await guardStudioLeave())) return;
-  const updated = await call("reset_generation_settings", studio.genScope, state.projectId || "");
-  studio.gen = { ...(studio.gen || {}), settings: updated };
-  renderGenSettings();
-  markStudioSaved();
-  toast(studio.genScope === "project" ? "已改用全局默认。" : "已恢复出厂默认。");
+  const unlock = lockStudioForm("正在恢复创作设置，请稍候。");
+  try {
+    const updated = await call("reset_generation_settings", studio.genScope, state.projectId || "");
+    studio.gen = { ...(studio.gen || {}), settings: updated };
+    renderGenSettings();
+    markStudioSaved();
+    toast(studio.genScope === "project" ? "已改用全局默认。" : "已恢复出厂默认。");
+  } catch (error) { toast(error.message); }
+  finally { unlock(); }
 }
 
 async function openRecordsStudio(kind = "connection") {
