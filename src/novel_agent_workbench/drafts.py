@@ -10,7 +10,7 @@ from .chapters import ChapterWorkflowService
 from .config import effective_generation_settings
 from .providers import MOCK_PROVIDER_ID, ProviderRequest, generate_with_provider, get_effective_model_role_config
 from .storage import ProjectStore, retire_path, safe_filename, utc_stamp
-from .token_budget import input_budget, estimate_input_tokens, capacity_check
+from .token_budget import InputBudgetExceeded, input_capacity_report
 from .task_control import check_cancelled
 
 
@@ -277,29 +277,46 @@ class DraftGenerationService:
         max_context_tokens: int | None = None,
         final_assembly_gate_id: str = "",
     ) -> DraftGenerationResult:
+        context_request, render, capacity = self.prepare_context_draft_request(
+            request, max_context_tokens=max_context_tokens,
+        )
+        if not capacity["can_send"]:
+            raise InputBudgetExceeded(capacity)
+        if final_assembly_gate_id:
+            context_request = replace(context_request, metadata={
+                **context_request.metadata, "final_assembly_gate_id": final_assembly_gate_id,
+            })
+        result = self.generate_draft(context_request)
+        role_config = get_effective_model_role_config(self.store, "writer", feature_id="draft_generation")
+        mode = "mock_context_aware_generation" if role_config.provider == MOCK_PROVIDER_ID else "real_context_aware_generation"
+        self._write_context_generation_summary(result.draft_id, render, mode=mode)
+        return result
+
+    def prepare_context_draft_request(
+        self, request: DraftGenerationRequest, *, max_context_tokens: int | None = None,
+    ) -> tuple[DraftGenerationRequest, dict[str, Any], dict[str, Any]]:
+        """Preview and generation use the same full prompt, including all enabled materials."""
         from .context_assembler import ContextAssemblerService
 
         role_config = get_effective_model_role_config(self.store, "writer", feature_id="draft_generation")
         config = self.store.read_config()
         system_prompt = request.system_prompt or effective_generation_settings(config).get("prompting", {}).get("system_prompt", "")
-        limit = input_budget(config, requested=max_context_tokens, feature_id="draft_generation", max_tokens=request.max_tokens)
-        reserve = estimate_input_tokens(system_prompt, request.prompt) + 512
-        if reserve > limit:
-            raise RuntimeError("写作要求已超过可用输入预算，请提高上下文上限或缩短要求；未发送请求。")
         render = ContextAssemblerService(self.store).prompt_render_dry_run(
             prompt=request.prompt,
             system_prompt=system_prompt,
-            max_context_tokens=max(0, limit - reserve),
+            max_context_tokens=max_context_tokens,
             chapter_id=request.chapter_id,
             include_prompt_text=True,
             include_context_text=True,
         ).to_dict()
         rendered_prompt = render_context_prompt(render)
-        capacity_check(config, rendered_prompt, system_prompt, feature_id="draft_generation",
-                       input_limit=limit, max_tokens=request.max_tokens, model=role_config.model)
-        metadata = {**request.metadata, "context_aware_generation": True, "input_token_limit": limit}
-        if final_assembly_gate_id:
-            metadata["final_assembly_gate_id"] = final_assembly_gate_id
+        capacity = input_capacity_report(config, rendered_prompt, system_prompt, feature_id="draft_generation",
+                                         input_limit=max_context_tokens, max_tokens=request.max_tokens,
+                                         model=role_config.model)
+        render["input_capacity"] = capacity
+        render["prompt_summary"]["estimated_total_tokens"] = capacity["estimated_input_tokens"]
+        metadata = {**request.metadata, "context_aware_generation": True,
+                    "input_token_limit": capacity["configured_input_limit"]}
         context_request = DraftGenerationRequest(
             chapter_id=request.chapter_id,
             title=request.title,
@@ -318,10 +335,7 @@ class DraftGenerationService:
             reasoning_callback=request.reasoning_callback,
             metadata=metadata,
         )
-        result = self.generate_draft(context_request)
-        mode = "mock_context_aware_generation" if role_config.provider == MOCK_PROVIDER_ID else "real_context_aware_generation"
-        self._write_context_generation_summary(result.draft_id, render, mode=mode)
-        return result
+        return context_request, render, capacity
 
     def save_provider_draft_version(
         self,

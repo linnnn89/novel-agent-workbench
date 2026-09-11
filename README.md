@@ -14,6 +14,8 @@
 
 正文会自动保存。浅色、深色、字体、字号和专注模式都可以调整。顶栏的模型名称可以直接切换当前正文模型；完整接入配置仍在「模型设置」。专注模式会收起左右两侧栏，中间栏右侧的细把手也可以单独收起资料栏。审稿完成后，如果当时没在看审稿页，「审稿」标签上会出现一个小圆点。常用操作留在编辑区附近，窗口变窄时按钮会自动换行，不会被挤出画面。
 
+新版界面的记忆、大纲、人物与世界观、创作设置、接入商和功能分配页会显示保存状态。修改后关闭页面、切换资料或作品、退出程序时，可以选择「保存并继续」「放弃修改」「返回编辑」；保存失败会留在原页。大纲和资料页把正文与保存按钮放在主要区域，章节范围等属性收进可展开的区域。
+
 ### 现在可以做什么
 
 - 同时管理多部作品，以及每部作品的章节和草稿版本。
@@ -39,6 +41,8 @@
 
 软件不会替你决定哪一版算正文，也不会因为打开作品或保存设置就在后台调用模型。
 
+自动带入的前文按章节编号排序，只选目标章节之前最近的 N 章。例如补写第 2 章时不会带入第 3 章。自定义章节编号需要以数字结尾；无法判断顺序时会提示改编号或关闭自动带入前文。
+
 ### 模型怎么接
 
 模型设置里已经预置硅基流动、Chutes 和 OpenRouter，也可以添加 DeepSeek、其他 OpenAI 兼容接口，或本机的 LM Studio、Ollama 兼容地址。正文生成与 AI 精修在「功能分配」里共用 None / Low / High / Max 思考控制，支持 DeepSeek Flash / Pro 动态名称和 V4 起的版本名称，不再限定 0731。直连接口发送 `thinking` 和 `reasoning_effort`，OpenRouter / Chutes 发送 `reasoning`；硅基流动使用 `enable_thinking`，只控制开关。新模型名称或接口不兼容时，可在接入商设置中手工指定思考控制接口，或选择不发送开关。未来接口是否兼容仍需以接入商文档为准。
@@ -52,7 +56,9 @@
 
 针对 DeepSeek，程序会尽量让变化较少的项目资料保持稳定顺序，把本次指令放在后面，以增加前缀缓存复用的机会。接口返回的缓存命中和未命中数据会被保留，但实际命中率仍取决于模型、服务端缓存周期和每次发送的内容。
 
-上下文默认预算为 131072 tokens。已有作品的明确设置保留，可在「创作设置 → 采样参数」使用宽松预算按钮，再点击保存。程序使用固定版本 `deepseek-tokenizer==0.3.0` 在本地计算文本长度；下载包约 1.9 MB，词表约 6.4 MB，无额外运行依赖，不会下载模型权重。它使用 DeepSeek V4 词表，动态名称、未来模型及消息格式仍有估算误差；其他模型或缺少 tokenizer 时使用中文保守估算。最终以 API 用量为准。所有生成请求都会检查完整输入，并为输出预留空间；模型目录未提供容量时，只能检查用户配置的输入上限。
+上下文默认预算为 131072 tokens。已有作品的明确设置保留，可在「创作设置 → 采样与上下文」使用宽松预算按钮，再点击保存。程序使用固定版本 `deepseek-tokenizer==0.3.0` 在本地计算文本长度；下载包约 1.9 MB，词表约 6.4 MB，无额外运行依赖，不会下载模型权重。它使用 DeepSeek V4 词表，动态名称、未来模型及消息格式仍有估算误差；其他模型或缺少 tokenizer 时使用中文保守估算。最终以 API 用量为准。
+
+已启用的资料、记忆银行和按设置选入的前文章节会完整组装，不会为了满足 input 预算而自动删减。发送前检查会把系统提示词、本次要求、审稿或精修所需正文一起计入输入，并为输出预留空间。超出软件预算时先停止发送，在专门提示区列出估算用量，并提供提高本作品预算、减少带入的前文章数、手工精简记忆三个入口。提高预算需点击保存；减少前文章数不会删除本地章节；记忆只有手工编辑并保存正文才会缩短，调整目标 tokens 不会自动改写它。保存并关闭编辑页后，可通过稿纸上方的「查看发送预算提示」重新检查并发送原请求，无需重输写作要求。模型硬性容量不能通过提高软件预算突破；模型目录未提供容量时，只能检查软件预算，实际仍以服务商限制为准。
 
 编辑已确认章节，或用内容不同的新版本替换确认稿时，如果记忆银行涉及该章，会弹窗提醒手工核对。提醒不会改写、禁用或重新生成记忆。同一作品、同一章节每次启动最多提醒一次，避免自动保存反复打断写作；只有措辞润色时可以忽略。
 
@@ -63,6 +69,10 @@
 ### 数据放在哪里
 
 EXE 版的作品、设置和密钥保存在程序旁边的 `用户数据` 文件夹中。重新打包时，构建脚本只替换程序和运行依赖，不会删除这份目录。右侧「导入导出」可以把一部作品打包为 `.nawpkg`；作品包不含 API Key 和 `backups/`。
+
+「项目库位置」会先将当前正文保存到原项目库，再切换目录并清空旧编辑状态。保存请求绑定原目录，避免两个库里同名的作品互相覆盖。成功切换的位置会记在默认数据目录旁的 `desktop_settings.local.json` 中，下次启动继续使用；该目录不可用时使用默认项目库。
+
+左侧「历史备份」列出最近 200 个完整作品检查点，包括时间、触发原因和作品名称。选中后会校验全部文件，再允许恢复为带「恢复副本」名称的新作品，包含备份时的草稿、确认章节、记忆和作品设置，当前作品不会被覆盖。独立密钥文件和旧配置中的 API Key 不会复制。恢复以实际保留的完整检查点为准；清空回收站后，已删除作品中的备份也会被清理。
 
 源码运行时，作品默认放在仓库的 `workspace_projects`。这些目录以及 `.venv`、`dist`、API Key 和小说正文都不应提交到 GitHub。
 
@@ -81,6 +91,8 @@ BUILD_NovelAgentWorkbench.bat
 ```text
 dist\NovelAgentWorkbench\NovelAgentWorkbench.exe
 ```
+
+构建会先在独立目录完成并核对文件，再替换正式程序。旧 EXE 和运行依赖保存在 `old/program-backup-*`，替换失败会尝试还原并核对旧程序；运行中的程序需先关闭。「关于」显示构建时间、代码提交和当前项目库位置。旧程序备份会占用磁盘空间，确认新版可用后可手工整理。已有构建依赖时可用 `powershell -File scripts/build_windows_exe.ps1 -SkipInstall` 跳过安装。
 
 如果只想从源码启动：
 
@@ -114,6 +126,8 @@ src/novel_agent_workbench/providers.py
 ```
 
 接口约定和项目说明在 [`codex_docs/`](codex_docs/) 中。
+
+在 Windows 桌面会话中运行 `.venv\Scripts\python.exe scripts\verify_desktop_iterations.py`，可用独立临时项目库验证保存提示、切库、备份恢复和原生退出；不会调用模型。结果保存在 `work/desktop-iteration-check/ui_results.json`。
 
 ---
 
@@ -179,6 +193,8 @@ The source package supports Python 3.10 or newer. If pywebview is unavailable, t
 The modern interface covers the main path from project setup and drafting through review, confirmation, and TXT export. A few secondary views—such as aggregate review history, connection diagnostics, provider call logs, and export settings—still live primarily in the classic Tk interface.
 
 Shared display helpers live in `ui_presenters.py`; the classic Tk interface remains a fallback. The modern UI supports cancellation, while both interfaces use the same save integrity checks, incomplete-output markers, and manual Memory Bank reminders. New defaults allow 131072 input tokens, using a small local DeepSeek V4 tokenizer with conservative fallbacks. Existing explicit budgets are retained. Thinking controls recognize DeepSeek model families and can be overridden per provider; future API compatibility still needs verification.
+
+Enabled context is always assembled in full. If the complete input exceeds the configured budget, the request stops before dispatch; the modern UI offers a dedicated panel to raise the project budget, reduce the selected prior chapters, or manually edit Memory Bank. Changes must be saved before retrying the original request. Increasing the software budget cannot override a known model context limit, including reserved output tokens.
 
 Technical notes and interface contracts are kept in [`codex_docs/`](codex_docs/).
 

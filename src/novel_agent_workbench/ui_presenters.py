@@ -205,10 +205,12 @@ def format_context_package_preview(preview: dict[str, Any]) -> str:
     lines = [
         "生成时会携带的上下文",
         "------------------",
-        "这里只显示会进入正文生成 prompt 的资料。没有正文的旧记忆占位不会发送给 AI。",
+        "已启用且有正文的资料完整保留；预算不足会在发送前提示，不会自动删除资料。",
         f"估算 token: {budget.get('estimated_used_tokens') or 0} / {budget.get('max_context_tokens') or '-'}",
         f"会发送资料: {len(sections)} 项",
     ]
+    if budget.get("over_budget_tokens"):
+        lines.append(f"资料本身已超预算约 {budget['over_budget_tokens']} tokens；完整请求还需计入写作要求和系统提示词。")
     if hidden_skipped_count:
         lines.append(f"已隐藏未填写旧占位: {hidden_skipped_count} 项。这些条目没有正文，不会发送。")
     lines.extend(["", "会发送的内容", "------------"])
@@ -430,6 +432,16 @@ def format_prompt_preview(render: dict[str, Any]) -> str:
             f"跳过段数: {len(skipped)}",
         ]
     )
+    capacity = render.get("input_capacity")
+    if isinstance(capacity, dict):
+        lines.extend([
+            "",
+            "完整材料全部保留，不按 input 预算自动删减。",
+            f"软件 input 预算: {capacity['configured_input_limit']} tokens",
+            f"预留输出: {capacity['output_token_budget']} tokens",
+            f"模型容量: {capacity['model_context_limit'] or '未知，以服务商实际限制为准'}",
+            "预算检查: " + ("可以发送" if capacity["can_send"] else "请先调整预算或材料；当前不会发送"),
+        ])
     return "\n".join(lines).strip()
 
 

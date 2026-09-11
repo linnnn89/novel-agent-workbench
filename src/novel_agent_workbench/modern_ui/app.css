@@ -762,6 +762,12 @@ h3 {
   min-height: 100%;
 }
 .studio-grid.wide-left { grid-template-columns: 320px minmax(0, 1fr); }
+.planning-workspace { height: 100%; min-height: 0; }
+.planning-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 10px; }
+.planning-form > .studio-editor { min-height: 160px; resize: none; }
+.planning-properties { flex: 0 1 auto; overflow: auto; max-height: 40%; }
+.planning-properties summary { cursor: pointer; color: var(--muted); padding: 8px 0; }
+.planning-property-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .studio-list, .studio-form {
   min-height: 0;
   display: flex;
@@ -999,6 +1005,13 @@ h3 {
   animation: slide 280ms var(--spring);
 }
 .drawer.wide { width: min(640px, calc(100vw - 20px)); }
+.input-budget-panel { width: min(440px, calc(100vw - 20px)); }
+.input-budget-entry { align-self: flex-start; margin: 0 20px 8px; }
+.input-budget-body { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.input-budget-body .hint { margin: 0; line-height: 1.6; }
+.input-budget-stats { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin: 4px 0; }
+.input-budget-stats dt { color: var(--muted); }
+.input-budget-stats dd { margin: 0; font-variant-numeric: tabular-nums; }
 .drawer header { display: flex; justify-content: space-between; gap: 12px; }
 .drawer-body {
   overflow: auto;

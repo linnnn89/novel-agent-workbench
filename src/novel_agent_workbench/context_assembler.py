@@ -4,6 +4,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .chapters import chapter_id_number
 from .config import FORMAL_CONTEXT_PRIORITY_ORDER, effective_generation_settings
 from .drafts import DraftGenerationService, context_items_in_render_order
 from .formal_context import FormalContextPlanService
@@ -89,9 +90,6 @@ class ContextAssemblerService:
             if estimated_tokens <= 0:
                 skipped.append({**candidate, "selection_status": "skipped", "skip_reason": "empty_or_metadata_only"})
                 continue
-            if used_tokens + estimated_tokens > budget:
-                skipped.append({**candidate, "selection_status": "skipped", "skip_reason": "token_budget_exceeded"})
-                continue
             selected.append({**candidate, "selection_status": "selected", "skip_reason": ""})
             used_tokens += estimated_tokens
         return ContextAssemblyDryRunResult(
@@ -101,6 +99,8 @@ class ContextAssemblerService:
                 "max_context_tokens": budget,
                 "estimated_used_tokens": used_tokens,
                 "estimated_remaining_tokens": max(budget - used_tokens, 0),
+                "over_budget_tokens": max(used_tokens - budget, 0),
+                "materials_preserved": True,
                 "estimator": tokenizer_description(),
                 "real_tokenizer": "local_when_available; metadata_only_items_estimated",
             },
@@ -157,13 +157,10 @@ class ContextAssemblerService:
             eligible.append(item)
         sections: list[dict[str, Any]] = []
         used_tokens = 0
-        budget_exhausted = False
         for item in context_items_in_render_order(eligible):
             estimated_tokens = safe_int(item.get("estimated_tokens"), default=0)
-            if budget_exhausted or used_tokens + estimated_tokens > budget:
-                skipped.append({**item, "selection_status": "skipped", "skip_reason": "token_budget_exceeded"})
-                budget_exhausted = True
-                continue
+            # Budget is checked against the complete request before sending.
+            # Enabled materials must never silently disappear to make it fit.
             sections.append({**item, "selection_status": "selected", "skip_reason": ""})
             used_tokens += estimated_tokens
         return ContextPackagePreviewResult(
@@ -173,6 +170,8 @@ class ContextAssemblerService:
                 "max_context_tokens": budget,
                 "estimated_used_tokens": used_tokens,
                 "estimated_remaining_tokens": max(budget - used_tokens, 0),
+                "over_budget_tokens": max(used_tokens - budget, 0),
+                "materials_preserved": True,
                 "estimator": tokenizer_description(),
                 "real_tokenizer": "local_when_available",
             },
@@ -490,12 +489,20 @@ def recent_confirmed_chapter_package_candidates(
 
 
 def recent_confirmed_entries(entries: list[dict[str, Any]], *, chapter_id: str, count: int) -> list[dict[str, Any]]:
-    safe_entries = [item for item in entries if isinstance(item, dict)]
-    if chapter_id:
-        for index, item in enumerate(safe_entries):
-            if item.get("chapter_id") == chapter_id:
-                return safe_entries[max(index - count, 0) : index]
-    return safe_entries[-count:]
+    if count <= 0:
+        return []
+    target = chapter_id_number(chapter_id)
+    if chapter_id and target is None:
+        raise ValueError("无法判断自定义章节编号的先后顺序。请使用以数字结尾的章节编号，或在创作设置中关闭自动带入前文。")
+    ordered = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        number = chapter_id_number(str(item.get("chapter_id") or ""))
+        if number is not None and (target is None or number < target):
+            ordered.append((number, str(item.get("chapter_id") or ""), item))
+    ordered.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in ordered[-count:]]
 
 
 def planning_library_package_candidates(

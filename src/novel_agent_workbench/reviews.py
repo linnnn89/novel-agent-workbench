@@ -17,10 +17,10 @@ from .drafts import (
     validate_chapter_id,
 )
 from .manual_rewrite_comparison import ManualRewriteComparisonService
-from .providers import ProviderRequest, generate_with_provider, provider_request_role_or_writer_fallback
+from .providers import ProviderRequest, generate_with_provider, provider_request_role_or_writer_fallback, get_effective_model_role_config
 from .review_handoffs import ReviewHandoffService
 from .storage import ProjectStore, safe_filename, utc_stamp
-from .token_budget import input_budget, estimate_input_tokens, capacity_check
+from .token_budget import capacity_check
 
 
 REVIEWS_DIRNAME = "reviews"
@@ -275,17 +275,10 @@ class DraftReviewService:
             template=review_task_template,
             extra_instruction=extra_instruction,
         )
-        request_role = provider_request_role_or_writer_fallback(self.store, "scorer", feature_id="ai_review")
-        limit = input_budget(config, requested=max_context_tokens, feature_id="ai_review",
-                             role=request_role, max_tokens=max_tokens)
-        mandatory = render_ai_review_prompt({}, draft, draft_sanitized["content"], review_prompt=task_prompt)
-        reserve = estimate_input_tokens(review_system_prompt, mandatory) + 512
-        if reserve > limit:
-            raise RuntimeError("原稿和审稿要求已超过可用输入预算，请提高上下文上限；未截断原稿，未发送请求。")
         render = ContextAssemblerService(self.store).prompt_render_dry_run(
             prompt=task_prompt,
             system_prompt=review_system_prompt,
-            max_context_tokens=max(0, limit - reserve),
+            max_context_tokens=max_context_tokens,
             chapter_id=chapter_id,
             include_prompt_text=True,
             include_context_text=True,
@@ -307,8 +300,9 @@ class DraftReviewService:
             settings = effective_generation_settings(config)
             sampling = settings.get("sampling") if isinstance(settings.get("sampling"), dict) else {}
             review_max_tokens = _positive_max_tokens(sampling.get("max_tokens"))
-        capacity_check(config, provider_prompt, review_system_prompt, feature_id="ai_review",
-                       role=request_role, input_limit=limit, max_tokens=review_max_tokens)
+        capacity = capacity_check(config, provider_prompt, review_system_prompt, feature_id="ai_review",
+                                  role=request_role, input_limit=max_context_tokens, max_tokens=review_max_tokens,
+                                  model=get_effective_model_role_config(self.store, request_role, feature_id="ai_review").model)
         try:
             response = generate_with_provider(
                 self.store,
@@ -326,7 +320,7 @@ class DraftReviewService:
                         "chapter_id": chapter_id,
                         "draft_id": draft_id,
                         "context_aware_review": True,
-                        "input_token_limit": limit,
+                        "input_token_limit": capacity["configured_input_limit"],
                     },
                 ),
             )

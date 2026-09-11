@@ -257,6 +257,89 @@ class ProjectPackageService:
             raise StorageError("作品正在保存或生成，请稍后重试。") from exc
         return result
 
+    def list_history_backups(self) -> dict[str, Any]:
+        root = self.registry.projects_root.resolve()
+        candidates = []
+        for folder in root.iterdir() if root.exists() else []:
+            if not folder.is_dir() or folder.name.startswith("."):
+                continue
+            try:
+                folder.resolve().relative_to(root)
+                directory = folder / "backups" / "checkpoints"
+                directory.resolve().relative_to(folder.resolve())
+            except ValueError:
+                continue
+            candidates.extend(directory.glob("*.zip"))
+        candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        items = []
+        for path in candidates[:200]:
+            item = {"backup_id": path.relative_to(root).as_posix(), "name": path.name,
+                    "created_at": "", "title": path.parts[-4], "label": "", "error": ""}
+            try:
+                source = self._history_backup_path(item["backup_id"])
+                with zipfile.ZipFile(source) as archive:
+                    if archive.getinfo(CHECKPOINT_MANIFEST_NAME).file_size > 8 * 1024 * 1024:
+                        raise StorageError("备份清单过大。")
+                    manifest = json.loads(archive.read(CHECKPOINT_MANIFEST_NAME))
+                    item.update(created_at=str(manifest.get("created_at") or ""), label=str(manifest.get("label") or ""))
+                    if archive.getinfo("project.json").file_size < 1024 * 1024:
+                        meta = json.loads(archive.read("project.json"))
+                        item["title"] = str(meta.get("title") or meta.get("project_id") or item["title"])
+            except (OSError, ValueError, KeyError, AttributeError, zipfile.BadZipFile, StorageError) as exc:
+                item["error"] = f"无法读取备份：{exc}"
+            items.append(item)
+        return {"items": items, "total_count": len(candidates)}
+
+    def inspect_history_backup(self, backup_id: str) -> dict[str, Any]:
+        validated = self._validate_history_backup(backup_id)
+        files = validated.files
+        def records(path: str, key: str) -> list:
+            value = json.loads(files.get(path, b"{}"))
+            return value.get(key, []) if isinstance(value, dict) else []
+        return {"backup_id": backup_id, "title": str(validated.project_meta.get("title") or ""),
+                "created_at": str(validated.manifest.get("created_at") or ""),
+                "label": str(validated.manifest.get("label") or ""), "file_count": len(files),
+                "draft_count": len(records("data/drafts_index.json", "drafts")),
+                "confirmed_count": len(records("data/confirmed_chapters.json", "chapters")),
+                "memory_count": len(records("data/memory_bank.json", "items")), "validated": True}
+
+    def restore_history_backup(self, backup_id: str) -> ProjectPackageImportResult:
+        # Revalidate at the time of restoration, then reuse the staged new-project
+        # importer. No file is written into the source project.
+        validated = self._validate_history_backup(backup_id)
+        source_id = str(validated.project_meta["project_id"])
+        target_id = allocate_new_project_id(f"{source_id}_restored", self._existing_ids())
+        title = f"{validated.project_meta.get('title') or source_id}（恢复副本）"
+        files = {name: data for name, data in validated.files.items() if not _hits_secret_denylist(name)}
+        if "data/config.json" in files:
+            files["data/config.json"] = wash_config_bytes(files["data/config.json"])
+        meta = {**validated.project_meta, "title": title}
+        files["project.json"] = json.dumps(meta, ensure_ascii=False).encode("utf-8")
+        portable = _ValidatedPackage(validated.path, validated.manifest, files, meta, validated.warnings)
+        return self._unpack_new_directory(portable, target_id=target_id, mode="new_id", title=title, source_id=source_id)
+
+    def _history_backup_path(self, backup_id: str) -> Path:
+        relative = safe_archive_relative_path(backup_id)
+        if len(relative.parts) != 4 or relative.parts[1:3] != ("backups", "checkpoints") or relative.suffix != ".zip":
+            raise StorageError("请选择当前项目库内的历史备份。")
+        root = self.registry.projects_root.resolve()
+        path = (root / relative).resolve()
+        try:
+            path.relative_to(root / relative.parts[0])
+        except ValueError as exc:
+            raise StorageError("备份路径超出所属作品。") from exc
+        if not path.is_file():
+            raise StorageError("备份文件不存在。")
+        return path
+
+    def _validate_history_backup(self, backup_id: str) -> _ValidatedPackage:
+        path = self._history_backup_path(backup_id)
+        try:
+            with zipfile.ZipFile(path) as archive:
+                return _validate_open_archive(path, archive, checkpoint=True)
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+            raise StorageError(f"备份校验失败，未恢复任何内容：{exc}") from exc
+
     def _unpack_new_directory(
         self,
         validated: _ValidatedPackage,
@@ -508,32 +591,36 @@ def _validate_package_file(package_path: str | Path) -> _ValidatedPackage:
         archive.close()
 
 
-def _validate_open_archive(package_path: Path, archive: zipfile.ZipFile) -> _ValidatedPackage:
+def _validate_open_archive(package_path: Path, archive: zipfile.ZipFile, *, checkpoint: bool = False) -> _ValidatedPackage:
     names = archive.namelist()
     if len(names) > MAX_PACKAGE_FILES + 1:
         raise StorageError("作品包过大或文件过多，已拒绝导入。")
     name_set = set(names)
-    if CHECKPOINT_MANIFEST_NAME in name_set:
+    manifest_name = CHECKPOINT_MANIFEST_NAME if checkpoint else PACKAGE_MANIFEST_NAME
+    if not checkpoint and CHECKPOINT_MANIFEST_NAME in name_set:
         raise StorageError("这是内部回滚检查点，不是作品包。")
-    if PACKAGE_MANIFEST_NAME not in name_set:
+    if manifest_name not in name_set:
         raise StorageError("没有找到作品包清单。")
     try:
-        manifest = json.loads(archive.read(PACKAGE_MANIFEST_NAME).decode("utf-8"))
+        if archive.getinfo(manifest_name).file_size > 8 * 1024 * 1024:
+            raise StorageError("备份或作品包清单过大。")
+        manifest = json.loads(archive.read(manifest_name).decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError, KeyError) as exc:
         raise StorageError("没有找到作品包清单。") from exc
     if not isinstance(manifest, dict):
         raise StorageError("没有找到作品包清单。")
     try:
-        schema_version = int(manifest.get("schema_version") or 0)
+        schema_version = 1 if checkpoint else int(manifest.get("schema_version") or 0)
     except (TypeError, ValueError) as exc:
         raise StorageError("作品包版本不受支持，请升级软件后再导入。") from exc
-    if str(manifest.get("format") or "") != PACKAGE_FORMAT or schema_version != 1:
+    expected_format = "novel_agent_workbench.project_checkpoint.v1" if checkpoint else PACKAGE_FORMAT
+    if str(manifest.get("format") or "") != expected_format or schema_version != 1:
         raise StorageError("作品包版本不受支持，请升级软件后再导入。")
-    if manifest.get("include_secrets") is not False:
+    if not checkpoint and manifest.get("include_secrets") is not False:
         raise StorageError("作品包含有密钥文件，已拒绝导入。")
     advertised = 0
     for info in archive.infolist():
-        if info.is_dir() or info.filename == PACKAGE_MANIFEST_NAME:
+        if info.is_dir() or info.filename == manifest_name:
             continue
         advertised += max(0, int(info.file_size or 0))
         if advertised > MAX_PACKAGE_UNCOMPRESSED_BYTES:
@@ -552,16 +639,16 @@ def _validate_open_archive(package_path: Path, archive: zipfile.ZipFile) -> _Val
     members: list[str] = []
     zip_name_by_posix: dict[str, str] = {}
     for name in names:
-        if name == PACKAGE_MANIFEST_NAME:
+        if name == manifest_name:
             continue
         if name.endswith("/"):
             raise StorageError("作品包校验失败：文件清单不一致。")
         posix = safe_archive_relative_path(name).as_posix()
-        if _hits_secret_denylist(posix):
+        if not checkpoint and _hits_secret_denylist(posix):
             raise StorageError("作品包含有密钥文件，已拒绝导入。")
         members.append(posix)
         zip_name_by_posix[posix] = name
-    if set(members) != set(listed):
+    if set(members) != set(listed) or len(members) != len(set(members)):
         raise StorageError("作品包校验失败：文件清单不一致。")
     file_bytes: dict[str, bytes] = {}
     actual = 0
@@ -576,11 +663,13 @@ def _validate_open_archive(package_path: Path, archive: zipfile.ZipFile) -> _Val
         item = spec_by_path[posix]
         expected_sha = str(item.get("sha256") or "")
         try:
-            expected_size = int(item.get("size") or -1)
+            expected_size = int(item.get("size", -1))
         except (TypeError, ValueError):
             expected_size = -1
         if sha256(data).hexdigest() != expected_sha or len(data) != expected_size:
             raise StorageError("作品包校验失败：文件哈希不一致。")
+        if checkpoint and posix.endswith(".json"):
+            json.loads(data.decode("utf-8"))
         file_bytes[posix] = data
     project_raw = file_bytes.get("project.json")
     if not project_raw:
@@ -591,7 +680,7 @@ def _validate_open_archive(package_path: Path, archive: zipfile.ZipFile) -> _Val
         raise StorageError("作品包缺少 project.json。") from exc
     if not isinstance(project_meta, dict) or not str(project_meta.get("project_id") or "").strip():
         raise StorageError("作品包缺少项目编号。")
-    manifest_source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    manifest_source = manifest if checkpoint else (manifest.get("source") if isinstance(manifest.get("source"), dict) else {})
     if str(manifest_source.get("project_id") or "") != str(project_meta.get("project_id") or ""):
         raise StorageError("作品包清单与 project.json 的编号不一致。")
     return _ValidatedPackage(

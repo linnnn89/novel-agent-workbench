@@ -9,7 +9,82 @@ const studio = {
   selectedPlanning: "",
   creating: false,
   followMemory: true,
+  savedForm: "",
+  leaving: false,
 };
+
+function studioFormSnapshot() {
+  if (studio.mode === "memory" && studio.memoryEditor) {
+    return JSON.stringify([studio.memoryEditor.value, studio.memoryTarget.value, studio.memoryEnabled.checked]);
+  }
+  if (["outline", "world"].includes(studio.mode) && studio.planForm) {
+    const f = studio.planForm;
+    return JSON.stringify([f.ident.value, f.typeBox.value, f.title.value, f.range.value, f.adherence.value, f.active.checked, f.editor.value]);
+  }
+  if (studio.mode === "gen" && studio.genFields) {
+    collectGenForm();
+    return JSON.stringify(studio.gen.settings, (_, value) => typeof value === "number" ? String(value) : value);
+  }
+  if (studio.mode === "models" && studio.modelEdit) return JSON.stringify(studio.modelEdit.read());
+  return "";
+}
+
+function markStudioSaved() {
+  studio.savedForm = studioFormSnapshot();
+  refreshStudioSaveStatus();
+}
+
+function studioHasChanges() {
+  return Boolean(studio.savedForm) && studio.savedForm !== studioFormSnapshot();
+}
+
+function refreshStudioSaveStatus() {
+  const label = $("studioEditStatus");
+  if (!label) return;
+  label.hidden = !studio.savedForm;
+  label.textContent = studioHasChanges() ? "有未保存修改" : "已保存";
+}
+
+function lockStudioForm() {
+  studio.saving = true;
+  const controls = Array.from($("studioBody").querySelectorAll("input, textarea, select, button"));
+  const disabled = controls.map(control => control.disabled);
+  controls.forEach(control => { control.disabled = true; });
+  return () => {
+    controls.forEach((control, index) => { control.disabled = disabled[index]; });
+    studio.saving = false;
+  };
+}
+
+async function guardStudioLeave() {
+  if (studio.saving) { toast("正在保存，请稍候。"); return false; }
+  if (studio.memoryBusy) { toast("请先停止或等待记忆任务完成。"); return false; }
+  if (studio.leaving) return false;
+  if (!studioHasChanges()) return true;
+  studio.leaving = true;
+  try {
+    return await new Promise(resolve => {
+      const finish = allowed => { state.modalCancel = null; closeModal(); resolve(allowed); };
+      openModal({ title: "还有未保存的修改", desc: "保存成功后才会继续；返回编辑会保留当前内容。",
+        body: elNote($("studioTitle").textContent), actions: [
+          { label: "返回编辑", onClick: () => finish(false) },
+          { label: "放弃修改", onClick: () => finish(true) },
+          { label: "保存并继续", style: "primary", onClick: async () => {
+            const buttons = Array.from($("modalFoot").querySelectorAll("button"));
+            buttons.forEach(button => { button.disabled = true; });
+            try {
+              const saved = studio.mode === "memory" ? await saveMemoryStudio()
+                : studio.mode === "gen" ? await saveGenSettings()
+                : studio.mode === "models" ? await studio.modelEdit.save() : await savePlanningStudio();
+              if (saved) finish(true);
+            } catch (error) { toast(error.message); }
+            finally { buttons.forEach(button => { button.disabled = false; }); }
+          } },
+        ] });
+      state.modalCancel = () => resolve(false);
+    });
+  } finally { studio.leaving = false; }
+}
 
 function requireProject() {
   if (!state.projectId) {
@@ -19,8 +94,8 @@ function requireProject() {
   return true;
 }
 
-function closeStudio() {
-  if (studio.memoryBusy) { toast("请等待记忆任务完成，或先点击“停止任务”。"); return; }
+async function closeStudio({ discard = false } = {}) {
+  if (!discard && !(await guardStudioLeave())) return false;
   $("studio").hidden = true;
   $("studioBody").innerHTML = "";
   $("studioTabs").innerHTML = "";
@@ -38,7 +113,11 @@ function closeStudio() {
   studio.memoryLive = null;
   studio.memoryBusy = false;
   studio.memoryLiveText = "";
+  studio.savedForm = "";
+  studio.modelEdit = null;
+  refreshStudioSaveStatus();
   if (window.ThinkTrace && ThinkTrace.isIdle()) ThinkTrace.close();
+  return true;
 }
 
 function setStudioStatus(text) {
@@ -74,6 +153,8 @@ function el(tag, className, text) {
 
 async function openModelStudio(tab = "provider") {
   if (blockIfGenerating()) return;
+  if (!(await guardStudioLeave())) return;
+  studio.savedForm = "";
   studio.mode = "models";
   studio.tab = tab;
   openStudioShell({ kicker: "软件级配置", title: "模型设置" });
@@ -92,16 +173,19 @@ function renderModelStudio() {
       ["assign", "功能分配"],
     ],
     studio.tab,
-    (tab) => {
+    async (tab) => {
+      if (tab === studio.tab || !(await guardStudioLeave())) return;
       studio.tab = tab;
       renderModelStudio();
     }
   );
   const body = $("studioBody");
   body.innerHTML = "";
+  studio.modelEdit = null;
   if (studio.tab === "provider") body.append(renderProviderPage());
   if (studio.tab === "models") body.append(renderModelsPage());
   if (studio.tab === "assign") body.append(renderAssignPage());
+  markStudioSaved();
 }
 
 function providerById(id) {
@@ -129,7 +213,8 @@ function renderProviderPage() {
     const button = el("button", `choice${provider.profile_id === studio.selectedProvider ? " active" : ""}`);
     button.type = "button";
     button.innerHTML = `<span class="tree-title">${escapeHtml(provider.display_name)}</span><span class="pill">${providerKeyPill(provider)}</span>`;
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
+      if (provider.profile_id === studio.selectedProvider || !(await guardStudioLeave())) return;
       studio.selectedProvider = provider.profile_id;
       renderModelStudio();
     });
@@ -138,7 +223,8 @@ function renderProviderPage() {
   list.append(scroll);
   const add = el("button", "btn quiet", "+ 添加自定义接入商");
   add.type = "button";
-  add.addEventListener("click", () => {
+  add.addEventListener("click", async () => {
+    if (!(await guardStudioLeave())) return;
     studio.selectedProvider = "";
     renderModelStudio();
   });
@@ -172,27 +258,30 @@ function renderProviderPage() {
   const actions = el("div", "side-actions");
   const save = el("button", "btn primary", "保存当前设置");
   save.type = "button";
-  save.addEventListener("click", async () => {
+  const readProvider = () => ({
+    profile_id: studio.selectedProvider,
+    display_name: name.value.trim(), adapter: adapter.value, base_url: base.value.trim(),
+    api_key: key.value, timeout_seconds: timeout.value, thinking_protocol: thinkingProtocol.value,
+  });
+  const saveProvider = async () => {
+    if (studio.saving) return false;
+    const unlock = lockStudioForm();
     try {
-      const result = await call("save_provider", {
-        profile_id: studio.selectedProvider,
-        display_name: name.value.trim(),
-        adapter: adapter.value,
-        base_url: base.value.trim(),
-        api_key: key.value,
-        timeout_seconds: timeout.value,
-        thinking_protocol: thinkingProtocol.value,
-      });
+      const result = await call("save_provider", readProvider());
       studio.model = result;
       studio.selectedProvider = result.profile_id || studio.selectedProvider;
       setStudioStatus("接入商已保存；未发起网络请求。");
       renderModelStudio();
       if (state.projectId) loadOverview(state.projectId).catch(() => {});
       toast("接入商已保存。");
+      return true;
     } catch (error) {
       toast(error.message);
-    }
-  });
+      return false;
+    } finally { unlock(); }
+  };
+  studio.modelEdit = { read: readProvider, save: saveProvider };
+  save.addEventListener("click", saveProvider);
   const refresh = el("button", "btn quiet", "刷新模型");
   refresh.type = "button";
   refresh.addEventListener("click", () => refreshSelectedModels());
@@ -200,6 +289,7 @@ function renderProviderPage() {
   clearKey.type = "button";
   clearKey.addEventListener("click", async () => {
     if (!studio.selectedProvider) return;
+    if (!(await guardStudioLeave())) return;
     try {
       studio.model = await call("clear_provider_key", studio.selectedProvider);
       setStudioStatus("API Key 已清除。");
@@ -213,6 +303,7 @@ function renderProviderPage() {
   remove.disabled = Boolean(provider?.built_in) || !studio.selectedProvider;
   remove.addEventListener("click", async () => {
     if (!studio.selectedProvider || provider?.built_in) return;
+    if (!(await guardStudioLeave())) return;
     try {
       studio.model = await call("delete_provider", studio.selectedProvider);
       studio.selectedProvider = studio.model.providers?.[0]?.profile_id || "";
@@ -230,6 +321,7 @@ function renderProviderPage() {
 
 async function refreshSelectedModels() {
   if (blockIfGenerating()) return;
+  if (!(await guardStudioLeave())) return;
   const profileId = studio.selectedProvider || studio.model.providers?.[0]?.profile_id;
   if (!profileId) return toast("请先选择接入商。");
   setStudioStatus("正在刷新模型目录…");
@@ -436,6 +528,7 @@ function searchSelect(options, attrs = {}) {
     selected = key;
     box.value = labelFor(key);
     closeList();
+    refreshStudioSaveStatus();
   }
 
   function placeList() {
@@ -546,7 +639,7 @@ function renderDraftEffortCapsules(assignment) {
     const button = el("button", "seg-cap", labels[level]);
     button.type = "button";
     button.dataset.effort = level;
-    button.addEventListener("click", () => { effort = level; sync(); });
+    button.addEventListener("click", () => { effort = level; sync(); refreshStudioSaveStatus(); });
     caps.append(button);
   });
   toggle.addEventListener("change", sync);
@@ -601,7 +694,7 @@ function renderAssignPage() {
   });
   const save = el("button", "btn primary", "保存功能分配");
   save.type = "button";
-  save.addEventListener("click", async () => {
+  const readAssignments = () => {
     const assignments = {};
     Object.entries(rows).forEach(([featureId, row]) => {
       assignments[featureId] = {
@@ -612,20 +705,26 @@ function renderAssignPage() {
         assignments[featureId].reasoning_effort = row.effort.value;
       }
     });
+    return { primary_model_ref: primary.value, feature_assignments: assignments };
+  };
+  const saveAssignments = async () => {
+    if (studio.saving) return false;
+    const unlock = lockStudioForm();
     try {
-      studio.model = await call("save_assignments", {
-        primary_model_ref: primary.value,
-        feature_assignments: assignments,
-      });
+      studio.model = await call("save_assignments", readAssignments());
       syncModelState(studio.model);
       setStudioStatus("主模型和功能分配已保存。");
       renderModelStudio();
       if (state.projectId) loadOverview(state.projectId).catch(() => {});
       toast("功能分配已保存。");
+      return true;
     } catch (error) {
       toast(error.message);
-    }
-  });
+      return false;
+    } finally { unlock(); }
+  };
+  studio.modelEdit = { read: readAssignments, save: saveAssignments };
+  save.addEventListener("click", saveAssignments);
   wrap.append(save);
   return wrap;
 }
@@ -633,6 +732,8 @@ function renderAssignPage() {
 async function openMemoryStudio() {
   if (blockIfGenerating()) return;
   if (!requireProject()) return;
+  if (!(await guardStudioLeave())) return;
+  studio.savedForm = "";
   studio.mode = "memory";
   studio.memoryEditor = null;
   studio.memoryTarget = null;
@@ -645,6 +746,7 @@ async function openMemoryStudio() {
   studio.memory = await call("memory_state", state.projectId);
   studio.checked = new Set(studio.memory.recommended || []);
   renderMemoryStudio();
+  markStudioSaved();
 }
 
 function renderMemoryStudio() {
@@ -762,8 +864,8 @@ function renderMemoryStudio() {
 }
 
 async function saveMemoryStudio() {
-  if (!studio.memoryEditor) return;
-  if (studio.memoryBusy) return toast("请等待记忆任务结束后再保存手工编辑。");
+  if (!studio.memoryEditor || studio.memoryBusy || studio.saving) return false;
+  const unlock = lockStudioForm();
   try {
     studio.memory = await call("save_memory_workspace", {
       project_id: state.projectId,
@@ -775,10 +877,15 @@ async function saveMemoryStudio() {
     });
     studio.checked = new Set();
     renderMemoryStudio();
+    markStudioSaved();
     loadOverview(state.projectId).catch(() => {});
     toast("记忆库已保存。");
+    return true;
   } catch (error) {
     toast(error.message);
+    return false;
+  } finally {
+    unlock();
   }
 }
 
@@ -810,13 +917,18 @@ function formatSavedMemory(data) {
 
 async function reloadMemoryStudio() {
   if (!requireProject()) return;
+  if (!(await guardStudioLeave())) return;
   try {
+    const loaded = await call("memory_state", state.projectId);
     studio.memoryEditor = null;
-    studio.memory = await call("memory_state", state.projectId);
+    studio.memoryTarget = null;
+    studio.memoryEnabled = null;
+    studio.memory = loaded;
     studio.checked = new Set(studio.memory.recommended || []);
     studio.memoryLiveText = "";
     studio.memoryBusy = false;
     renderMemoryStudio();
+    markStudioSaved();
     toast("已从磁盘重新加载已保存记忆。");
   } catch (error) {
     toast(error.message);
@@ -907,12 +1019,16 @@ function finishMemoryJob(payload) {
     studio.memoryLive.hidden = true;
   }
   setStudioStatus("AI 已生成记忆正文，请审阅后保存。");
+  refreshStudioSaveStatus();
   toast("记忆正文已生成，尚未保存。");
 }
 
 async function openPlanningStudio(kind, options = {}) {
   if (blockIfGenerating()) return;
   if (!requireProject()) return;
+  if (!(await guardStudioLeave())) return;
+  studio.savedForm = "";
+  studio.planForm = null;
   studio.mode = kind;
   studio.creating = false;
   studio.selectedPlanning = "";
@@ -971,7 +1087,7 @@ function renderPlanningStudio() {
     studio.selectedPlanning = items[0].planning_id;
   }
   const idle = planningIsIdle();
-  const wrap = el("div", "studio-grid");
+  const wrap = el("div", "studio-grid planning-workspace");
   const list = el("div", "studio-list");
   list.append(el("h3", "", kind === "outline" ? "阶段资料" : "资料条目"));
   const scroll = el("div", "studio-scroll");
@@ -981,7 +1097,9 @@ function renderPlanningStudio() {
     const button = el("button", `choice${item.planning_id === studio.selectedPlanning && !studio.creating ? " active" : ""}`);
     button.type = "button";
     button.innerHTML = `<span class="tree-title">${active ? "●" : "○"} ${escapeHtml(typeLabel)} ${escapeHtml(item.title || item.planning_id)}</span>`;
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
+      if (item.planning_id === studio.selectedPlanning && !studio.creating) return;
+      if (!(await guardStudioLeave())) return;
       studio.creating = false;
       studio.selectedPlanning = item.planning_id;
       renderPlanningStudio();
@@ -1003,7 +1121,7 @@ function renderPlanningStudio() {
   });
   list.append(actions);
 
-  const form = el("div", `studio-form${idle ? " is-idle" : ""}`);
+  const form = el("div", `studio-form planning-form${idle ? " is-idle" : ""}`);
   if (idle) {
     const banner = el("div", "studio-idle-banner");
     banner.append(el("p", "", idleCopy.banner));
@@ -1063,30 +1181,28 @@ function renderPlanningStudio() {
   remove.type = "button";
   remove.disabled = idle || studio.creating || !studio.selectedPlanning;
   remove.addEventListener("click", () => deletePlanningStudio());
-  const row = el("div", "side-actions");
-  row.append(save, remove);
+  const row = el("div", "planning-toolbar");
+  row.append(field("标题", title), save, remove);
   if (!idle) {
     form.append(
       el("p", "studio-note", kind === "outline" ? "这里只管理总纲和章节计划。保存资料本身不会调用模型。" : "人物、世界观和约束可以逐条编辑。保存不会调用模型。")
     );
   }
-  form.append(
-    field("资料类型", typeBox),
-    field("标题", title),
-    field("内部编号", ident),
-    field("章节范围", range),
-    field("参考强度", adherence),
-    activeRow,
-    editor,
-    row
-  );
+  const properties = el("details", "planning-properties");
+  properties.append(el("summary", "", "资料属性（类型、章节范围、参考强度）"));
+  const propertyFields = el("div", "planning-property-fields");
+  propertyFields.append(field("资料类型", typeBox), field("章节范围", range), field("参考强度", adherence), field("内部编号", ident));
+  properties.append(propertyFields);
+  form.append(row, activeRow, editor, properties);
   wrap.append(list, form);
   const body = $("studioBody");
   body.innerHTML = "";
   body.append(wrap);
+  markStudioSaved();
 }
 
 async function startPlanning(itemType) {
+  if (!(await guardStudioLeave())) return;
   const existing = planningItems().find((item) => item.item_type === itemType);
   if ((itemType === "outline" || itemType === "world_plan") && existing) {
     studio.creating = false;
@@ -1107,7 +1223,7 @@ async function startPlanning(itemType) {
 
 async function savePlanningStudio() {
   const form = studio.planForm;
-  if (!form) return;
+  if (!form || studio.saving) return false;
   if (planningIsIdle()) {
     toast(planningIdleCopy(studio.mode).saveHint);
     return;
@@ -1116,6 +1232,7 @@ async function savePlanningStudio() {
     toast("请先选择一条资料。");
     return;
   }
+  const unlock = lockStudioForm();
   try {
     const result = await call("save_planning", {
       project_id: state.projectId,
@@ -1134,13 +1251,18 @@ async function savePlanningStudio() {
     renderPlanningStudio();
     loadOverview(state.projectId).catch(() => {});
     toast("资料已保存。");
+    return true;
   } catch (error) {
     toast(error.message);
+    return false;
+  } finally {
+    unlock();
   }
 }
 
 async function deletePlanningStudio() {
   if (studio.creating || !studio.selectedPlanning) return;
+  if (!(await guardStudioLeave())) return;
   try {
     studio.planning = await call("delete_planning", state.projectId, studio.selectedPlanning, studio.mode);
     studio.selectedPlanning = studio.planning.items?.[0]?.planning_id || "";
@@ -1183,11 +1305,14 @@ async function saveActiveStudio() {
   if (studio.mode === "memory") return saveMemoryStudio();
   if (studio.mode === "outline" || studio.mode === "world") return savePlanningStudio();
   if (studio.mode === "gen") return saveGenSettings();
+  if (studio.mode === "models" && studio.modelEdit) return studio.modelEdit.save();
 }
 
 async function openGenSettings(scope) {
   if (blockIfGenerating()) return;
   if (scope === "project" && !requireProject()) return;
+  if (!(await guardStudioLeave())) return;
+  studio.savedForm = "";
   studio.mode = "gen";
   studio.genScope = scope;
   studio.genTab = studio.genTab || "prompt";
@@ -1197,6 +1322,7 @@ async function openGenSettings(scope) {
   });
   studio.gen = await call("generation_settings_state", scope, state.projectId || "");
   renderGenSettings();
+  markStudioSaved();
 }
 
 function renderGenSettings() {
@@ -1250,7 +1376,7 @@ function renderGenSettings() {
       ["presence_penalty", "Presence Penalty", sampling.presence_penalty],
       ["frequency_penalty", "Frequency Penalty", sampling.frequency_penalty],
       ["repetition_penalty", "Repetition Penalty", sampling.repetition_penalty],
-      ["max_context_tokens", "上下文 Token 上限", context.max_context_tokens],
+      ["max_context_tokens", "软件 input 预算（tokens）", context.max_context_tokens],
       ["recent_confirmed_chapter_count", "自动带入前文章数", context.recent_confirmed_chapter_count],
     ];
     studio.genFields = {};
@@ -1262,7 +1388,7 @@ function renderGenSettings() {
     const generous = el("button", "btn outline", "使用宽松预算：131072 tokens");
     generous.type = "button";
     generous.addEventListener("click", () => { studio.genFields.max_context_tokens.value = "131072"; });
-    form.append(generous, el("p", "studio-note", "上下文按中文适配的本地 tokenizer 估算；最终请求还会预留输出空间。提高上限可能增加等待和费用，不会自动增加前文章数。现有设置仅在点击保存后改变。"));
+    form.append(generous, el("p", "studio-note", "所有已启用材料完整保留，超出软件 input 预算时先提示，不会自动删减。提高预算不会自动增加前文章数；模型容量还需容纳预留输出。记忆需手工编辑保存，降低目标 tokens 不会自动缩短已有记忆。点击保存后设置才生效。"));
     const stream = document.createElement("input");
     stream.type = "checkbox";
     stream.checked = Boolean(sampling.stream);
@@ -1393,24 +1519,34 @@ function collectGenForm() {
 }
 
 async function saveGenSettings() {
-  collectGenForm();
-  await call("save_generation_settings", {
-    scope: studio.genScope,
-    project_id: state.projectId || "",
-    settings: studio.gen.settings || studio.gen,
-  });
-  setStudioStatus("创作设置已保存。");
-  toast("创作设置已保存。");
+  if (studio.saving) return false;
+  const unlock = lockStudioForm();
+  try {
+    collectGenForm();
+    await call("save_generation_settings", {
+      scope: studio.genScope,
+      project_id: state.projectId || "",
+      settings: studio.gen.settings || studio.gen,
+    });
+    setStudioStatus("创作设置已保存。");
+    markStudioSaved();
+    toast("创作设置已保存。");
+    return true;
+  } finally { unlock(); }
 }
 
 async function resetGenSettings() {
+  if (!(await guardStudioLeave())) return;
   const updated = await call("reset_generation_settings", studio.genScope, state.projectId || "");
   studio.gen = { ...(studio.gen || {}), settings: updated };
   renderGenSettings();
+  markStudioSaved();
   toast(studio.genScope === "project" ? "已改用全局默认。" : "已恢复出厂默认。");
 }
 
 async function openRecordsStudio(kind = "connection") {
+  if (blockIfGenerating() || !(await guardStudioLeave())) return;
+  studio.savedForm = "";
   const pages = [
     ["connection", "连接检查", true],
     ["confirmed", "已确认章节", true],
@@ -1434,6 +1570,92 @@ async function openRecordsStudio(kind = "connection") {
   $("studioTabs").innerHTML = "";
   studio.records = await call("records_state", studio.recordsKind, state.projectId || "");
   renderRecordsStudio();
+}
+
+function backupReason(label) {
+  if (label.includes("import")) return "覆盖导入前";
+  if (label.startsWith("pre_delete")) return "删除章节前";
+  if (label === "pre_planning_library_delete") return "删除大纲或资料前";
+  if (label.includes("planning")) return "修改大纲或资料前";
+  if (label.includes("authorization")) return "确认模型调用许可前";
+  if (label.includes("memory")) return "修改记忆前";
+  if (label.includes("replace_commit")) return "替换确认稿前";
+  if (label.includes("commit")) return "确认稿件前";
+  if (label.includes("migration")) return "配置迁移前";
+  return label || "作品检查点";
+}
+
+function backupTime(value) {
+  const stamp = String(value || "");
+  const match = stamp.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})\d*Z$/);
+  if (!match) return stamp;
+  return new Date(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`).toLocaleString("zh-CN", { hour12: false });
+}
+
+async function openBackupStudio() {
+  if (blockIfGenerating() || !(await guardStudioLeave())) return;
+  if (!(await flushSave()).ok) return;
+  const projectsRoot = state.projectsRoot;
+  const data = await call("history_backups");
+  if (projectsRoot !== state.projectsRoot) return;
+  studio.mode = "backups";
+  studio.savedForm = "";
+  refreshStudioSaveStatus();
+  openStudioShell({ kicker: "本地恢复", title: "历史备份" });
+  $("studioTabs").innerHTML = "";
+  const wrap = el("div", "studio-grid");
+  const list = el("div", "studio-list");
+  list.append(el("h3", "", `历史备份 ${data.items.length} / ${data.total_count}`));
+  const scroll = el("div", "studio-scroll");
+  const form = el("div", "studio-form");
+  form.append(el("p", "studio-note", "显示最近 200 个完整作品检查点。先校验全部文件，再恢复成新作品副本供你核对；当前作品保持不变，密钥不会复制。"));
+  const details = el("pre", "studio-records", "请选择一个备份，查看时间、原因和内容数量。");
+  const restore = el("button", "btn primary", "恢复为新作品副本");
+  restore.type = "button";
+  restore.disabled = true;
+  let selected = "";
+  let restoring = false;
+  for (const item of data.items) {
+    const button = el("button", "choice");
+    button.type = "button";
+    button.textContent = `${item.title} · ${backupReason(item.label)}\n${backupTime(item.created_at) || item.name}`;
+    button.addEventListener("click", async () => {
+      if (restoring) return;
+      selected = item.backup_id;
+      restore.disabled = true;
+      details.textContent = "正在校验备份…";
+      try {
+        const info = await call("inspect_history_backup", item.backup_id);
+        if (selected !== item.backup_id || studio.mode !== "backups") return;
+        details.textContent = `${info.title}\n时间：${backupTime(info.created_at)}\n原因：${backupReason(info.label)}\n\n${info.file_count} 个文件已完整校验\n草稿：${info.draft_count}\n确认章节：${info.confirmed_count}\n记忆条目：${info.memory_count}\n\n恢复后会出现在作品列表中，名称带有“恢复副本”。`;
+        restore.disabled = false;
+      } catch (error) { if (selected === item.backup_id) details.textContent = error.message; }
+    });
+    scroll.append(button);
+  }
+  if (!data.items.length) scroll.append(el("p", "studio-note", "暂无完整备份。确认稿件、删除章节或修改记忆等操作会自动创建检查点。"));
+  restore.addEventListener("click", async () => {
+    if (!selected || restoring || blockIfGenerating()) return;
+    if (projectsRoot !== state.projectsRoot) return toast("项目库已切换，请重新打开历史备份。");
+    restoring = true;
+    restore.disabled = true;
+    const unlock = lockStudioForm();
+    setBusy(true, "正在恢复备份…", { lockEditor: false, veil: false });
+    try {
+      if (!(await flushSave()).ok) return;
+      const result = await call("restore_history_backup", selected, projectsRoot);
+      state.workspace = result.workspace;
+      setBusy(false);
+      await closeStudio({ discard: true });
+      await selectProject(result.restored.project_id);
+      toast("已恢复为新作品副本，请打开章节核对。");
+    } catch (error) { toast(error.message); }
+    finally { setBusy(false); unlock(); restoring = false; restore.disabled = false; }
+  });
+  list.append(scroll);
+  form.append(details, restore);
+  wrap.append(list, form);
+  $("studioBody").replaceChildren(wrap);
 }
 
 function renderRecordsStudio() {

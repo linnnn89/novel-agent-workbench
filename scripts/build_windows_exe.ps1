@@ -65,6 +65,109 @@ function Assert-VenvPythonSupported {
     }
 }
 
+function Assert-BuildPath {
+    param([string]$Path)
+    $full = [IO.Path]::GetFullPath($Path)
+    $root = [IO.Path]::GetFullPath([string]$RepoRoot).TrimEnd('\')
+    if (-not $full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Build path is outside the repository: $full"
+    }
+    $cursor = $full
+    while ($cursor.Length -gt $root.Length) {
+        if (Test-Path -LiteralPath $cursor) {
+            if ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Build paths must not traverse a junction or symbolic link: $cursor"
+            }
+        }
+        $cursor = [IO.Path]::GetDirectoryName($cursor)
+    }
+}
+
+function Assert-BuildTree {
+    param([string]$Path)
+    Assert-BuildPath $Path
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $pending = New-Object 'System.Collections.Generic.Stack[string]'
+    $pending.Push($Path)
+    while ($pending.Count) {
+        $current = Get-Item -LiteralPath $pending.Pop() -Force
+        if ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Build payload contains a junction or symbolic link: $($current.FullName)"
+        }
+        if ($current.PSIsContainer) {
+            foreach ($child in Get-ChildItem -LiteralPath $current.FullName -Force) { $pending.Push($child.FullName) }
+        }
+    }
+}
+
+function Get-ProgramFingerprint {
+    param([string]$Directory)
+    $records = foreach ($name in @('NovelAgentWorkbench.exe', '_internal')) {
+        $path = Join-Path $Directory $name
+        Assert-BuildTree $path
+        if (Test-Path -LiteralPath $path) {
+            foreach ($file in Get-ChildItem -LiteralPath $path -File -Recurse -Force | Sort-Object FullName) {
+                $relative = $file.FullName.Substring($Directory.Length).TrimStart('\')
+                $relative + ':' + (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+            }
+        }
+    }
+    return $records -join "`n"
+}
+
+function Publish-WindowsApp {
+    param([string]$Candidate, [string]$Destination, [string]$WorkDirectory)
+    foreach ($path in @($Candidate, $Destination, $WorkDirectory)) { Assert-BuildPath $path }
+    if (-not (Test-Path -LiteralPath (Join-Path $Candidate 'NovelAgentWorkbench.exe') -PathType Leaf) -or
+        -not (Test-Path -LiteralPath (Join-Path $Candidate '_internal') -PathType Container)) {
+        throw 'The candidate is missing its executable or runtime directory.'
+    }
+    $dist = Split-Path -Parent $Destination
+    New-Item -ItemType Directory -Path $dist -Force | Out-Null
+    $publishLock = [IO.File]::Open((Join-Path $dist '.NovelAgentWorkbench.publish.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+        $installedExe = Join-Path $Destination 'NovelAgentWorkbench.exe'
+        foreach ($process in Get-Process -Name NovelAgentWorkbench -ErrorAction SilentlyContinue) {
+            if ($process.Path -eq $installedExe) { throw 'Please close NovelAgentWorkbench before publishing. The current program is unchanged.' }
+        }
+        $expected = Get-ProgramFingerprint $Candidate
+        $prepared = Join-Path $WorkDirectory 'prepared'
+        $backup = Join-Path $RepoRoot ('old/program-backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+        foreach ($path in @($prepared, $backup)) { Assert-BuildPath $path }
+        New-Item -ItemType Directory -Path $prepared, $backup, $Destination -Force | Out-Null
+        foreach ($name in @('NovelAgentWorkbench.exe', '_internal')) {
+            Copy-Item -LiteralPath (Join-Path $Candidate $name) -Destination (Join-Path $prepared $name) -Recurse
+        }
+        if ((Get-ProgramFingerprint $prepared) -cne $expected) { throw 'Prepared program verification failed; the installed program is unchanged.' }
+        $original = Get-ProgramFingerprint $Destination
+        $oldMoved = @()
+        $newMoved = @()
+        try {
+            foreach ($name in @('NovelAgentWorkbench.exe', '_internal')) {
+                $old = Join-Path $Destination $name
+                if (Test-Path -LiteralPath $old) {
+                    Move-Item -LiteralPath $old -Destination (Join-Path $backup $name)
+                    $oldMoved += $name
+                }
+            }
+            foreach ($name in @('NovelAgentWorkbench.exe', '_internal')) {
+                Move-Item -LiteralPath (Join-Path $prepared $name) -Destination (Join-Path $Destination $name)
+                $newMoved += $name
+            }
+            if ((Get-ProgramFingerprint $Destination) -cne $expected) { throw 'Published program verification failed.' }
+        }
+        catch {
+            $publishFailure = $_
+            foreach ($name in $newMoved) { Move-Item -LiteralPath (Join-Path $Destination $name) -Destination (Join-Path $prepared $name) }
+            foreach ($name in $oldMoved) { Move-Item -LiteralPath (Join-Path $backup $name) -Destination (Join-Path $Destination $name) }
+            if ((Get-ProgramFingerprint $Destination) -cne $original) { throw "Rollback verification failed. Retained files: $backup and $prepared" }
+            throw "Publishing failed; the original program was restored. $publishFailure"
+        }
+        Write-Host "Old program retained: $backup"
+    }
+    finally { $publishLock.Dispose() }
+}
+
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 $IconPath = Join-Path $RepoRoot "src\novel_agent_workbench\assets\novel_agent_workbench.ico"
@@ -73,8 +176,9 @@ $AssetsPath = Join-Path $RepoRoot "src\novel_agent_workbench\assets"
 $ModernUiPath = Join-Path $RepoRoot "src\novel_agent_workbench\modern_ui"
 $DistRoot = Join-Path $RepoRoot "dist"
 $FinalAppDir = Join-Path $DistRoot "NovelAgentWorkbench"
-$SpecWorkDir = Join-Path $RepoRoot "build\pyinstaller_spec"
-$StagingDist = Join-Path $RepoRoot "build\pyinstaller_dist"
+$RunBuildRoot = Join-Path $RepoRoot ('build\windows-exe-' + [guid]::NewGuid().ToString('N'))
+$SpecWorkDir = Join-Path $RunBuildRoot 'spec'
+$StagingDist = Join-Path $RunBuildRoot 'dist'
 $StagingAppDir = Join-Path $StagingDist "NovelAgentWorkbench"
 
 Push-Location $RepoRoot
@@ -85,6 +189,7 @@ try {
         $PythonCommand = Resolve-PythonCommand
         Write-Host "[2/6] Creating .venv with: $($PythonCommand -join ' ')"
         Invoke-PythonCommand -Command $PythonCommand -Arguments @("-m", "venv", ".venv")
+        if ($LASTEXITCODE -ne 0) { throw 'Virtual environment creation failed.' }
     }
     else {
         Write-Host "[2/6] Reusing existing .venv"
@@ -94,7 +199,9 @@ try {
     if (-not $SkipInstall) {
         Write-Host "[3/6] Installing build dependencies"
         & $VenvPython -m pip install --upgrade pip
+        if ($LASTEXITCODE -ne 0) { throw 'pip upgrade failed.' }
         & $VenvPython -m pip install pyinstaller pillow "pywebview>=5.0" "deepseek-tokenizer==0.3.0"
+        if ($LASTEXITCODE -ne 0) { throw 'Build dependency installation failed.' }
     }
     else {
         Write-Host "[3/6] Skipping dependency install"
@@ -111,13 +218,14 @@ try {
         Write-Host "[4/6] Reusing committed Windows icon"
     }
 
-    if (Test-Path $StagingDist) {
-        Remove-Item -LiteralPath $StagingDist -Recurse -Force
-    }
-    if (Test-Path $SpecWorkDir) {
-        Remove-Item -LiteralPath $SpecWorkDir -Recurse -Force
-    }
+    Assert-BuildPath $RunBuildRoot
     New-Item -ItemType Directory -Path $SpecWorkDir | Out-Null
+    $commit = & git rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { $commit = 'unknown' }
+    $dirty = [bool](& git status --porcelain)
+    $BuildInfoPath = Join-Path $RunBuildRoot 'build_info.json'
+    $buildInfo = @{ built_at = (Get-Date -Format 'o'); commit = $commit; local_changes = $dirty } | ConvertTo-Json
+    [IO.File]::WriteAllText($BuildInfoPath, $buildInfo, (New-Object Text.UTF8Encoding($false)))
 
     Write-Host "[5/6] Building PyInstaller application"
     & $VenvPython -m PyInstaller `
@@ -127,10 +235,12 @@ try {
         --name "NovelAgentWorkbench" `
         --distpath $StagingDist `
         --specpath $SpecWorkDir `
+        --workpath (Join-Path $RunBuildRoot 'work') `
         --icon $IconPath `
         --paths "src" `
         --add-data "$AssetsPath;novel_agent_workbench\assets" `
         --add-data "$ModernUiPath;novel_agent_workbench\modern_ui" `
+        --add-data "$BuildInfoPath;." `
         --collect-all webview `
         --collect-all deepseek_tokenizer `
         --collect-all clr_loader `
@@ -144,33 +254,16 @@ try {
     if (-not (Test-Path $StagingAppDir)) {
         throw "PyInstaller did not create expected staging output: $StagingAppDir"
     }
-    if (-not (Test-Path $FinalAppDir)) {
-        New-Item -ItemType Directory -Path $FinalAppDir | Out-Null
-    }
-
     $FinalExe = Join-Path $FinalAppDir "NovelAgentWorkbench.exe"
-    $FinalInternal = Join-Path $FinalAppDir "_internal"
-    $StagingExe = Join-Path $StagingAppDir "NovelAgentWorkbench.exe"
-    $StagingInternal = Join-Path $StagingAppDir "_internal"
+    Write-Host "[6/6] Verifying and publishing, with automatic rollback on failure"
+    Publish-WindowsApp -Candidate $StagingAppDir -Destination $FinalAppDir -WorkDirectory $RunBuildRoot
 
-    Write-Host "[6/6] Publishing final EXE while preserving user data"
-    if (Test-Path $FinalExe) {
-        Remove-Item -LiteralPath $FinalExe -Force
-    }
-    if (Test-Path $FinalInternal) {
-        Remove-Item -LiteralPath $FinalInternal -Recurse -Force
-    }
-    Copy-Item -LiteralPath $StagingExe -Destination $FinalExe
-    Copy-Item -LiteralPath $StagingInternal -Destination $FinalInternal -Recurse
-
-    $BuildDir = Join-Path $RepoRoot "build"
-    if (Test-Path $BuildDir) {
-        Remove-Item -LiteralPath $BuildDir -Recurse -Force
-    }
+    Assert-BuildTree $RunBuildRoot
+    Remove-Item -LiteralPath $RunBuildRoot -Recurse -Force
 
     Write-Host ""
     Write-Host "Built: $FinalExe"
-    Write-Host "Cleaned PyInstaller intermediate build files."
+    Write-Host "Cleaned only this run's PyInstaller intermediate files."
     Write-Host "Preserved dist\NovelAgentWorkbench user-data directory if present."
 }
 finally {

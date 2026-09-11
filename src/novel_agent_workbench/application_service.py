@@ -21,7 +21,7 @@ from .config import (
 from .context_previews import ContextUpdatePreviewService
 from .chapters import ChapterWorkflowService
 from .context_assembler import ContextAssemblerService
-from .token_budget import capacity_check, estimate_input_tokens, input_budget
+from .token_budget import capacity_check, estimate_input_tokens
 from .context_queue import ContextUpdateQueueService
 from .corpus_boundaries import CorpusBoundaryService
 from .corpus_profiler import profile_corpus
@@ -83,6 +83,7 @@ from .providers import (
     configure_provider_role,
     generate_with_provider,
     get_model_role_config,
+    get_effective_model_role_config,
     list_provider_adapters,
     mask_secret,
     provider_dry_run,
@@ -1105,16 +1106,10 @@ class WorkbenchApplicationService:
             title=title,
             instruction=instruction,
         )
-        input_limit = input_budget(store.read_config(), requested=max_context_tokens,
-                                   feature_id="ai_refinement", role="reviser", max_tokens=max_tokens)
-        mandatory_prompt = render_ai_refinement_prompt({}, draft=draft, review=review, instruction=instruction)
-        mandatory_tokens = estimate_refinement_input_tokens(system_prompt, mandatory_prompt) + 512
-        if mandatory_tokens >= input_limit:
-            raise RuntimeError("原稿、审稿和精修要求的估算长度已达到上下文上限，请提高上下文 Token 上限后重试；未发送请求。")
         render = ContextAssemblerService(store).prompt_render_dry_run(
             prompt=task_prompt,
             system_prompt=system_prompt,
-            max_context_tokens=input_limit - mandatory_tokens,
+            max_context_tokens=max_context_tokens,
             chapter_id=chapter_id,
             include_prompt_text=True,
             include_context_text=True,
@@ -1127,7 +1122,8 @@ class WorkbenchApplicationService:
         )
         capacity = refinement_capacity_check(
             store.read_config(), provider_prompt, system_prompt,
-            input_limit=input_limit, max_tokens=max_tokens, role=request_role,
+            input_limit=max_context_tokens, max_tokens=max_tokens, role=request_role,
+            model=get_effective_model_role_config(store, request_role, feature_id="ai_refinement").model,
         )
         safe_stream_callback = stream_sanitizer_callback(stream_callback, reasoning_callback)
         try:
@@ -1155,7 +1151,7 @@ class WorkbenchApplicationService:
                         "draft_id": draft_id,
                         "review_id": str(review.get("review_id") or ""),
                         "context_aware_refinement": True,
-                        "input_token_limit": input_limit,
+                        "input_token_limit": capacity["configured_input_limit"],
                     },
                 ),
             )
@@ -1301,6 +1297,18 @@ class WorkbenchApplicationService:
             include_prompt_text=include_prompt_text,
             include_context_text=include_context_text,
         ).to_dict()
+
+    def preview_context_draft(
+        self, project_id: str, *, chapter_id: str, prompt: str,
+        system_prompt: str = "", max_context_tokens: int | None = None,
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
+        _, render, _ = DraftGenerationService(self._runtime_store(project_id)).prepare_context_draft_request(
+            DraftGenerationRequest(chapter_id=chapter_id, prompt=prompt,
+                                   system_prompt=system_prompt, max_tokens=max_tokens),
+            max_context_tokens=max_context_tokens,
+        )
+        return render
 
     def create_final_assembly_gate(
         self,
@@ -1593,6 +1601,15 @@ class WorkbenchApplicationService:
     def inspect_project_package(self, package_path: str | Path) -> dict[str, Any]:
         return ProjectPackageService(self.registry).inspect(package_path).to_dict()
 
+    def list_history_backups(self) -> dict[str, Any]:
+        return ProjectPackageService(self.registry).list_history_backups()
+
+    def inspect_history_backup(self, backup_id: str) -> dict[str, Any]:
+        return ProjectPackageService(self.registry).inspect_history_backup(backup_id)
+
+    def restore_history_backup(self, backup_id: str) -> dict[str, Any]:
+        return ProjectPackageService(self.registry).restore_history_backup(backup_id).to_dict()
+
     def import_project_package(
         self,
         package_path: str | Path,
@@ -1870,10 +1887,10 @@ def estimate_refinement_input_tokens(system_prompt: str, prompt: str) -> int:
 
 def refinement_capacity_check(
     config: dict[str, Any], prompt: str, system_prompt: str, *,
-    input_limit: int, max_tokens: int | None, role: str,
+    input_limit: int | None, max_tokens: int | None, role: str, model: str = "deepseek-v4",
 ) -> dict[str, Any]:
     return capacity_check(config, prompt, system_prompt, feature_id="ai_refinement", role=role,
-                          input_limit=input_limit, max_tokens=max_tokens)
+                          input_limit=input_limit, max_tokens=max_tokens, model=model)
 
 
 def ai_refinement_system_prompt(project_system_prompt: str = "") -> str:
