@@ -158,7 +158,6 @@ class PlanningLibraryService:
             library = self._read_library()
             if not any(item_id(item) == safe_id for item in library["items"]):
                 raise PlanningLibraryError(f"Planning item not found: {safe_id}")
-            checkpoint = self.store.create_checkpoint(label="pre_planning_library_update")
             now = utc_stamp()
             result_item: dict[str, Any] | None = None
             updated_items: list[dict[str, Any]] = []
@@ -176,7 +175,6 @@ class PlanningLibraryService:
                         "adherence_level": safe_adherence,
                         "send_mode": safe_send_mode,
                         "chapter_range": safe_chapter_range,
-                        "updated_at": now,
                         "safety": {
                             **(item.get("safety") if isinstance(item.get("safety"), dict) else {}),
                             "manual_text": True,
@@ -187,11 +185,17 @@ class PlanningLibraryService:
                     }
                     result_item = item
                 updated_items.append(item)
-            library["items"] = updated_items
-            library["enabled"] = True
-            library["updated_at"] = now
-            write_library(self.store, library)
             assert result_item is not None
+            checkpoint = {}
+            if updated_items != library["items"] or library.get("enabled") is not True:
+                checkpoint = self.store.create_checkpoint(label="pre_planning_library_update")
+                result_item["updated_at"] = now
+                library["items"] = updated_items
+                library["enabled"] = True
+                library["updated_at"] = now
+                write_library(self.store, library)
+            else:
+                now = str(result_item.get("updated_at") or "")
             return PlanningLibraryItemResult(
                 planning_id=safe_id,
                 active=bool(result_item["active"]),
@@ -238,7 +242,6 @@ class PlanningLibraryService:
             library = self._read_library()
             if not any(item_id(item) == safe_id for item in library["items"]):
                 raise PlanningLibraryError(f"Planning item not found: {safe_id}")
-            checkpoint = self.store.create_checkpoint(label="pre_planning_library_update")
             now = utc_stamp()
             result_item: dict[str, Any] | None = None
             updated_items: list[dict[str, Any]] = []
@@ -249,13 +252,18 @@ class PlanningLibraryService:
                         item["active"] = active
                     if enabled is not None:
                         item["enabled"] = enabled
-                    item["updated_at"] = now
                     result_item = item
                 updated_items.append(item)
-            library["items"] = updated_items
-            library["updated_at"] = now
-            write_library(self.store, library)
             assert result_item is not None
+            checkpoint = {}
+            if updated_items != library["items"]:
+                checkpoint = self.store.create_checkpoint(label="pre_planning_library_update")
+                result_item["updated_at"] = now
+                library["items"] = updated_items
+                library["updated_at"] = now
+                write_library(self.store, library)
+            else:
+                now = str(result_item.get("updated_at") or "")
             return PlanningLibraryItemResult(
                 planning_id=safe_id,
                 active=bool(result_item.get("active")),

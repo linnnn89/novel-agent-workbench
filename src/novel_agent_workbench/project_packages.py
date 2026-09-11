@@ -288,7 +288,8 @@ class ProjectPackageService:
             except (OSError, ValueError, KeyError, AttributeError, zipfile.BadZipFile, StorageError) as exc:
                 item["error"] = f"无法读取备份：{exc}"
             items.append(item)
-        return {"items": items, "total_count": len(candidates)}
+        return {"items": items, "total_count": len(candidates),
+                "total_bytes": sum(path.stat().st_size for path in candidates)}
 
     def inspect_history_backup(self, backup_id: str) -> dict[str, Any]:
         validated = self._validate_history_backup(backup_id)

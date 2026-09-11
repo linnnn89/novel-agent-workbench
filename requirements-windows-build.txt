@@ -1,0 +1,20 @@
+# Verified Windows build environment (Python 3.14.5).
+# Pin direct and transitive dependencies together; upgrade deliberately and smoke-test the EXE.
+altgraph==0.17.5
+bottle==0.13.4
+cffi==2.1.1
+clr_loader==0.3.1
+deepseek-tokenizer==0.3.0
+packaging==26.2
+pefile==2024.8.26
+pillow==12.2.0
+pip==26.2.1
+proxy_tools==0.1.0
+pycparser==3.0
+pyinstaller==6.20.0
+pyinstaller-hooks-contrib==2026.5
+pythonnet==3.1.0
+pywebview==6.2.1
+pywin32-ctypes==0.2.3
+setuptools==82.0.1
+typing_extensions==4.16.0

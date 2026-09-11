@@ -581,7 +581,7 @@ class WorkbenchBridge:
 
     def project_overview(self, project_id: str) -> dict[str, Any]:
         try:
-            state = self.app.project_state(project_id)
+            state = self.app.project_overview(project_id)
         except Exception as exc:
             return _fail(f"作品概览读取失败: {exc}")
         roles = state.get("provider_roles") if isinstance(state.get("provider_roles"), dict) else {}
@@ -996,7 +996,7 @@ class WorkbenchBridge:
         chapter_ids = [str(item) for item in (data.get("chapter_ids") or []) if str(item)]
         target = normalize_memory_target_tokens(data.get("target_tokens"))
         try:
-            self.app.set_memory_text(
+            text_result = self.app.set_memory_text(
                 project_id,
                 memory_id,
                 text,
@@ -1009,6 +1009,7 @@ class WorkbenchBridge:
                 enabled=bool(data.get("enabled", True)),
                 reason_code="modern_toggle",
                 target_token_budget=target,
+                checkpoint_before_update=not bool(text_result.get("checkpoint")),
             )
         except Exception as exc:
             return _fail(f"保存记忆库失败: {exc}")

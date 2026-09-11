@@ -2169,7 +2169,7 @@ class WorkbenchDesktopApp(tk.Tk):
                 return
             memory_id = str(memory_item.get("memory_id") or "main_memory_bank")
             try:
-                self.app.set_memory_text(
+                text_result = self.app.set_memory_text(
                     project_id,
                     memory_id,
                     text,
@@ -2182,6 +2182,7 @@ class WorkbenchDesktopApp(tk.Tk):
                     enabled=memory_item.get("enabled") is not False,
                     reason_code="auto_5_chapter_summary",
                     target_token_budget=target_tokens,
+                    checkpoint_before_update=not bool(text_result.get("checkpoint")),
                 )
             except Exception as exc:
                 messagebox.showerror(APP_TITLE, f"保存自动记忆总结失败:\n{exc}", parent=progress)

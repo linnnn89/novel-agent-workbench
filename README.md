@@ -43,6 +43,8 @@
 
 软件不会替你决定哪一版算正文，也不会因为打开作品或保存设置就在后台调用模型。
 
+日常作品概览只读取写作所需的核心记录；高级执行记录的完整检查仍在「记录与诊断」中进行。某份高级记录损坏时，不会连带阻止日常概览显示。
+
 自动带入的前文按章节编号排序，只选目标章节之前最近的 N 章。例如补写第 2 章时不会带入第 3 章。自定义章节编号需要以数字结尾；无法判断顺序时会提示改编号或关闭自动带入前文。
 
 ### 模型怎么接
@@ -78,9 +80,13 @@ EXE 版的作品、设置和密钥保存在程序旁边的 `用户数据` 文件
 
 源码运行时，作品默认放在仓库的 `workspace_projects`。这些目录以及 `.venv`、`dist`、API Key 和小说正文都不应提交到 GitHub。
 
+保存未变化的记忆或大纲资料时，不改写正文、时间戳，也不新增备份。一次记忆表单保存中，正文和启用状态仍按原有步骤分别保存，共用正文步骤已建立的完整检查点；仅改启用状态时仍单独创建检查点。这项优化不改变原有保存事务边界。历史备份页显示全部完整检查点的占用，并提供打开项目库手工整理的入口；不会自动清理旧备份，整本恢复格式保持不变。
+
 ### 在 Windows 上构建
 
 构建 EXE 需要 Windows 10/11 和 Python 3.11–3.14。首次构建需要联网安装 PyInstaller、Pillow、pywebview 和上述小型 tokenizer。
+
+构建所需的直接和间接依赖固定在 `requirements-windows-build.txt`，使用普通 pip 安装，无需额外依赖管理工具。`-SkipInstall` 也会核对已安装版本和依赖关系；不匹配时请去掉该参数，按固定版本安装后构建。升级依赖时应一起更新版本文件，并重新验证 EXE 启动。当前实际验证环境为 Python 3.14.5。
 
 ```cmd
 git clone https://github.com/linnnn89/novel-agent-workbench.git
@@ -122,12 +128,17 @@ src/novel_agent_workbench/desktop_app.py      经典 Tk 备用界面
 src/novel_agent_workbench/ui_presenters.py    两种界面共用的显示格式
 src/novel_agent_workbench/token_budget.py     本地 token 估算及完整输入预算
 src/novel_agent_workbench/task_control.py     本地任务停止和网络中断
+src/novel_agent_workbench/refinement.py       AI 精修业务及提示词/预算检查
 src/novel_agent_workbench/application_service.py
 src/novel_agent_workbench/storage.py
 src/novel_agent_workbench/providers.py
 ```
 
 接口约定和项目说明在 [`codex_docs/`](codex_docs/) 中。
+
+AI 精修入口仍为 `WorkbenchApplicationService.refine_draft_from_ai_review`，内部委托给 `DraftRefinementService`；提示词、完整材料预算、审稿有效性和新草稿保存规则保持一致。旧的提示词辅助函数导入位置继续兼容。
+
+`.venv\Scripts\python.exe -m unittest discover -s scripts -p test_architecture_integrity.py` 使用临时文件验证记忆/资料的备份数量、无变化保存和概览与高级诊断的隔离；精修回归继续使用 `scripts/test_refinement_integrity.py`。
 
 在 Windows 桌面会话中运行 `.venv\Scripts\python.exe scripts\verify_desktop_iterations.py`，可用独立临时项目库验证保存提示、切库、备份恢复和原生退出；不会调用模型。结果保存在 `work/desktop-iteration-check/ui_results.json`。
 
@@ -170,6 +181,8 @@ In the packaged app, projects, settings, and secrets live in the `用户数据` 
 ### Build on Windows
 
 Building the EXE requires Windows 10/11 and Python 3.11–3.14.
+
+Direct and transitive build dependencies are pinned in `requirements-windows-build.txt`. The build verifies these versions even with `-SkipInstall`; the exercised runtime is Python 3.14.5. Daily overview queries are separate from advanced diagnostics. Unchanged memory/planning saves preserve existing timestamps and backups, and a memory form save reuses its first full checkpoint without changing its two-step save behavior. Historical checkpoints remain compatible and are never automatically deleted.
 
 ```cmd
 git clone https://github.com/linnnn89/novel-agent-workbench.git

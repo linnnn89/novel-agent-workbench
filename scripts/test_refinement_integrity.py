@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from novel_agent_workbench import application_service as app_module
+from novel_agent_workbench import refinement as refinement_module
 from novel_agent_workbench.providers import (
     ProviderError, ProviderResponse, ProviderRequest, ModelRoleConfig,
     OpenAICompatibleProviderClient, read_openai_compatible_stream_response,
@@ -81,7 +82,7 @@ class RefinementIntegrationTests(unittest.TestCase):
             self.review = DraftReviewService(self.store).ai_review_draft(self.original.draft_id)
 
     def refine(self, response, **kwargs):
-        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(app_module, "generate_with_provider", return_value=response) as provider:
+        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(refinement_module, "generate_with_provider", return_value=response) as provider:
             result = self.app.refine_draft_from_ai_review("test", self.original.draft_id, max_tokens=100, **kwargs)
         return result, provider
 
@@ -101,7 +102,7 @@ class RefinementIntegrationTests(unittest.TestCase):
 
     def test_edited_source_blocks_explicit_old_review(self):
         self.drafts.update_draft_content(self.original.draft_id, text="Edited source")
-        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(app_module, "generate_with_provider") as provider:
+        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(refinement_module, "generate_with_provider") as provider:
             with self.assertRaises(RuntimeError):
                 self.app.refine_draft_from_ai_review("test", self.original.draft_id, review_id=self.review.review_id)
             provider.assert_not_called()
@@ -112,14 +113,14 @@ class RefinementIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(DraftReviewService(self.store).find_ai_review_for_draft(self.original.draft_id))
 
     def test_capacity_rejection_before_call(self):
-        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(app_module, "generate_with_provider") as provider:
+        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(refinement_module, "generate_with_provider") as provider:
             with self.assertRaises(RuntimeError):
                 self.app.refine_draft_from_ai_review("test", self.original.draft_id, max_context_tokens=1)
             provider.assert_not_called()
 
     def test_failed_provider_does_not_save_candidate(self):
         before = len(self.drafts.list_drafts())
-        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(app_module, "generate_with_provider", side_effect=ProviderError("interrupted", error_type="incomplete_stream")):
+        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(refinement_module, "generate_with_provider", side_effect=ProviderError("interrupted", error_type="incomplete_stream")):
             with self.assertRaises(ProviderError):
                 self.app.refine_draft_from_ai_review("test", self.original.draft_id)
         self.assertEqual(len(self.drafts.list_drafts()), before)
@@ -131,7 +132,7 @@ class RefinementIntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.drafts.list_drafts()), before)
 
     def test_complete_response_and_default_output_budget(self):
-        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(app_module, "generate_with_provider", return_value=ProviderResponse("Complete revision", {}, "mock", "mock", "stop")) as provider:
+        with patch.object(app_module.WorkbenchApplicationService, "_runtime_store", return_value=self.store), patch.object(refinement_module, "generate_with_provider", return_value=ProviderResponse("Complete revision", {}, "mock", "mock", "stop")) as provider:
             result = self.app.refine_draft_from_ai_review("test", self.original.draft_id)
         saved = self.drafts.read_draft(result["draft_id"])
         self.assertFalse(result["output_incomplete"])

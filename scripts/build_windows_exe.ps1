@@ -198,14 +198,19 @@ try {
 
     if (-not $SkipInstall) {
         Write-Host "[3/6] Installing build dependencies"
-        & $VenvPython -m pip install --upgrade pip
-        if ($LASTEXITCODE -ne 0) { throw 'pip upgrade failed.' }
-        & $VenvPython -m pip install pyinstaller pillow "pywebview>=5.0" "deepseek-tokenizer==0.3.0"
+        & $VenvPython -m pip install --no-deps -r (Join-Path $RepoRoot 'requirements-windows-build.txt')
         if ($LASTEXITCODE -ne 0) { throw 'Build dependency installation failed.' }
     }
     else {
         Write-Host "[3/6] Skipping dependency install"
     }
+
+    # SkipInstall must use the same validated versions, not silently build a different environment.
+    # A script file also avoids Windows PowerShell 5.1 native-argument quote rewriting.
+    & $VenvPython (Join-Path $RepoRoot 'scripts/check_build_dependencies.py') (Join-Path $RepoRoot 'requirements-windows-build.txt')
+    if ($LASTEXITCODE -ne 0) { throw 'Build dependency versions do not match the lock file.' }
+    & $VenvPython -m pip check
+    if ($LASTEXITCODE -ne 0) { throw 'Build dependencies are inconsistent.' }
 
     if ($RegenerateIcon -or -not (Test-Path $IconPath)) {
         Write-Host "[4/6] Regenerating Windows icon"

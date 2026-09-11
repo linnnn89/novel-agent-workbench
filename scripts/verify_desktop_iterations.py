@@ -151,6 +151,13 @@ def run():
 
         evaluate('''$("historyBackupsBtn").click();await until(()=>studio.mode==="backups");const b=Array.from($("studioBody").querySelectorAll("button.choice")).find(b=>b.textContent.includes("删除章节"));if(!b)throw Error("Expected deletion checkpoint");b.click();await until(()=>!Array.from($("studioBody").querySelectorAll("button")).find(b=>b.textContent==="恢复为新作品副本").disabled);return true;''')
         results["backup_preview"] = window.evaluate_js('$("studioBody").querySelector("pre").textContent')
+        results["backup_usage"] = window.evaluate_js('Array.from($("studioBody").querySelectorAll("p")).find(p=>p.textContent.includes("共占用")).textContent')
+        opened, opened_path = threading.Event(), []
+        with patch.object(os, "startfile", side_effect=lambda path: (opened_path.append(Path(path)), opened.set())):
+            evaluate('press("studioBody","打开项目库整理备份");return true;')
+            assert opened.wait(5), "Backup management button did not request the folder"
+        assert opened_path == [LIB_B]
+        results["backup_management_opens_current_library"] = True
         phase("history")
         restored_id = evaluate('''press("studioBody","恢复为新作品副本");await until(()=>!state.generating&&!studio.saving&&studio.mode===""&&state.projectId!=="same_id");return state.projectId;''')
         recovered = ProjectStore.open(LIB_B, restored_id)

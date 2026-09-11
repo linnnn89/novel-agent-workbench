@@ -1658,6 +1658,8 @@ Must not return prompt text, chapter text, raw Provider responses, request bodie
 
 Explicitly writes manual text into one Memory Bank placeholder item.
 
+If the text and supplied metadata are unchanged, the operation preserves the existing timestamp and files and returns an empty `checkpoint` object.
+
 Creates a pre-write checkpoint:
 
 ```text
@@ -1696,6 +1698,8 @@ This method must not call Providers, auto-extract from chapters, update world bo
 ### set_memory_item_enabled(project_id, memory_id, enabled, reason_code="")
 
 Explicitly changes the lifecycle switch for one Memory Bank item.
+
+Unchanged settings preserve files and timestamps and return an empty `checkpoint`. The optional `checkpoint_before_update` defaults to true; desktop callers set it to false only when the preceding text step in the same save already returned a full checkpoint. Text and lifecycle remain separate writes.
 
 Creates a pre-write checkpoint:
 
