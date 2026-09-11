@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from .application_service import WorkbenchApplicationService
 from .task_control import JobControl, JobCancelled, current_job, job_scope
+from .token_budget import InputBudgetExceeded
 from .ui_presenters import (
     default_planning_id,
     default_projects_root,
@@ -47,7 +48,7 @@ from .memory_bank import normalize_memory_target_tokens
 from .model_settings import FEATURE_DEFINITIONS
 from .providers import format_prompt_cache_usage
 from .reviews import REVIEW_TRUNCATED_NOTICE, review_output_truncated
-from .storage import ProjectLockError, utc_stamp
+from .storage import ProjectLockError, atomic_write_json_file, utc_stamp
 
 
 
@@ -129,10 +130,32 @@ class WindowCloseSaveCoordinator:
         try:
             self._window.evaluate_js(
                 f"window.__workbenchFlushBeforeClose({attempt_id})",
-                callback=lambda result: self._after_flush(attempt_id, result),
+                # WebView2 invokes promise callbacks on its UI thread. Calling
+                # run_js/destroy there would wait for that same thread to respond.
+                callback=lambda result: threading.Thread(
+                    target=self._after_flush, args=(attempt_id, result),
+                    name="NovelCloseResult", daemon=True,
+                ).start(),
             )
         except Exception as exc:
             self._cancel_close(attempt_id, f"关闭前保存未能启动：{exc}")
+
+    def wait_for_decision(self, attempt_id: int, pending: bool) -> None:
+        # A person deciding whether to save is not a stalled disk write.
+        with self._lock:
+            if attempt_id != self._attempt_id or not self._close_in_progress:
+                return
+            if self._watchdog is not None:
+                self._watchdog.cancel()
+            self._watchdog = None
+            if not pending:
+                watchdog = threading.Timer(
+                    self._close_timeout_seconds, self._cancel_close,
+                    args=(attempt_id, f"关闭前保存超时（{self._close_timeout_seconds:g} 秒），请重试。"),
+                )
+                watchdog.daemon = True
+                self._watchdog = watchdog
+                watchdog.start()
 
     def _after_flush(self, attempt_id: int, result: Any) -> None:
         with self._lock:
@@ -371,8 +394,9 @@ def build_project_chapters(app: WorkbenchApplicationService, project_id: str) ->
 
 
 class WorkbenchBridge:
-    def __init__(self, *, projects_root: Path, repo_root: Path) -> None:
-        self.projects_root = projects_root
+    def __init__(self, *, projects_root: Path, repo_root: Path, settings_path: Path | None = None) -> None:
+        self.projects_root = projects_root.resolve()
+        self.settings_path = settings_path or self.projects_root.parent / "desktop_settings.local.json"
         self.repo_root = repo_root
         self.app = WorkbenchApplicationService.open(projects_root)
         self._busy = False
@@ -381,6 +405,12 @@ class WorkbenchBridge:
         self._job_control: JobControl | None = None
         self._job_number = 0
         self._job_flushers: list[Callable[[], None]] = []
+        self._close_coordinator: WindowCloseSaveCoordinator | None = None
+
+    def wait_close_decision(self, attempt_id: int, pending: bool) -> dict[str, Any]:
+        if self._close_coordinator is not None:
+            self._close_coordinator.wait_for_decision(int(attempt_id), bool(pending))
+        return _ok({})
 
     def bind_window(self, window: Any) -> None:
         global _ACTIVE_WINDOW
@@ -458,6 +488,8 @@ class WorkbenchBridge:
                 except Exception as exc:
                     self._log(f"任务结束: {name}  {exc}")
                     payload = {"ok": False, "error": str(exc), "cancelled": isinstance(exc, JobCancelled)}
+                    if isinstance(exc, InputBudgetExceeded):
+                        payload["input_budget"] = exc.report
                 else:
                     self._log(f"任务完成: {name}")
                     payload = _ok(_jsonable(result))
@@ -648,9 +680,14 @@ class WorkbenchBridge:
             }
         )
 
-    def save_draft(self, project_id: str, draft_id: str, text: str) -> dict[str, Any]:
+    def save_draft(self, project_id: str, draft_id: str, text: str, projects_root: str = "") -> dict[str, Any]:
         try:
-            result = self.app.update_draft_content(project_id, draft_id, text=str(text or ""))
+            # Capture the service and library together, before another UI request can switch them.
+            with self._busy_lock:
+                if projects_root and Path(projects_root).resolve() != self.projects_root:
+                    return _fail("项目库已切换，旧库的保存请求已停止。请重新打开正确的作品。")
+                app = self.app
+            result = app.update_draft_content(project_id, draft_id, text=str(text or ""))
         except Exception as exc:
             return _fail(f"保存编辑失败: {exc}")
         return _ok(_jsonable(result))
@@ -1499,17 +1536,53 @@ class WorkbenchBridge:
             return _fail("当前环境还没有安装 pywebview。")
         if _ACTIVE_WINDOW is None:
             return _fail("窗口尚未就绪。")
-        selected = _ACTIVE_WINDOW.create_file_dialog(webview.FOLDER_DIALOG, directory=str(self.projects_root))
-        if not selected:
-            return _fail("已取消更改项目库。", cancelled=True)
-        path = Path(selected[0] if isinstance(selected, (list, tuple)) else selected)
+        with self._busy_lock:
+            if self._busy:
+                return _fail("当前任务尚未结束，不能切换项目库。")
+            self._busy = True
         try:
+            selected = _ACTIVE_WINDOW.create_file_dialog(webview.FOLDER_DIALOG, directory=str(self.projects_root))
+            if not selected:
+                return _fail("已取消更改项目库。", cancelled=True)
+            path = Path(selected[0] if isinstance(selected, (list, tuple)) else selected).expanduser().resolve()
             path.mkdir(parents=True, exist_ok=True)
-            self.projects_root = path
-            self.app = WorkbenchApplicationService.open(path)
+            candidate = WorkbenchApplicationService.open(path)
+            workspace = build_workspace_tree(candidate)
+            atomic_write_json_file(self.settings_path, {"projects_root": str(path)})
+            with self._busy_lock:
+                self.projects_root = path
+                self.app = candidate
+            return _ok({"projectsRoot": str(path), "workspace": workspace})
         except Exception as exc:
             return _fail(f"切换项目库失败: {exc}")
-        return _ok({"projectsRoot": str(path), "workspace": build_workspace_tree(self.app)})
+        finally:
+            self._end_job()
+
+    def history_backups(self) -> dict[str, Any]:
+        try:
+            return _ok(self.app.list_history_backups())
+        except Exception as exc:
+            return _fail(f"读取历史备份失败：{exc}")
+
+    def inspect_history_backup(self, backup_id: str) -> dict[str, Any]:
+        try:
+            return _ok(self.app.inspect_history_backup(backup_id))
+        except Exception as exc:
+            return _fail(f"备份校验失败：{exc}")
+
+    def restore_history_backup(self, backup_id: str, projects_root: str) -> dict[str, Any]:
+        with self._busy_lock:
+            if self._busy or Path(projects_root).resolve() != self.projects_root:
+                return _fail("项目库已切换或仍有任务运行，请重新打开历史备份。")
+            self._busy = True
+            app = self.app
+        try:
+            result = app.restore_history_backup(backup_id)
+            return _ok({"restored": result, "workspace": build_workspace_tree(app)})
+        except Exception as exc:
+            return _fail(f"恢复失败，原作品未覆盖：{exc}")
+        finally:
+            self._end_job()
 
     def open_folder(self, kind: str = "project", project_id: str = "") -> dict[str, Any]:
         if kind == "library":
@@ -1616,18 +1689,18 @@ class WorkbenchBridge:
             settings = self.app.generation_settings(project_id)
             prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
             context = settings.get("context") if isinstance(settings.get("context"), dict) else {}
-            render = self.app.prompt_render_dry_run(
+            sampling = settings.get("sampling") if isinstance(settings.get("sampling"), dict) else {}
+            render = self.app.preview_context_draft(
                 project_id,
                 chapter_id=str(chapter_id or "").strip(),
                 prompt=user_prompt,
                 system_prompt=str(prompting.get("system_prompt") or ""),
                 max_context_tokens=optional_int(context.get("max_context_tokens")),
-                include_prompt_text=True,
-                include_context_text=False,
+                max_tokens=optional_int(sampling.get("max_tokens")),
             )
         except Exception as exc:
             return _fail(f"预览失败: {exc}")
-        return _ok({"details": format_prompt_preview(render)})
+        return _ok({"details": format_prompt_preview(render), "input_budget": render["input_capacity"]})
 
     def memory_auto_candidate(self, project_id: str) -> dict[str, Any]:
         try:
@@ -1659,10 +1732,22 @@ class WorkbenchBridge:
         )
 
     def about(self) -> dict[str, Any]:
+        build_text = "运行方式：源码\n"
+        if getattr(sys, "frozen", False):
+            build_text = "运行方式：Windows EXE\n"
+            try:
+                path = Path(getattr(sys, "_MEIPASS", self.repo_root)) / "build_info.json"
+                info = json.loads(path.read_text(encoding="utf-8"))
+                commit = str(info.get("commit") or "unknown")[:12]
+                suffix = "（包含构建时的本地修改）" if info.get("local_changes") else ""
+                build_text += f"构建时间：{info.get('built_at') or '未知'}\n代码提交：{commit}{suffix}\n"
+            except (OSError, ValueError, TypeError):
+                build_text += "构建信息：旧版构建未记录\n"
         return _ok(
             {
                 "title": APP_TITLE,
                 "text": (
+                    build_text + f"当前项目库：{self.projects_root}\n\n"
                     "本地优先的小说创作工作台。\n\n"
                     "草稿必须由你显式确认，才会成为正文。\n"
                     "保存设置、打开作品、编辑正文不会自动联网。\n"
@@ -1712,8 +1797,16 @@ def main() -> int:
         return classic_main()
 
     projects_root = default_projects_root()
+    settings_path = projects_root.parent / "desktop_settings.local.json"
+    if settings_path.exists():
+        try:
+            saved_root = Path(json.loads(settings_path.read_text(encoding="utf-8"))["projects_root"]).expanduser()
+            if saved_root.is_dir():
+                projects_root = saved_root.resolve()
+        except (OSError, KeyError, TypeError, ValueError):
+            pass
     projects_root.mkdir(parents=True, exist_ok=True)
-    api = WorkbenchBridge(projects_root=projects_root, repo_root=default_repo_root())
+    api = WorkbenchBridge(projects_root=projects_root, repo_root=default_repo_root(), settings_path=settings_path)
     window = webview.create_window(
         APP_TITLE,
         url=str(index.resolve()),
@@ -1728,6 +1821,7 @@ def main() -> int:
     )
     api.bind_window(window)
     close_coordinator = WindowCloseSaveCoordinator(window)
+    api._close_coordinator = close_coordinator
     window.events.closing += close_coordinator.on_closing
     webview.start(debug=False, gui="edgechromium")
     return 0

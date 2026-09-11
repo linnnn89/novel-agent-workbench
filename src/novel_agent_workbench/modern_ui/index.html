@@ -48,6 +48,7 @@
           <div class="tree" id="tree"></div>
           <p class="hint">单击作品展开 · 点章节打开 · 章节按 10 章分组 · 右键更多操作 · 生成不会自动成为确认稿</p>
           <button class="btn ghost block" id="dataRootBtn" type="button">更改项目库位置</button>
+          <button class="btn ghost block" id="historyBackupsBtn" type="button">历史备份</button>
           <button class="btn ghost block" id="trashBtn" type="button">清空回收站</button>
         </aside>
 
@@ -73,6 +74,7 @@
             </button>
             <div class="think-bar-body" id="thinkBarBody" hidden></div>
           </section>
+          <button class="btn outline input-budget-entry" id="inputBudgetEntry" type="button" hidden>查看发送预算提示 · 调整后重试</button>
           <div class="paper-wrap">
             <textarea id="editor" spellcheck="false" placeholder="这里是稿纸。打开章节后开始写，编辑会自动保存。"></textarea>
             <div class="stream-veil" id="streamVeil" hidden>
@@ -115,7 +117,7 @@
             <hr />
             <section>
               <h3>上下文</h3>
-              <p id="contextText">记忆库、资料和前文章节会在生成前按预算组装。</p>
+              <p id="contextText">已启用的记忆、资料和所选前文章节会完整组装；预算不足时提示调整。</p>
             </section>
           </div>
           <div class="inspector-pane" id="pane-outline" hidden></div>
@@ -149,6 +151,7 @@
         </div>
         <div class="studio-tabs" id="studioTabs"></div>
         <p class="studio-status" id="studioStatus"></p>
+        <span class="pill" id="studioEditStatus" hidden>已保存</span>
         <button class="btn outline compact" id="cancelStudioJobBtn" type="button" hidden>停止任务</button>
         <button class="btn quiet compact" id="studioClose" type="button">关闭</button>
       </header>
@@ -164,6 +167,29 @@
         <button class="icon-btn" id="drawerClose" type="button">✕</button>
       </header>
       <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <aside class="drawer glass input-budget-panel" id="inputBudgetPanel" aria-labelledby="inputBudgetTitle" hidden>
+      <header>
+        <div>
+          <p class="kicker">发送前检查 · 全部材料已保留</p>
+          <h2 id="inputBudgetTitle">需要调整发送预算</h2>
+        </div>
+        <button class="btn quiet compact" id="inputBudgetClose" type="button">收起</button>
+      </header>
+      <div class="input-budget-body">
+        <p id="inputBudgetMessage" role="status"></p>
+        <dl class="input-budget-stats" id="inputBudgetStats"></dl>
+        <p class="hint">当前未发送。已启用的资料、记忆和所选前文章节均完整保留。</p>
+        <button class="btn primary block" id="raiseInputBudgetBtn" type="button">提高本作品 input 预算</button>
+        <p class="hint">保留全部材料；打开设置并填入建议值，点击保存后生效。</p>
+        <button class="btn outline block" id="reduceInputChaptersBtn" type="button">调整带入的前文章数</button>
+        <p class="hint">由你决定减少多少章；不会删除本地章节。</p>
+        <button class="btn outline block" id="editInputMemoryBtn" type="button">手工精简记忆银行</button>
+        <p class="hint">编辑并保存记忆正文后再发送。只调整目标 tokens 不会缩短已有记忆。</p>
+        <p class="hint">保存并关闭编辑页后，可在此重新检查并发送；本次写作要求会保留。</p>
+        <button class="btn primary block" id="retryInputBudgetBtn" type="button" hidden>重新检查并发送本次请求</button>
+      </div>
     </aside>
 
     <script src="think.js"></script>

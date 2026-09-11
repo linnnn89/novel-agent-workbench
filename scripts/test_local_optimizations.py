@@ -16,6 +16,7 @@ from novel_agent_workbench.config import default_generation_settings, effective_
 from novel_agent_workbench.context_assembler import ContextAssemblerService, memory_bank_package_candidates
 from novel_agent_workbench.drafts import DraftGenerationRequest, DraftGenerationService
 from novel_agent_workbench.memory_bank import MemoryBankService
+from novel_agent_workbench.reviews import DraftReviewService
 from novel_agent_workbench.model_settings import supports_deepseek_thinking
 from novel_agent_workbench.modern_desktop import WorkbenchBridge
 from novel_agent_workbench.providers import (
@@ -26,7 +27,7 @@ from novel_agent_workbench.providers import (
 from novel_agent_workbench.storage import ProjectStore
 from novel_agent_workbench.task_control import JobControl, JobCancelled, job_scope
 from novel_agent_workbench.task_control import current_job
-from novel_agent_workbench.token_budget import capacity_check, count_text_tokens, estimate_input_tokens
+from novel_agent_workbench.token_budget import InputBudgetExceeded, capacity_check, count_text_tokens, estimate_input_tokens
 
 
 class LocalProjectTests(unittest.TestCase):
@@ -111,9 +112,70 @@ class LocalProjectTests(unittest.TestCase):
         self.assertEqual(light["estimated_tokens"], full["estimated_tokens"])
         self.assertGreaterEqual(full["estimated_tokens"], count_text_tokens(full["text"]))
 
-    def test_zero_background_budget_is_really_empty(self):
+    def test_zero_budget_keeps_enabled_materials_for_user_decision(self):
         self.memory()
-        self.assertEqual(ContextAssemblerService(self.store).package_preview(max_context_tokens=0).sections, [])
+        preview = ContextAssemblerService(self.store).package_preview(max_context_tokens=0)
+        self.assertEqual([s["source_id"] for s in preview.sections], ["main"])
+        self.assertGreater(preview.token_budget["over_budget_tokens"], 0)
+        self.assertFalse(any(s["skip_reason"] == "token_budget_exceeded" for s in preview.skipped))
+
+    def test_all_enabled_materials_reach_generation_review_and_refinement(self):
+        self.drafts.update_draft_content(self.original.draft_id, text="前文章节必须保留的独有标记。")
+        self.confirm()
+        self.memory()
+        outline = "总纲必须保留。" * 120 + "总纲末尾标记"
+        self.app.create_planning_item("test", "required_outline", text=outline, active=True)
+        self.app.create_planning_item("test", "disabled_outline", text="禁止发送的未启用资料", active=False)
+        self.app.configure_mock_writer("test")
+        memory_before = self.store.data_file_path("memory_bank.json").read_bytes()
+        client = MagicMock()
+        client.role_config = ModelRoleConfig.from_mapping("writer", {"provider": "mock", "model": "deepseek-v4"})
+        client.generate.side_effect = lambda r: ProviderResponse(
+            "请调整结尾的节奏。" if r.feature_id == "ai_review" else "他重新打开城门，走入雨后的街道。",
+            {}, "mock", "deepseek-v4", "stop")
+        with patch("novel_agent_workbench.providers.create_provider_client", return_value=client):
+            with self.assertRaises(InputBudgetExceeded) as blocked:
+                self.drafts.generate_context_draft(DraftGenerationRequest("chapter_2", "继续写作"), max_context_tokens=64)
+            self.assertFalse(blocked.exception.report["can_send"])
+            self.assertGreater(blocked.exception.report["estimated_input_tokens"], 64)
+            client.generate.assert_not_called()
+            result = self.drafts.generate_context_draft(DraftGenerationRequest("chapter_2", "继续写作"), max_context_tokens=100000)
+            review = DraftReviewService(self.store).ai_review_draft(result.draft_id, max_context_tokens=100000)
+            with patch.object(WorkbenchApplicationService, "_runtime_store", return_value=self.store):
+                self.app.refine_draft_from_ai_review("test", result.draft_id, review_id=review.review_id,
+                                                   max_context_tokens=100000)
+        self.assertEqual(client.generate.call_count, 3)
+        for sent in client.generate.call_args_list:
+            prompt = sent.args[0].prompt
+            self.assertIn(outline, prompt)
+            self.assertIn("旧城门在北边。" * 80, prompt)
+            self.assertIn("前文章节必须保留的独有标记。", prompt)
+            self.assertNotIn("禁止发送的未启用资料", prompt)
+        self.assertEqual(self.store.data_file_path("memory_bank.json").read_bytes(), memory_before)
+
+    def test_preview_matches_full_request_and_model_limit_cannot_be_raised_away(self):
+        self.memory()
+        self.app.configure_mock_writer("test")
+        request = DraftGenerationRequest("chapter_2", "本次完整写作要求", max_tokens=100)
+        prepared, preview, report = self.drafts.prepare_context_draft_request(request, max_context_tokens=1)
+        self.assertFalse(report["can_send"])
+        self.assertIn("旧城门在北边。" * 80, prepared.prompt)
+        client = MagicMock()
+        client.role_config = ModelRoleConfig.from_mapping("writer", {"provider": "mock", "model": "mock-writer"})
+        client.generate.return_value = ProviderResponse("新的小说正文。", {}, "mock", "mock-writer", "stop")
+        with patch("novel_agent_workbench.providers.create_provider_client", return_value=client):
+            self.drafts.generate_context_draft(request, max_context_tokens=report["estimated_input_tokens"])
+        sent = client.generate.call_args.args[0]
+        self.assertEqual(prepared.prompt, sent.prompt)
+        self.assertEqual(prepared.system_prompt, sent.system_prompt)
+        self.assertEqual(preview["input_capacity"]["estimated_input_tokens"], sent.metadata["estimated_input_tokens"])
+        n = estimate_input_tokens(prepared.system_prompt, prepared.prompt, model="mock-writer")
+        config = {"primary_model_ref": "p::m", "model_profiles": {"p::m": {"context_length": n + 99}}}
+        with self.assertRaises(InputBudgetExceeded) as blocked:
+            capacity_check(config, prepared.prompt, prepared.system_prompt,
+                           input_limit=n * 10, max_tokens=100, model="mock-writer")
+        self.assertTrue(blocked.exception.report["model_limit_exceeded"])
+        self.assertFalse(blocked.exception.report["software_limit_exceeded"])
 
     def test_empty_generation_rejected_and_truncated_generation_marked(self):
         before = len(self.drafts.list_drafts())

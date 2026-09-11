@@ -49,6 +49,10 @@ const state = {
   lastJobId: 0,
   memoryReminders: [],
   memoryReminderShown: new Set(),
+  inputBudgetNotice: null,
+  inputBudgetRetry: null,
+  projectsRoot: "",
+  changingRoot: false,
   streamSource: null,
   streamProjectId: "",
   streamChapterId: "",
@@ -346,12 +350,16 @@ function setReviewBadge(on) {
 }
 
 function closeModal() {
+  const cancelled = state.modalCancel;
+  state.modalCancel = null;
   $("modal").hidden = true;
   $("modalBody").innerHTML = "";
   $("modalFoot").innerHTML = "";
+  cancelled?.();
 }
 
 function openModal({ title, desc, body, actions }) {
+  if (state.modalCancel) closeModal();
   $("modalTitle").textContent = title;
   $("modalDesc").textContent = desc || "";
   $("modalBody").innerHTML = "";
@@ -370,6 +378,75 @@ function openModal({ title, desc, body, actions }) {
 
 function closeDrawer() {
   $("drawer").hidden = true;
+}
+
+function showInputBudgetNotice(report, projectId = state.projectId, retry = null) {
+  if (!report || report.can_send || projectId !== state.projectId) return;
+  state.inputBudgetNotice = { report, projectId, retry, sourceDraftId: state.draftId };
+  const hardLimit = Boolean(report.model_limit_exceeded);
+  $("inputBudgetTitle").textContent = hardLimit ? "完整材料超过模型容量" : "完整材料超过软件预算";
+  $("inputBudgetMessage").textContent = hardLimit
+    ? "提高软件 input 预算不能突破模型容量。请减少带入的前文、手工精简记忆，或在创作设置中降低预留输出。"
+    : `完整材料超出软件 input 预算约 ${formatCount(report.over_budget_tokens)} tokens。请选择提高预算，或自行调整材料。`;
+  const rows = [
+    ["完整输入（估算）", `${formatCount(report.estimated_input_tokens)} tokens`],
+    ["软件 input 预算", `${formatCount(report.configured_input_limit)} tokens`],
+    ["预留输出", `${formatCount(report.output_token_budget)} tokens`],
+    ["模型容量", report.model_context_limit ? `${formatCount(report.model_context_limit)} tokens` : "未知，以服务商限制为准"],
+  ];
+  const stats = $("inputBudgetStats");
+  stats.replaceChildren();
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = value;
+    stats.append(dt, dd);
+  }
+  $("raiseInputBudgetBtn").disabled = hardLimit;
+  $("inputBudgetEntry").hidden = false;
+  $("retryInputBudgetBtn").hidden = !retry;
+  $("inputBudgetPanel").hidden = false;
+}
+
+async function retryInputBudget() {
+  const notice = state.inputBudgetNotice;
+  const retry = notice?.retry;
+  if (!retry || notice.projectId !== state.projectId || blockIfGenerating()) return;
+  if (notice.sourceDraftId !== state.draftId) return toast("当前稿件已切换，请从当前稿件重新发起任务。");
+  if (studio.mode) return toast("请先保存并关闭当前编辑页，再重新检查发送。");
+  if (!(await flushSave()).ok || blockIfGenerating()) return;
+  $("inputBudgetPanel").hidden = true;
+  if (retry.method === "ai_review") return reviewDraft();
+  state.inputBudgetRetry = retry;
+  beginStream(retry.projectId, retry.chapterId, retry.title);
+  try {
+    await call(retry.method, ...retry.args);
+  } catch (error) {
+    await finishDraft({ ok: false, error: error.message });
+  }
+}
+
+async function adjustInputBudget(kind) {
+  const notice = state.inputBudgetNotice;
+  if (!notice || notice.projectId !== state.projectId || blockIfGenerating()) return;
+  const targetOpen = kind === "memory" ? studio.mode === "memory" : studio.mode === "gen" && studio.genScope === "project";
+  if (studio.mode && !targetOpen) return toast("请先保存并关闭当前编辑页，再调整另一项材料。");
+  if (kind === "memory") {
+    if (studio.mode !== "memory") await openMemoryStudio();
+    studio.memoryEditor?.focus();
+  } else {
+    if (kind === "raise" && notice.report.model_limit_exceeded) return;
+    if (targetOpen) collectGenForm();
+    studio.genTab = "sample";
+    if (targetOpen) renderGenSettings();
+    else await openGenSettings("project");
+    const key = kind === "raise" ? "max_context_tokens" : "recent_confirmed_chapter_count";
+    const box = studio.genFields[key];
+    if (kind === "raise") box.value = String(notice.report.suggested_input_limit);
+    box.focus();
+    box.scrollIntoView({ block: "center" });
+    setStudioStatus("仅调整本作品。点击保存后，再重新发起任务。");
+  }
+  $("inputBudgetPanel").hidden = true;
 }
 
 function openDrawer({ kicker, title, content, wide }) {
@@ -656,6 +733,7 @@ async function flushSave() {
 }
 
 function blockIfGenerating() {
+  if (state.changingRoot) { toast("正在切换项目库，请稍候。"); return true; }
   if (!state.generating) return false;
   toast("请等待当前生成完成。");
   return true;
@@ -665,6 +743,7 @@ async function selectProject(projectId) {
   if (!projectId) return false;
   if (projectId !== state.projectId) {
     if (blockIfGenerating()) return false;
+    if (studio.mode && !(await guardStudioLeave())) return false;
     if (!(await flushSave()).ok) return false;
     state.navigationId += 1;
     state.draftId = "";
@@ -675,6 +754,10 @@ async function selectProject(projectId) {
     state.reviewText = "";
     state.dirty = false;
     state.savedSnapshot = null;
+    state.inputBudgetNotice = null;
+    state.inputBudgetRetry = null;
+    $("inputBudgetPanel").hidden = true;
+    $("inputBudgetEntry").hidden = true;
     $("editor").value = "";
     $("editor").readOnly = false;
     $("draftTitle").textContent = "选择章节开始写作";
@@ -682,7 +765,7 @@ async function selectProject(projectId) {
     $("versionLabel").textContent = "—";
     updateCountPill();
     updateDock();
-    if (studio.mode) closeStudio();
+    if (studio.mode) await closeStudio({ discard: true });
     ["outline", "world"].forEach((kind) => {
       const pane = $(`pane-${kind}`);
       if (pane) {
@@ -705,7 +788,7 @@ async function loadOverview(projectId) {
   $("projectChip").textContent = currentProject()?.title || projectId;
   refreshModelPill().catch(() => {});
   $("summaryText").textContent = `章节 ${overview.chapter_count} · 草稿 ${overview.draft_count}\n已确认 ${overview.committed_chapter_count} · 审稿 ${overview.review_count}`;
-  $("contextText").textContent = `大纲与资料 ${overview.planning_item_count} 项\n记忆库 ${overview.memory_bank_item_count} 项\n生成前会按预算组装，不会自动联网。`;
+  $("contextText").textContent = `大纲与资料 ${overview.planning_item_count} 项\n记忆库 ${overview.memory_bank_item_count} 项\n已启用材料完整保留，超出预算会提示调整。`;
   if (state.inspectorTab !== "chapter") renderInspector().catch(() => {});
 }
 
@@ -800,18 +883,19 @@ async function saveDraft() {
   const projectId = state.projectId;
   const draftId = state.draftId;
   const text = $("editor").value;
+  const projectsRoot = state.projectsRoot;
   // Serialize writes so a slower earlier request cannot overwrite newer editor text.
   const queuedSave = state.saveQueue
     .catch(() => {})
     .then(() => {
       const previous = state.savedSnapshot;
-      if (previous?.projectId === projectId && previous.draftId === draftId && previous.text === text) return { changed: false };
-      return call("save_draft", projectId, draftId, text);
+      if (previous?.projectsRoot === projectsRoot && previous.projectId === projectId && previous.draftId === draftId && previous.text === text) return { changed: false };
+      return call("save_draft", projectId, draftId, text, projectsRoot);
     });
   state.saveQueue = queuedSave.catch(() => {});
   try {
     const result = await queuedSave;
-    state.savedSnapshot = { projectId, draftId, text };
+    state.savedSnapshot = { projectsRoot, projectId, draftId, text };
     if (result?.memory_reminder) queueMemoryReminder(projectId, result.memory_reminder);
     if (projectId === state.projectId && draftId === state.draftId && text === $("editor").value) {
       state.saveError = "";
@@ -930,11 +1014,24 @@ async function generateChapter() {
     actions: [
       { label: "取消", onClick: closeModal },
       {
-        label: "预览格式",
+        label: "检查发送材料",
         onClick: async () => {
           try {
-            const preview = await call("preview_prompt", state.projectId, chapter.value.trim(), prompt.value);
-            openDrawer({ kicker: "不会联网", title: "将发送给模型的结构", content: preview.details });
+            const projectId = state.projectId;
+            const chapterId = chapter.value.trim();
+            const chapterTitle = title.value.trim() || chapterId;
+            const userPrompt = prompt.value;
+            const preview = await call("preview_prompt", projectId, chapterId, userPrompt);
+            if (preview.input_budget && !preview.input_budget.can_send) {
+              closeModal();
+              closeDrawer();
+              showInputBudgetNotice(preview.input_budget, projectId, {
+                method: "generate_draft", args: [projectId, chapterId, chapterTitle, userPrompt],
+                projectId, chapterId, title: chapterTitle,
+              });
+            } else {
+              openDrawer({ kicker: "不会联网", title: "将发送给模型的结构", content: preview.details });
+            }
           } catch (error) {
             toast(error.message);
           }
@@ -952,6 +1049,8 @@ async function generateChapter() {
             if (!(await flushSave()).ok) return;
             if (blockIfGenerating()) return;
             closeModal();
+            state.inputBudgetRetry = { method: "generate_draft", args: [projectId, chapterId, chapterTitle, userPrompt],
+              projectId, chapterId, title: chapterTitle };
             beginStream(projectId, chapterId, chapterTitle);
             await call("generate_draft", projectId, chapterId, chapterTitle, userPrompt);
           } catch (error) {
@@ -1049,6 +1148,8 @@ async function rewriteDraft() {
       const chapterId = state.chapterId;
       const project = currentProject();
       const chapter = project?.chapters?.find((item) => item.chapter_id === chapterId);
+      state.inputBudgetRetry = { method: "rewrite_draft", args: [projectId, draftId, instruction],
+        projectId, chapterId, title: chapter?.title || chapterId };
       beginStream(projectId, chapterId, chapter?.title || chapterId);
       try {
         await call("rewrite_draft", projectId, draftId, instruction);
@@ -1084,6 +1185,8 @@ async function refineDraft() {
       const projectId = state.projectId;
       const draftId = state.draftId;
       const chapterId = state.chapterId;
+      state.inputBudgetRetry = { method: "refine_draft", args: [projectId, draftId, instruction],
+        projectId, chapterId, title: `精修 ${chapterId}` };
       beginStream(projectId, chapterId, `精修 ${chapterId}`);
       try {
         await call("refine_draft", projectId, draftId, instruction);
@@ -1108,10 +1211,12 @@ async function reviewDraft() {
   pane.innerHTML = "";
   pane.append(elNote("正在阅读这一稿…"), box);
   ThinkTrace.start();
+  state.inputBudgetRetry = { method: "ai_review", projectId: state.projectId };
   setBusy(true, "请求已发出，正在等待模型接入…", { lockEditor: false, veil: false });
   try {
     const result = await call("ai_review", state.projectId, state.draftId);
     if (result?.existing) {
+      state.inputBudgetRetry = null;
       setBusy(false);
       ThinkTrace.finish(true);
       state.hasReview = true;
@@ -1846,6 +1951,12 @@ function draftInWorkspace(projectId, draftId) {
 }
 
 function clearEditorBuffer() {
+  state.navigationId += 1;
+  clearTimeout(state.saveTimer);
+  state.saveTimer = 0;
+  state.savedSnapshot = null;
+  state.dirty = false;
+  state.saveError = "";
   state.draftId = "";
   state.chapterId = "";
   state.draftIds = [];
@@ -1859,6 +1970,48 @@ function clearEditorBuffer() {
   setReviewBadge(false);
   updateCountPill();
   updateDock();
+}
+
+async function changeDataRoot() {
+  if (blockIfGenerating()) return;
+  if (studio.mode && !(await guardStudioLeave())) return;
+  if (!(await flushSave()).ok || blockIfGenerating()) return;
+  const editor = $("editor");
+  state.changingRoot = true;
+  const wasReadOnly = editor.readOnly;
+  editor.readOnly = true;
+  try {
+    const result = await call("choose_data_root");
+    clearEditorBuffer();
+    state.projectId = "";
+    state.projectsRoot = result.projectsRoot;
+    state.workspace = result.workspace || [];
+    state.memoryReminders = [];
+    state.memoryReminderShown.clear();
+    state.inputBudgetNotice = null;
+    state.inputBudgetRetry = null;
+    $("inputBudgetPanel").hidden = true;
+    $("inputBudgetEntry").hidden = true;
+    closeDrawer();
+    await closeStudio({ discard: true });
+    if (window.ThinkTrace && ThinkTrace.isIdle()) ThinkTrace.dispose();
+    ["outline", "world"].forEach(kind => {
+      const pane = $(`pane-${kind}`);
+      if (pane) { pane.dataset.selected = ""; pane.dataset.projectId = ""; }
+    });
+    state.projectId = state.workspace[0]?.project_id || "";
+    $("projectChip").textContent = currentProject()?.title || "未选择作品";
+    renderTree();
+    if (state.projectId) await loadOverview(state.projectId);
+    else $("summaryText").textContent = "当前项目库没有作品。";
+    await refreshModelPill();
+    toast("已切换项目库，旧编辑已保存在原库。");
+  } catch (error) {
+    if (!error.cancelled) toast(error.message);
+  } finally {
+    state.changingRoot = false;
+    editor.readOnly = wasReadOnly;
+  }
 }
 
 async function exportProjectPackage(projectId) {
@@ -2069,6 +2222,17 @@ async function applyWorkspaceResult(result, projectId) {
 }
 
 function bindEvents() {
+  $("studioBody").addEventListener("input", refreshStudioSaveStatus);
+  $("studioBody").addEventListener("change", refreshStudioSaveStatus);
+  $("inputBudgetClose").addEventListener("click", () => { $("inputBudgetPanel").hidden = true; });
+  $("inputBudgetEntry").addEventListener("click", () => {
+    const notice = state.inputBudgetNotice;
+    if (notice && notice.projectId === state.projectId) $("inputBudgetPanel").hidden = false;
+  });
+  $("retryInputBudgetBtn").addEventListener("click", () => retryInputBudget().catch(error => toast(error.message)));
+  [["raiseInputBudgetBtn", "raise"], ["reduceInputChaptersBtn", "chapters"], ["editInputMemoryBtn", "memory"]].forEach(([id, kind]) => {
+    $(id).addEventListener("click", () => adjustInputBudget(kind).catch(error => toast(error.message)));
+  });
   $("searchInput").addEventListener("input", () => {
     if (!searchQuery()) {
       state.treeSearchOpen = { projects: Object.create(null), groups: Object.create(null) };
@@ -2092,6 +2256,7 @@ function bindEvents() {
   $("recordsBtn").addEventListener("click", () => openRecordsStudio("connection").catch((error) => toast(error.message)));
   $("aboutBtn").addEventListener("click", () => showAbout().catch((error) => toast(error.message)));
   $("trashBtn").addEventListener("click", () => emptyTrash().catch((error) => toast(error.message)));
+  $("historyBackupsBtn").addEventListener("click", () => openBackupStudio().catch(error => toast(error.message)));
   ThinkTrace.bind();
   $("modelBtn").addEventListener("click", () => openModelStudio().catch((error) => toast(error.message)));
   $("widthBtn").addEventListener("click", async () => {
@@ -2108,18 +2273,7 @@ function bindEvents() {
     if (!tab) return;
     setInspectorTab(tab.dataset.tab);
   });
-  $("dataRootBtn").addEventListener("click", async () => {
-    try {
-      const result = await call("choose_data_root");
-      state.workspace = result.workspace || [];
-      state.projectId = state.workspace[0]?.project_id || "";
-      renderTree();
-      if (state.projectId) await selectProject(state.projectId);
-      toast("已切换项目库。");
-    } catch (error) {
-      if (!error.cancelled) toast(error.message);
-    }
-  });
+  $("dataRootBtn").addEventListener("click", () => changeDataRoot().catch(error => toast(error.message)));
   $("openFolderBtn").addEventListener("click", async () => {
     if (!state.projectId) return toast("请先选择作品。");
     try {
@@ -2175,7 +2329,7 @@ function bindEvents() {
     const el = $("editor");
     state.follow = el.scrollTop + el.clientHeight >= el.scrollHeight - 48;
   });
-  $("studioClose").addEventListener("click", closeStudio);
+  $("studioClose").addEventListener("click", () => closeStudio());
   $("drawerClose").addEventListener("click", closeDrawer);
   $("modal").addEventListener("click", (event) => {
     if (event.target === $("modal")) closeModal();
@@ -2202,6 +2356,11 @@ function bindEvents() {
       toggleFocus();
     }
     if (event.key === "Escape") {
+      if (state.modalCancel) { closeModal(); return; }
+      if (!$("inputBudgetPanel").hidden) {
+        $("inputBudgetPanel").hidden = true;
+        return;
+      }
       if (window.ThinkTrace && ThinkTrace.isOpen()) {
         ThinkTrace.close();
         return;
@@ -2220,6 +2379,9 @@ window.__workbenchPush = function workbenchPush(event, payload) {
     if (payload.job_id > state.lastJobId) {
       state.lastJobId = payload.job_id;
       state.activeJobId = payload.job_id;
+      state.inputBudgetNotice = null;
+      $("inputBudgetPanel").hidden = true;
+      $("inputBudgetEntry").hidden = true;
     }
     return;
   }
@@ -2238,14 +2400,29 @@ window.__workbenchPush = function workbenchPush(event, payload) {
   if (event === "draft_done") finishDraft(payload);
   if (event === "review_done") finishReview(payload);
   handleStudioPush(event, payload);
+  if (payload?.input_budget) {
+    const retry = state.inputBudgetRetry;
+    const feature = { generate_draft: "draft_generation", rewrite_draft: "draft_generation",
+      refine_draft: "ai_refinement", ai_review: "ai_review" }[retry?.method];
+    showInputBudgetNotice(payload.input_budget, state.projectId,
+      feature === payload.input_budget.feature_id ? retry : null);
+  }
+  if (event.endsWith("_done")) state.inputBudgetRetry = null;
 };
 
 window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose(attemptId = 0) {
   state.closeAttempt = Number(attemptId) || 0;
+  if (state.changingRoot) return { ok: false, error: "正在切换项目库，请稍候。" };
   if (state.generating) {
     const error = "请等待当前任务完成，或点击“停止任务”后再关闭。";
     toast(error);
     return { ok: false, error };
+  }
+  if (studio.mode) {
+    const waiting = studioHasChanges();
+    if (waiting) await call("wait_close_decision", state.closeAttempt, true);
+    try { if (!(await guardStudioLeave())) return { ok: false }; }
+    finally { if (waiting) await call("wait_close_decision", state.closeAttempt, false); }
   }
   const editor = $("editor");
   state.closeEditorWasReadOnly = Boolean(editor?.readOnly);
@@ -2276,6 +2453,7 @@ async function boot() {
   applyPrefs();
   setInterval(refreshSavePill, 5000);
   const data = await call("bootstrap");
+  state.projectsRoot = data.projectsRoot || "";
   state.prefs = { ...state.prefs, ...(data.prefs || {}) };
   state.workspace = data.workspace || [];
   applyPrefs();
