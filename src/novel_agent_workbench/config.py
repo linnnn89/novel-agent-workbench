@@ -217,7 +217,7 @@ def default_project_config() -> dict[str, Any]:
             "planning_library_enabled": True,
             "memory_bank_enabled": False,
             "world_book_enabled": False,
-            "max_context_tokens": 32768,
+            "max_context_tokens": 131072,
             "formal_context_policy": default_formal_context_policy(),
             "style_check_policy": default_style_check_policy(),
         },
@@ -245,7 +245,7 @@ def default_generation_settings() -> dict[str, Any]:
             "stream": False,
         },
         "context": {
-            "max_context_tokens": 32768,
+            "max_context_tokens": 131072,
             "recent_confirmed_chapter_count": 2,
             "include_planning_library": True,
             "include_memory_bank": True,

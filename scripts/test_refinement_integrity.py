@@ -156,9 +156,9 @@ class CapacityTests(unittest.TestCase):
         check = app_module.refinement_capacity_check
         config = {"primary_model_ref": "p::m", "model_profiles": {"p::m": {"context_length": 100}}}
         with self.assertRaises(RuntimeError):
-            check(config, "x" * 400, "", input_limit=500, max_tokens=10, role="reviser")
+            check(config, "春风吹过村庄，他站在桥头等候。" * 100, "", input_limit=500, max_tokens=10, role="reviser")
         with self.assertRaises(RuntimeError):
-            check({}, "x" * 400, "", input_limit=100, max_tokens=10, role="reviser")
+            check({}, "春风吹过村庄，他站在桥头等候。" * 100, "", input_limit=100, max_tokens=10, role="reviser")
         result = check(config, "short", "", input_limit=100, max_tokens=10, role="reviser")
         self.assertEqual(result["model_context_limit"], 100)
 

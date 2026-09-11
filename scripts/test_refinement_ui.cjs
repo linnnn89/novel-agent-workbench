@@ -13,7 +13,7 @@ async function refinement(saved, current) {
   const context = {
     requireDraft: () => true,
     state: { hasReview: true, projectId: "p", draftId: "d", chapterId: "c" },
-    saveDraft: async () => ({ ok: saved }),
+    flushSave: async () => ({ ok: saved }), blockIfGenerating: () => false,
     call: async (name, ...args) => { calls.push([name, ...args]); return { has_review: current }; },
     promptText: (options) => { dialog = options; },
     beginStream: () => { begun = true; context.state.draftId = ""; },

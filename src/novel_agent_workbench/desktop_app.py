@@ -1392,6 +1392,10 @@ class WorkbenchDesktopApp(tk.Tk):
             dialog.destroy()
 
         def generate() -> None:
+            if self.current_draft_project_id and self.current_draft_index >= 0:
+                if not self.save_current_draft_edit(silent=True):
+                    messagebox.showerror(APP_TITLE, "当前编辑保存失败，请保存成功后再生成。", parent=dialog)
+                    return
             chapter_id = chapter_var.get().strip()
             prompt = prompt_box.get("1.0", tk.END).strip()
             if not chapter_id:
@@ -1648,6 +1652,10 @@ class WorkbenchDesktopApp(tk.Tk):
     def show_draft_workspace(self, project_id: str, draft_id: str) -> None:
         if not draft_id:
             return
+        if self.current_draft_project_id and self.current_draft_index >= 0 and not self.live_generation_key:
+            if not self.save_current_draft_edit(silent=True):
+                messagebox.showerror(APP_TITLE, "当前编辑保存失败，已保留编辑区，请重试保存后再切换。")
+                return
         self.live_generation_key = None
         try:
             draft = self.app.read_draft(project_id, draft_id)
@@ -1758,13 +1766,11 @@ class WorkbenchDesktopApp(tk.Tk):
     def show_previous_draft_version(self) -> None:
         if self.current_draft_index <= 0 or not self.current_draft_project_id:
             return
-        self.save_current_draft_edit(silent=True)
         self.show_draft_workspace(self.current_draft_project_id, self.current_draft_ids[self.current_draft_index - 1])
 
     def show_next_draft_version(self) -> None:
         if not self.current_draft_project_id or self.current_draft_index + 1 >= len(self.current_draft_ids):
             return
-        self.save_current_draft_edit(silent=True)
         self.show_draft_workspace(self.current_draft_project_id, self.current_draft_ids[self.current_draft_index + 1])
 
     def on_draft_text_modified(self, event: object | None = None) -> None:
@@ -1784,9 +1790,11 @@ class WorkbenchDesktopApp(tk.Tk):
     def save_current_draft_edit(self, *, silent: bool = False) -> bool:
         if not self.current_draft_project_id or self.current_draft_index < 0:
             return False
-        self.current_draft_autosave_job = None
+        if self.current_draft_autosave_job is not None:
+            self.after_cancel(self.current_draft_autosave_job)
+            self.current_draft_autosave_job = None
         draft_id = self.current_draft_ids[self.current_draft_index]
-        text = self.draft_body.get("1.0", tk.END).rstrip("\n")
+        text = self.draft_body.get("1.0", "end-1c")
         try:
             result = self.app.update_draft_content(self.current_draft_project_id, draft_id, text=text)
         except Exception as exc:
@@ -1799,6 +1807,14 @@ class WorkbenchDesktopApp(tk.Tk):
             messagebox.showinfo(APP_TITLE, "编辑已保存。")
         self.autosave_status_var.set("已自动保存" if silent else "已保存")
         synced = str(result.get("synced_confirmed_chapter") or "")
+        reminder = result.get("memory_reminder")
+        if reminder:
+            shown = getattr(self, "_memory_edit_reminders", set())
+            key = (self.current_draft_project_id, synced)
+            if key not in shown:
+                shown.add(key)
+                self._memory_edit_reminders = shown
+                messagebox.showinfo("请核对记忆银行", reminder["message"])
         suffix = f" synced_confirmed={synced}" if synced else ""
         self.write_log(f"编辑已保存: draft_id={draft_id}{suffix}")
         return True
@@ -1932,7 +1948,9 @@ class WorkbenchDesktopApp(tk.Tk):
             return
         project_id = self.current_draft_project_id
         draft_id = self.current_draft_ids[self.current_draft_index]
-        self.save_current_draft_edit(silent=True)
+        if not self.save_current_draft_edit(silent=True):
+            messagebox.showerror(APP_TITLE, "当前编辑保存失败，请保存成功后重试。")
+            return
         try:
             existing = self.app.find_review_for_draft(project_id, draft_id)
         except Exception:
@@ -2002,7 +2020,9 @@ class WorkbenchDesktopApp(tk.Tk):
             return
         project_id = self.current_draft_project_id
         draft_id = self.current_draft_ids[self.current_draft_index]
-        self.save_current_draft_edit(silent=True)
+        if not self.save_current_draft_edit(silent=True):
+            messagebox.showerror(APP_TITLE, "当前编辑保存失败，请保存成功后重试。")
+            return
         try:
             draft = self.app.read_draft(project_id, draft_id)
             if str(draft.get("status") or "") == "committed":
@@ -2015,6 +2035,8 @@ class WorkbenchDesktopApp(tk.Tk):
             self.write_log(f"确认稿件失败: {exc}")
             return
         chapter_id = str(result.get("chapter_id") or "")
+        if result.get("memory_reminder"):
+            messagebox.showinfo("请核对记忆银行", result["memory_reminder"]["message"])
         if chapter_id:
             self.load_confirmed_chapter_nodes(project_id)
             node_id = project_node_id(project_id)
@@ -2239,7 +2261,9 @@ class WorkbenchDesktopApp(tk.Tk):
             return
         project_id = self.current_draft_project_id
         draft_id = self.current_draft_ids[self.current_draft_index]
-        self.save_current_draft_edit(silent=True)
+        if not self.save_current_draft_edit(silent=True):
+            messagebox.showerror(APP_TITLE, "当前编辑保存失败，请保存成功后重试。")
+            return
         try:
             draft = self.app.read_draft(project_id, draft_id)
         except Exception as exc:

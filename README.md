@@ -23,7 +23,7 @@
 - 从已确认章节整理 Memory Bank，也可以手工修改、生成或压缩记忆内容。
 - 在发送前预览本次会带给模型的资料和提示词结构。预览本身不会联网。
 - 为正文生成、AI 审稿、AI 精修、记忆生成和记忆压缩分别指定模型。
-- 写作、审稿和精修共用同一套「创作资料」前缀（稳定设定在前，本章大纲/记忆/前文在后），便于 DeepSeek 等接口命中前缀缓存。模型调用记录会显示缓存命中情况。
+- 写作、审稿和精修共享按固定顺序排列的「创作资料」块（稳定设定在前，本章大纲/记忆/前文在后）。各自的系统提示词不同，实际是否命中前缀缓存以模型调用记录为准。
 - 给所有作品设置通用提示词和采样参数，也可以为某一部作品单独覆盖。
 - 把已确认章节按顺序导出为 TXT。
 
@@ -41,7 +41,7 @@
 
 ### 模型怎么接
 
-模型设置里已经预置硅基流动、Chutes 和 OpenRouter，也可以添加 DeepSeek、其他 OpenAI 兼容接口，或本机的 LM Studio、Ollama 兼容地址。正文生成可在「功能分配」里用 None / Low / High / Max 设置 DeepSeek V4 Flash 0731 的思考强度：经 OpenRouter 时发送 reasoning.effort。
+模型设置里已经预置硅基流动、Chutes 和 OpenRouter，也可以添加 DeepSeek、其他 OpenAI 兼容接口，或本机的 LM Studio、Ollama 兼容地址。正文生成与 AI 精修在「功能分配」里共用 None / Low / High / Max 思考控制，支持 DeepSeek Flash / Pro 动态名称和 V4 起的版本名称，不再限定 0731。直连接口发送 `thinking` 和 `reasoning_effort`，OpenRouter / Chutes 发送 `reasoning`；硅基流动使用 `enable_thinking`，只控制开关。新模型名称或接口不兼容时，可在接入商设置中手工指定思考控制接口，或选择不发送开关。未来接口是否兼容仍需以接入商文档为准。
 
 保存接口和 Key 不会发起请求。以下操作可能联网并产生费用，而且都需要你自己点击：
 
@@ -52,6 +52,14 @@
 
 针对 DeepSeek，程序会尽量让变化较少的项目资料保持稳定顺序，把本次指令放在后面，以增加前缀缓存复用的机会。接口返回的缓存命中和未命中数据会被保留，但实际命中率仍取决于模型、服务端缓存周期和每次发送的内容。
 
+上下文默认预算为 131072 tokens。已有作品的明确设置保留，可在「创作设置 → 采样参数」使用宽松预算按钮，再点击保存。程序使用固定版本 `deepseek-tokenizer==0.3.0` 在本地计算文本长度；下载包约 1.9 MB，词表约 6.4 MB，无额外运行依赖，不会下载模型权重。它使用 DeepSeek V4 词表，动态名称、未来模型及消息格式仍有估算误差；其他模型或缺少 tokenizer 时使用中文保守估算。最终以 API 用量为准。所有生成请求都会检查完整输入，并为输出预留空间；模型目录未提供容量时，只能检查用户配置的输入上限。
+
+编辑已确认章节，或用内容不同的新版本替换确认稿时，如果记忆银行涉及该章，会弹窗提醒手工核对。提醒不会改写、禁用或重新生成记忆。同一作品、同一章节每次启动最多提醒一次，避免自动保存反复打断写作；只有措辞润色时可以忽略。
+
+新版界面支持停止正文、审稿、记忆和模型目录任务。已返回结果进入本地保存阶段后，会先完成保存；网络阶段停止则保留原稿，已显示的正文片段供手工复制。停止本地请求不保证上游立即停止计算或计费。空正文不会创建草稿；达到输出上限的有效正文会保存为不完整候选，重新打开仍有提示。保存失败会阻止切换、重写、确认和导出等后续动作。没有正文变化的保存会跳过，避免生成无意义备份。
+
+调用记录保留服务商实际返回的缓存、思考 token 和费用字段，缺失字段不补成零。记录另含输入估算、耗时和系统提示词摘要，方便比较同一功能的缓存效果。写作、审稿、精修各自的提示词职责保持不变；共享资料顺序并不保证跨功能命中缓存。
+
 ### 数据放在哪里
 
 EXE 版的作品、设置和密钥保存在程序旁边的 `用户数据` 文件夹中。重新打包时，构建脚本只替换程序和运行依赖，不会删除这份目录。右侧「导入导出」可以把一部作品打包为 `.nawpkg`；作品包不含 API Key 和 `backups/`。
@@ -60,7 +68,7 @@ EXE 版的作品、设置和密钥保存在程序旁边的 `用户数据` 文件
 
 ### 在 Windows 上构建
 
-构建 EXE 需要 Windows 10/11 和 Python 3.11–3.14。首次构建需要联网安装 PyInstaller、Pillow 和 pywebview。
+构建 EXE 需要 Windows 10/11 和 Python 3.11–3.14。首次构建需要联网安装 PyInstaller、Pillow、pywebview 和上述小型 tokenizer。
 
 ```cmd
 git clone https://github.com/linnnn89/novel-agent-workbench.git
@@ -89,14 +97,17 @@ START_ModernUI.cmd
 
 审稿与改写总表、模型连接检查、调用记录、运行记录、出稿清单和导出设置等辅助页面，目前仍以经典 Tk 界面中的版本为主。后续迁移不会改变现有作品格式。
 
-经典 Tk 文件目前不只是备用界面。新版桌面程序仍从 `desktop_app.py` 复用路径定位、章节排序、Memory Bank 状态、提示词预览和审稿信息格式化等公共函数；打包时也会把它一并带入。因此它仍是现阶段的运行依赖，不能直接从源码中删除。以后如果完成公共函数拆分并取消回退入口，才可以安全移除。
+新版桌面程序从 `ui_presenters.py` 复用路径定位、章节排序、Memory Bank 状态、提示词预览和审稿信息格式化。经典 Tk 界面仍作为备用入口保留；其保存保护、记忆提醒和底层输出检查也已更新，停止按钮目前位于新版界面。
 
 ### 开发入口
 
 ```text
 src/novel_agent_workbench/modern_desktop.py   WebView 宿主和桌面接口
 src/novel_agent_workbench/modern_ui/          新版界面的 HTML、CSS 和 JavaScript
-src/novel_agent_workbench/desktop_app.py      经典 Tk 界面及新版仍复用的公共函数（当前运行依赖）
+src/novel_agent_workbench/desktop_app.py      经典 Tk 备用界面
+src/novel_agent_workbench/ui_presenters.py    两种界面共用的显示格式
+src/novel_agent_workbench/token_budget.py     本地 token 估算及完整输入预算
+src/novel_agent_workbench/task_control.py     本地任务停止和网络中断
 src/novel_agent_workbench/application_service.py
 src/novel_agent_workbench/storage.py
 src/novel_agent_workbench/providers.py
@@ -167,7 +178,7 @@ The source package supports Python 3.10 or newer. If pywebview is unavailable, t
 
 The modern interface covers the main path from project setup and drafting through review, confirmation, and TXT export. A few secondary views—such as aggregate review history, connection diagnostics, provider call logs, and export settings—still live primarily in the classic Tk interface.
 
-The classic Tk file is not only a backup UI. The modern desktop host still imports shared path, chapter-ordering, Memory Bank, prompt-preview, and review-formatting helpers from `desktop_app.py`, and the packaged app includes it as a dependency. It cannot be deleted safely until those helpers are separated and the fallback entry point is removed.
+Shared display helpers live in `ui_presenters.py`; the classic Tk interface remains a fallback. The modern UI supports cancellation, while both interfaces use the same save integrity checks, incomplete-output markers, and manual Memory Bank reminders. New defaults allow 131072 input tokens, using a small local DeepSeek V4 tokenizer with conservative fallbacks. Existing explicit budgets are retained. Thinking controls recognize DeepSeek model families and can be overridden per provider; future API compatibility still needs verification.
 
 Technical notes and interface contracts are kept in [`codex_docs/`](codex_docs/).
 

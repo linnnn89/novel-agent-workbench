@@ -41,6 +41,15 @@ const state = {
   follow: true,
   saveQueue: Promise.resolve(),
   saveTimer: 0,
+  saveError: "",
+  dirty: false,
+  savedSnapshot: null,
+  navigationId: 0,
+  activeJobId: 0,
+  lastJobId: 0,
+  memoryReminders: [],
+  memoryReminderShown: new Set(),
+  streamSource: null,
   streamProjectId: "",
   streamChapterId: "",
   treeOpen: { projects: Object.create(null), groups: Object.create(null) },
@@ -132,6 +141,8 @@ function updateCountPill() {
 
 function refreshSavePill() {
   if (state.generating) return;
+  if (state.saveError) { $("savePill").textContent = "保存失败 · 请重试"; return; }
+  if (state.dirty) { $("savePill").textContent = "尚有编辑未保存"; return; }
   if (!state.lastSavedAt) {
     $("savePill").textContent = "本地保存就绪";
     return;
@@ -144,6 +155,10 @@ function refreshSavePill() {
 
 function updateDock() {
   const busy = state.generating;
+  ["cancelJobBtn", "cancelStudioJobBtn"].forEach(id => {
+    const cancel = $(id);
+    if (cancel) { cancel.hidden = !busy; cancel.disabled = false; cancel.textContent = "停止任务"; }
+  });
   ["rewriteBtn", "reviewBtn", "confirmBtn", "newChapterBtn"].forEach((id) => {
     const button = $(id);
     if (button) button.disabled = busy;
@@ -623,9 +638,21 @@ async function refreshWorkspace(keepSelection = true) {
 }
 
 async function flushSave() {
+  if (state.flushPromise) return state.flushPromise;
   clearTimeout(state.saveTimer);
   state.saveTimer = 0;
-  return saveDraft();
+  const editor = $("editor");
+  const wasReadOnly = editor.readOnly;
+  const pending = saveDraft();
+  editor.readOnly = true;
+  state.flushPromise = (async () => {
+    try { return await pending; }
+    finally {
+      state.flushPromise = null;
+      if (!state.closing && !state.generating && !state.importing) editor.readOnly = wasReadOnly;
+    }
+  })();
+  return state.flushPromise;
 }
 
 function blockIfGenerating() {
@@ -638,7 +665,23 @@ async function selectProject(projectId) {
   if (!projectId) return false;
   if (projectId !== state.projectId) {
     if (blockIfGenerating()) return false;
-    await flushSave();
+    if (!(await flushSave()).ok) return false;
+    state.navigationId += 1;
+    state.draftId = "";
+    state.chapterId = "";
+    state.draftIds = [];
+    state.draftIndex = -1;
+    state.hasReview = false;
+    state.reviewText = "";
+    state.dirty = false;
+    state.savedSnapshot = null;
+    $("editor").value = "";
+    $("editor").readOnly = false;
+    $("draftTitle").textContent = "选择章节开始写作";
+    $("draftHint").textContent = "";
+    $("versionLabel").textContent = "—";
+    updateCountPill();
+    updateDock();
     if (studio.mode) closeStudio();
     ["outline", "world"].forEach((kind) => {
       const pane = $(`pane-${kind}`);
@@ -667,18 +710,18 @@ async function loadOverview(projectId) {
 }
 
 async function openChapter(projectId, chapter) {
-  if (blockIfGenerating()) return;
+  if (blockIfGenerating()) return false;
   if (state.draftId && (projectId !== state.projectId || chapter.chapter_id !== state.chapterId)) {
-    await flushSave();
+    if (!(await flushSave()).ok) return false;
   }
   revealInTree(projectId, chapter.chapter_id);
-  if ((await selectProject(projectId)) === false) return;
-  state.chapterId = chapter.chapter_id;
+  if ((await selectProject(projectId)) === false) return false;
   const latest = [...(chapter.drafts || [])].pop();
   renderTree();
   if (latest?.draft_id) {
-    await loadDraft(projectId, latest.draft_id);
+    return loadDraft(projectId, latest.draft_id);
   } else {
+    state.chapterId = chapter.chapter_id;
     state.draftId = "";
     state.draftIds = [];
     state.draftIndex = -1;
@@ -692,15 +735,23 @@ async function openChapter(projectId, chapter) {
     setReviewBadge(false);
     updateDock();
     if (state.inspectorTab === "review") renderInspector();
+    return true;
   }
 }
 
 async function loadDraft(projectId, draftId, { silent = false, force = false } = {}) {
-  if (!force && blockIfGenerating()) return;
-  if (!force && state.draftId && (projectId !== state.projectId || draftId !== state.draftId)) {
-    await flushSave();
+  if (!force && blockIfGenerating()) return false;
+  if (!force && state.draftId) {
+    if (!(await flushSave()).ok) return false;
   }
-  const draft = await call("open_draft", projectId, draftId);
+  const navigationId = ++state.navigationId;
+  $("editor").readOnly = true;
+  let draft;
+  try { draft = await call("open_draft", projectId, draftId); }
+  finally {
+    if (navigationId === state.navigationId) $("editor").readOnly = state.closing || state.generating;
+  }
+  if (navigationId !== state.navigationId) return false;
   state.projectId = draft.project_id;
   state.chapterId = draft.chapter_id;
   state.draftId = draft.draft_id;
@@ -714,6 +765,11 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
   }
   $("versionLabel").textContent = draft.version_label;
   $("editor").value = draft.content || "";
+  // The first save after opening also reconciles a previously interrupted disk
+  // write. Only a successful save response may populate the no-op cache.
+  state.savedSnapshot = null;
+  state.dirty = false;
+  state.saveError = "";
   state.hasReview = Boolean(draft.has_review);
   state.reviewText = draft.review?.details || draft.review?.comment || "";
   setReviewBadge(false);
@@ -726,11 +782,13 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
   renderTree();
   if (state.inspectorTab === "review") renderInspector();
   if (!silent) $("editor").focus();
+  return true;
 }
 
 function scheduleSave() {
   updateCountPill();
   if (!state.draftId || $("editor").readOnly || state.importing) return;
+  state.dirty = true;
   $("savePill").textContent = "保存中…";
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(saveDraft, 700);
@@ -745,20 +803,48 @@ async function saveDraft() {
   // Serialize writes so a slower earlier request cannot overwrite newer editor text.
   const queuedSave = state.saveQueue
     .catch(() => {})
-    .then(() => call("save_draft", projectId, draftId, text));
+    .then(() => {
+      const previous = state.savedSnapshot;
+      if (previous?.projectId === projectId && previous.draftId === draftId && previous.text === text) return { changed: false };
+      return call("save_draft", projectId, draftId, text);
+    });
   state.saveQueue = queuedSave.catch(() => {});
   try {
-    await queuedSave;
+    const result = await queuedSave;
+    state.savedSnapshot = { projectId, draftId, text };
+    if (result?.memory_reminder) queueMemoryReminder(projectId, result.memory_reminder);
     if (projectId === state.projectId && draftId === state.draftId && text === $("editor").value) {
+      state.saveError = "";
+      state.dirty = false;
       state.lastSavedAt = Date.now();
       refreshSavePill();
     }
     return { ok: true };
   } catch (error) {
+    state.saveError = error.message || "保存失败";
     $("savePill").textContent = "保存失败";
     toast(error.message);
     return { ok: false, error: error.message || "保存失败" };
   }
+}
+
+function queueMemoryReminder(projectId, reminder) {
+  const key = `${projectId}:${reminder.chapter_id}`;
+  if (state.memoryReminderShown.has(key)) return;
+  state.memoryReminderShown.add(key);
+  state.memoryReminders.push({ projectId, ...reminder });
+  if (state.memoryReminders.length === 1) setTimeout(showMemoryReminder, 500);
+}
+
+function showMemoryReminder() {
+  if (!state.memoryReminders.length || state.closing) return;
+  if (state.generating || !$("modal").hidden) { setTimeout(showMemoryReminder, 500); return; }
+  const reminder = state.memoryReminders.shift();
+  openModal({ title: "请核对记忆银行", desc: `${reminder.projectId} · ${reminder.chapter_id}`,
+    body: elNote(reminder.message), actions: [{ label: "知道了，我会按需手工检查", onClick: () => {
+      closeModal();
+      if (state.memoryReminders.length) setTimeout(showMemoryReminder, 500);
+    } }] });
 }
 
 function requireDraft() {
@@ -824,6 +910,7 @@ async function createProject() {
 }
 
 async function generateChapter() {
+  if (blockIfGenerating()) return;
   if (!state.projectId) {
     toast("请先选择或新建一个作品。");
     return;
@@ -862,13 +949,13 @@ async function generateChapter() {
           const chapterTitle = title.value.trim() || chapterId;
           const userPrompt = prompt.value;
           try {
+            if (!(await flushSave()).ok) return;
+            if (blockIfGenerating()) return;
             closeModal();
             beginStream(projectId, chapterId, chapterTitle);
             await call("generate_draft", projectId, chapterId, chapterTitle, userPrompt);
           } catch (error) {
-            setBusy(false);
-            ThinkTrace.finish(false);
-            toast(error.message);
+            await finishDraft({ ok: false, error: error.message });
           }
         },
       },
@@ -877,6 +964,11 @@ async function generateChapter() {
 }
 
 function beginStream(projectId, chapterId, title) {
+  state.navigationId += 1;
+  state.streamSource = { projectId: state.projectId, chapterId: state.chapterId, draftId: state.draftId,
+    draftIds: [...state.draftIds], draftIndex: state.draftIndex, content: $("editor").value,
+    title: $("draftTitle").textContent, hint: $("draftHint").textContent,
+    version: $("versionLabel").textContent, hasReview: state.hasReview, reviewText: state.reviewText };
   state.follow = true;
   state.streamProjectId = projectId;
   state.streamChapterId = chapterId;
@@ -893,46 +985,65 @@ function beginStream(projectId, chapterId, title) {
 }
 
 function appendEditor(text, chapterId = "") {
+  if (!state.generating) return;
   if (state.streamChapterId && chapterId && chapterId !== state.streamChapterId) return;
   if (state.streamProjectId && state.projectId !== state.streamProjectId) return;
   const editor = $("editor");
   editor.value += text;
   updateCountPill();
   if (state.follow) {
-    editor.scrollTo({ top: editor.scrollHeight, behavior: "smooth" });
+    editor.scrollTo({ top: editor.scrollHeight, behavior: "auto" });
   }
 }
 
 async function finishDraft(payload) {
   const projectId = state.streamProjectId || state.projectId;
-  setBusy(false);
   ThinkTrace.finish(payload?.ok !== false);
   if (!payload?.ok) {
-    $("savePill").textContent = "生成失败";
+    const partial = $("editor").value;
+    const source = state.streamSource;
+    if (source) {
+      Object.assign(state, { projectId: source.projectId, chapterId: source.chapterId, draftId: source.draftId,
+        draftIds: source.draftIds, draftIndex: source.draftIndex, hasReview: source.hasReview, reviewText: source.reviewText });
+      $("editor").value = source.content;
+      $("draftTitle").textContent = source.title;
+      $("draftHint").textContent = source.hint;
+      $("versionLabel").textContent = source.version;
+      if (partial) openDrawer({ kicker: "未保存的输出片段，可手工复制", title: "本次生成未完成", content: partial });
+    }
+    state.streamSource = null;
+    setBusy(false);
+    updateCountPill();
+    renderTree();
+    $("savePill").textContent = payload.cancelled ? "本次任务已停止" : "本次生成失败，原稿已保留";
     toast(payload?.error || "生成失败");
     state.streamProjectId = "";
     state.streamChapterId = "";
     return;
   }
   const draftId = payload.data?.draft_id;
-  await refreshWorkspace();
-  if (draftId) {
-    await loadDraft(projectId, draftId, { silent: true, force: true });
-    toast(payload.data?.output_incomplete
-      ? "精修输出达到上限，已保存为不完整候选。请核对结尾、补全或提高 Max Tokens 后重试。"
-      : "新草稿已写入，尚未成为确认稿。");
-  }
+  try {
+    await refreshWorkspace();
+    if (draftId) {
+      await loadDraft(projectId, draftId, { silent: true, force: true });
+      toast(payload.data?.output_incomplete
+        ? "输出达到上限，已保存为不完整候选。请核对结尾、补全或提高 Max Tokens 后重试。"
+        : "新草稿已写入，尚未成为确认稿。");
+    }
+  } catch (error) { toast(`结果已保存，但刷新失败：${error.message}。请重新打开章节。`); }
+  finally { setBusy(false); state.streamSource = null; }
   state.streamProjectId = "";
   state.streamChapterId = "";
 }
 
 async function rewriteDraft() {
   if (!requireDraft()) return;
-  await saveDraft();
+  if (blockIfGenerating() || !(await flushSave()).ok) return;
   promptText({
     title: "重新生成",
     desc: "会生成一个全新版本，不会覆盖当前草稿，也不会参考上一版正文。",
     onSubmit: async (instruction) => {
+      if (blockIfGenerating() || !(await flushSave()).ok || blockIfGenerating()) return;
       const projectId = state.projectId;
       const draftId = state.draftId;
       const chapterId = state.chapterId;
@@ -942,9 +1053,7 @@ async function rewriteDraft() {
       try {
         await call("rewrite_draft", projectId, draftId, instruction);
       } catch (error) {
-        setBusy(false);
-        ThinkTrace.finish(false);
-        toast(error.message);
+        await finishDraft({ ok: false, error: error.message });
       }
     },
   });
@@ -957,7 +1066,7 @@ async function refineDraft() {
     setInspectorTab("review");
     return;
   }
-  const saved = await saveDraft();
+  const saved = await flushSave();
   if (!saved.ok) return;
   // Saving may have changed the text after its review was produced.
   const current = await call("open_draft", state.projectId, state.draftId);
@@ -971,6 +1080,7 @@ async function refineDraft() {
     title: "根据审稿精修",
     desc: "必须以当前 AI 审稿意见为主约束。没有审稿时不能精修。",
     onSubmit: async (instruction) => {
+      if (blockIfGenerating() || !(await flushSave()).ok || blockIfGenerating()) return;
       const projectId = state.projectId;
       const draftId = state.draftId;
       const chapterId = state.chapterId;
@@ -978,9 +1088,7 @@ async function refineDraft() {
       try {
         await call("refine_draft", projectId, draftId, instruction);
       } catch (error) {
-        setBusy(false);
-        ThinkTrace.finish(false);
-        toast(error.message);
+        await finishDraft({ ok: false, error: error.message });
       }
     },
   });
@@ -988,11 +1096,24 @@ async function refineDraft() {
 
 async function reviewDraft() {
   if (!requireDraft()) return;
-  const saved = await saveDraft();
-  if (!saved.ok) return;
+  if (blockIfGenerating()) return;
+  const saved = await flushSave();
+  if (!saved.ok || blockIfGenerating()) return;
+  const box = document.createElement("div");
+  box.className = "review-stream";
+  box.textContent = "";
+  state.reviewBox = box;
+  setInspectorTab("review");
+  const pane = $("pane-review");
+  pane.innerHTML = "";
+  pane.append(elNote("正在阅读这一稿…"), box);
+  ThinkTrace.start();
+  setBusy(true, "请求已发出，正在等待模型接入…", { lockEditor: false, veil: false });
   try {
     const result = await call("ai_review", state.projectId, state.draftId);
     if (result?.existing) {
+      setBusy(false);
+      ThinkTrace.finish(true);
       state.hasReview = true;
       state.reviewText = result.review.details || result.review.comment || "";
       updateDock();
@@ -1000,17 +1121,9 @@ async function reviewDraft() {
       if (result.review.truncated) toast(result.review.truncated_notice || "审稿意见被截断，可能不完整。");
       return;
     }
-    const box = document.createElement("div");
-    box.className = "review-stream";
-    box.textContent = "";
-    state.reviewBox = box;
-    setInspectorTab("review");
-    const pane = $("pane-review");
-    pane.innerHTML = "";
-    pane.append(elNote("正在阅读这一稿…"), box);
-    ThinkTrace.start();
-    setBusy(true, "请求已发出，正在等待模型接入…", { lockEditor: false, veil: false });
   } catch (error) {
+    setBusy(false);
+    ThinkTrace.finish(false);
     toast(error.message);
   }
 }
@@ -1023,7 +1136,7 @@ function finishReview(payload) {
     return;
   }
   const review = payload.data || {};
-  state.hasReview = true;
+  state.hasReview = !review.truncated && !state.dirty;
   state.reviewText = review.details || review.comment || "暂无说明";
   state.reviewBox = null;
   updateDock();
@@ -1040,7 +1153,7 @@ function finishReview(payload) {
 
 async function confirmDraft() {
   if (!requireDraft()) return;
-  await saveDraft();
+  if (blockIfGenerating() || !(await flushSave()).ok) return;
   const note = document.createElement("p");
   note.textContent = "确认后，这一版会成为该章节的确认稿。未确认的草稿仍会保留。";
   openModal({
@@ -1054,9 +1167,11 @@ async function confirmDraft() {
         style: "success",
         onClick: async () => {
           try {
+            if (!(await flushSave()).ok) return;
             const projectId = state.projectId;
             const draftId = state.draftId;
-            await call("confirm_draft", projectId, draftId);
+            const result = await call("confirm_draft", projectId, draftId);
+            if (result?.memory_reminder) queueMemoryReminder(projectId, result.memory_reminder);
             closeModal();
             await refreshWorkspace();
             await loadDraft(projectId, draftId, { silent: true });
@@ -1471,18 +1586,18 @@ function menuItemsFor(target) {
 }
 
 async function runOnChapterDraft(projectId, chapter, action) {
-  await openChapter(projectId, chapter);
+  if (!(await openChapter(projectId, chapter))) return;
   await action();
 }
 
 async function runOnDraft(projectId, draftId, action) {
-  await loadDraft(projectId, draftId, { silent: true });
+  if (!(await loadDraft(projectId, draftId, { silent: true }))) return;
   await action();
 }
 
 async function localReviewCurrent() {
   if (!requireDraft()) return;
-  await saveDraft();
+  if (blockIfGenerating() || !(await flushSave()).ok) return;
   const result = await call("local_review", state.projectId, state.draftId);
   openDrawer({
     kicker: result.existing ? "已有本地初审" : "本地初审完成",
@@ -1752,7 +1867,7 @@ async function exportProjectPackage(projectId) {
     toast("请先选择作品。");
     return;
   }
-  if (projectId === state.projectId) await flushSave();
+  if (projectId === state.projectId && !(await flushSave()).ok) return;
   try {
     await call("export_project_package", projectId);
     toast("作品包已导出。");
@@ -1890,7 +2005,7 @@ async function runImportPackage(inspect, mode, confirmText) {
   if (blockIfGenerating()) return;
   const previousProjectId = state.projectId;
   const previousDraftId = state.draftId;
-  await flushSave();
+  if (!(await flushSave()).ok) return;
   clearTimeout(state.saveTimer);
   state.saveTimer = 0;
   state.importing = true;
@@ -2016,6 +2131,7 @@ function bindEvents() {
   $("exportBtn").addEventListener("click", async () => {
     if (!state.projectId) return toast("请先选择作品。");
     try {
+      if (blockIfGenerating() || !(await flushSave()).ok) return;
       await call("export_txt", state.projectId);
       toast("已导出 TXT。");
     } catch (error) {
@@ -2025,19 +2141,31 @@ function bindEvents() {
   $("packageBtn").addEventListener("click", () => openPackageSheet());
   $("prevBtn").addEventListener("click", async () => {
     if (state.draftIndex > 0) {
-      await saveDraft();
       await loadDraft(state.projectId, state.draftIds[state.draftIndex - 1]);
     }
   });
   $("nextBtn").addEventListener("click", async () => {
     if (state.draftIndex >= 0 && state.draftIndex < state.draftIds.length - 1) {
-      await saveDraft();
       await loadDraft(state.projectId, state.draftIds[state.draftIndex + 1]);
     }
   });
   $("rewriteBtn").addEventListener("click", () => rewriteDraft().catch((error) => toast(error.message)));
   $("refineBtn").addEventListener("click", () => refineDraft().catch((error) => toast(error.message)));
   $("reviewBtn").addEventListener("click", () => reviewDraft().catch((error) => toast(error.message)));
+  const stopTask = async () => {
+    try {
+      const result = await call("cancel_job", state.activeJobId);
+      toast(result.message);
+      if (result.stopping && state.generating) {
+        ["cancelJobBtn", "cancelStudioJobBtn"].forEach(id => {
+          $(id).disabled = true;
+          $(id).textContent = "正在停止…";
+        });
+      }
+    } catch (error) { toast(error.message); }
+  };
+  $("cancelJobBtn").addEventListener("click", stopTask);
+  $("cancelStudioJobBtn").addEventListener("click", stopTask);
   $("confirmBtn").addEventListener("click", () => confirmDraft().catch((error) => toast(error.message)));
   $("editor").addEventListener("input", scheduleSave);
   $("editor").addEventListener("select", updateCountPill);
@@ -2088,6 +2216,19 @@ function bindEvents() {
 }
 
 window.__workbenchPush = function workbenchPush(event, payload) {
+  if (event === "job_started") {
+    if (payload.job_id > state.lastJobId) {
+      state.lastJobId = payload.job_id;
+      state.activeJobId = payload.job_id;
+    }
+    return;
+  }
+  if (payload?.job_id > state.lastJobId && state.generating) {
+    state.lastJobId = payload.job_id;
+    state.activeJobId = payload.job_id;
+  }
+  if (payload?.job_id && payload.job_id !== state.activeJobId) return;
+  if (event.endsWith("_done")) state.activeJobId = 0;
   if (window.ThinkTrace && ThinkTrace.handle(event, payload)) return;
   if (event === "draft_chunk") appendEditor(payload?.text || "", payload?.chapter_id || "");
   if (event === "review_chunk" && state.reviewBox) {
@@ -2102,7 +2243,7 @@ window.__workbenchPush = function workbenchPush(event, payload) {
 window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose(attemptId = 0) {
   state.closeAttempt = Number(attemptId) || 0;
   if (state.generating) {
-    const error = "请等待当前生成完成后再关闭。";
+    const error = "请等待当前任务完成，或点击“停止任务”后再关闭。";
     toast(error);
     return { ok: false, error };
   }

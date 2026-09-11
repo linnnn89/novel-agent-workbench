@@ -20,6 +20,7 @@ function requireProject() {
 }
 
 function closeStudio() {
+  if (studio.memoryBusy) { toast("请等待记忆任务完成，或先点击“停止任务”。"); return; }
   $("studio").hidden = true;
   $("studioBody").innerHTML = "";
   $("studioTabs").innerHTML = "";
@@ -72,6 +73,7 @@ function el(tag, className, text) {
 }
 
 async function openModelStudio(tab = "provider") {
+  if (blockIfGenerating()) return;
   studio.mode = "models";
   studio.tab = tab;
   openStudioShell({ kicker: "软件级配置", title: "模型设置" });
@@ -152,13 +154,20 @@ function renderProviderPage() {
   const base = input(provider?.base_url || "", { placeholder: "https://api.example.com/v1" });
   const key = input("", { type: "password", placeholder: providerKeyPlaceholder(provider) });
   const timeout = input(String(provider?.timeout_seconds || 300));
+  const thinkingProtocol = input(provider?.thinking_protocol || "auto", { select: true, options: [
+    ["auto", "自动识别 DeepSeek"], ["deepseek", "DeepSeek 直连接口"],
+    ["openrouter", "OpenRouter / Chutes 兼容接口"], ["siliconflow", "硅基流动（仅开关）"],
+    ["unsupported", "不发送思考开关"],
+  ] });
   form.append(
     el("p", "studio-note", "接入商保存后不会自动联网。只有“刷新模型”会请求对应 API。本地 LM Studio / Ollama 可不填 API Key。"),
     field("名称", name),
     field("适配器", adapter),
     field("API 地址", base),
     field("API Key", key),
-    field("接入等待上限（秒，收到思考后不再计时）", timeout)
+    field("连续无输出等待上限（秒，思考输出也会续期）", timeout),
+    field("思考控制接口（一般保持自动）", thinkingProtocol),
+    el("p", "studio-note", "未来模型名称或第三方接口未被识别时，可按接入商文档选择。手工指定会应用于该接入商下的正文/精修模型；接口不支持时选“不发送”。")
   );
   const actions = el("div", "side-actions");
   const save = el("button", "btn primary", "保存当前设置");
@@ -172,6 +181,7 @@ function renderProviderPage() {
         base_url: base.value.trim(),
         api_key: key.value,
         timeout_seconds: timeout.value,
+        thinking_protocol: thinkingProtocol.value,
       });
       studio.model = result;
       studio.selectedProvider = result.profile_id || studio.selectedProvider;
@@ -219,12 +229,15 @@ function renderProviderPage() {
 }
 
 async function refreshSelectedModels() {
+  if (blockIfGenerating()) return;
   const profileId = studio.selectedProvider || studio.model.providers?.[0]?.profile_id;
   if (!profileId) return toast("请先选择接入商。");
   setStudioStatus("正在刷新模型目录…");
+  setBusy(true, "正在刷新模型目录…", { lockEditor: false, veil: false });
   try {
     await call("refresh_models", profileId);
   } catch (error) {
+    setBusy(false);
     setStudioStatus("刷新失败。");
     toast(error.message);
   }
@@ -538,7 +551,7 @@ function renderDraftEffortCapsules(assignment) {
   });
   toggle.addEventListener("change", sync);
   row.append(toggleLabel, caps);
-  row.append(el("p", "studio-note", "正文生成与 AI 精修共用此开关，仅对 DeepSeek V4 Flash 0731 生效。默认关闭；开启后可选择思考强度。修改后请保存。"));
+  row.append(el("p", "studio-note", "正文生成与 AI 精修共用此开关，支持 DeepSeek Flash / Pro 动态名称及 V4 起的版本名称。默认关闭；按服务商接口发送思考参数。第三方模型是否支持这些强度，以其接口为准。修改后请保存。"));
   Object.defineProperty(row, "value", {
     get() { return toggle.checked ? effort : "none"; },
   });
@@ -618,6 +631,7 @@ function renderAssignPage() {
 }
 
 async function openMemoryStudio() {
+  if (blockIfGenerating()) return;
   if (!requireProject()) return;
   studio.mode = "memory";
   studio.memoryEditor = null;
@@ -749,6 +763,7 @@ function renderMemoryStudio() {
 
 async function saveMemoryStudio() {
   if (!studio.memoryEditor) return;
+  if (studio.memoryBusy) return toast("请等待记忆任务结束后再保存手工编辑。");
   try {
     studio.memory = await call("save_memory_workspace", {
       project_id: state.projectId,
@@ -840,10 +855,13 @@ async function previewMemory(kind, view) {
 
 async function runMemoryJob(name, label) {
   if (!studio.memoryEditor) return;
+  if (blockIfGenerating() || !(await flushSave()).ok || blockIfGenerating()) return;
   studio.followMemory = true;
   studio.memoryBackup = studio.memoryEditor.value;
   studio.memoryLiveText = "";
   studio.memoryBusy = true;
+  studio.memoryEditor.readOnly = true;
+  setBusy(true, label || "正在处理记忆…", { veil: false });
   if (studio.memoryLive) {
     studio.memoryLive.hidden = false;
     studio.memoryLive.textContent = "";
@@ -853,10 +871,12 @@ async function runMemoryJob(name, label) {
   try {
     await call(name, memoryJobPayload());
   } catch (error) {
+    setBusy(false);
     studio.memoryBusy = false;
     ThinkTrace.finish(false);
     if (studio.memoryEditor && studio.memoryBackup != null) {
       studio.memoryEditor.value = studio.memoryBackup;
+      studio.memoryEditor.readOnly = false;
     }
     setStudioStatus("");
     toast(error.message);
@@ -864,6 +884,8 @@ async function runMemoryJob(name, label) {
 }
 
 function finishMemoryJob(payload) {
+  setBusy(false);
+  if (studio.memoryEditor) studio.memoryEditor.readOnly = false;
   if (studio.mode !== "memory") return;
   studio.memoryBusy = false;
   ThinkTrace.finish(payload?.ok !== false);
@@ -889,6 +911,7 @@ function finishMemoryJob(payload) {
 }
 
 async function openPlanningStudio(kind, options = {}) {
+  if (blockIfGenerating()) return;
   if (!requireProject()) return;
   studio.mode = kind;
   studio.creating = false;
@@ -1131,6 +1154,7 @@ async function deletePlanningStudio() {
 
 function handleStudioPush(event, payload) {
   if (event === "models_done") {
+    setBusy(false);
     if (!payload?.ok) {
       setStudioStatus("刷新失败。");
       toast(payload?.error || "刷新模型失败");
@@ -1162,6 +1186,7 @@ async function saveActiveStudio() {
 }
 
 async function openGenSettings(scope) {
+  if (blockIfGenerating()) return;
   if (scope === "project" && !requireProject()) return;
   studio.mode = "gen";
   studio.genScope = scope;
@@ -1234,6 +1259,10 @@ function renderGenSettings() {
       form.append(field(label, box));
       studio.genFields[id] = box;
     });
+    const generous = el("button", "btn outline", "使用宽松预算：131072 tokens");
+    generous.type = "button";
+    generous.addEventListener("click", () => { studio.genFields.max_context_tokens.value = "131072"; });
+    form.append(generous, el("p", "studio-note", "上下文按中文适配的本地 tokenizer 估算；最终请求还会预留输出空间。提高上限可能增加等待和费用，不会自动增加前文章数。现有设置仅在点击保存后改变。"));
     const stream = document.createElement("input");
     stream.type = "checkbox";
     stream.checked = Boolean(sampling.stream);

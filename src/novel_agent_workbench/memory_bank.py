@@ -64,7 +64,7 @@ class MemoryBankGenerationResult:
     provider: str
     model: str
     finish_reason: str
-    usage: dict[str, int]
+    usage: dict[str, Any]
     request_summary: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
