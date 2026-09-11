@@ -16,6 +16,8 @@
 
 新版界面的记忆、大纲、人物与世界观、创作设置、接入商和功能分配页会显示保存状态。修改后关闭页面、切换资料或作品、退出程序时，可以选择「保存并继续」「放弃修改」「返回编辑」；保存失败会留在原页。大纲和资料页把正文与保存按钮放在主要区域，章节范围等属性收进可展开的区域。
 
+保存或恢复创作设置、刷新模型目录、从磁盘重载记忆时，当前编辑区和标签页会暂时锁定，避免返回结果覆盖等待期间的新输入。完成或失败后恢复编辑；刷新模型期间仍可使用「停止任务」。
+
 ### 现在可以做什么
 
 - 同时管理多部作品，以及每部作品的章节和草稿版本。
@@ -128,6 +130,8 @@ src/novel_agent_workbench/providers.py
 接口约定和项目说明在 [`codex_docs/`](codex_docs/) 中。
 
 在 Windows 桌面会话中运行 `.venv\Scripts\python.exe scripts\verify_desktop_iterations.py`，可用独立临时项目库验证保存提示、切库、备份恢复和原生退出；不会调用模型。结果保存在 `work/desktop-iteration-check/ui_results.json`。
+
+`.venv\Scripts\python.exe scripts\verify_studio_safety.py` 用 3 个真实窗口回归用例检查设置保存、模型刷新和记忆重载期间的编辑保护，使用受控本地延迟模拟慢操作，不调用模型。结果保存在 `work/studio-safety-check/green.json`；修复前可加 `--red` 单独记录失败基线。
 
 ---
 
