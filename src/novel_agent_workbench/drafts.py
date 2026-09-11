@@ -7,8 +7,11 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from .chapters import ChapterWorkflowService
-from .providers import MOCK_PROVIDER_ID, ProviderRequest, generate_with_provider, get_model_role_config
+from .config import effective_generation_settings
+from .providers import MOCK_PROVIDER_ID, ProviderRequest, generate_with_provider, get_effective_model_role_config
 from .storage import ProjectStore, retire_path, safe_filename, utc_stamp
+from .token_budget import input_budget, estimate_input_tokens, capacity_check
+from .task_control import check_cancelled
 
 
 DRAFTS_DIRNAME = "drafts"
@@ -111,7 +114,8 @@ class DraftGenerationResult:
     path: str
     provider: str
     model: str
-    usage: dict[str, int]
+    usage: dict[str, Any]
+    output_incomplete: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -125,9 +129,21 @@ class DraftCommitResult:
     path: str
     committed_at: str
     checkpoint: dict[str, Any]
+    memory_reminder: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def finish_reason_truncated(finish_reason: object) -> bool:
+    return str(finish_reason or "").strip().lower() in {"length", "max_tokens", "max_output_tokens"}
+
+
+def validated_draft_text(text: str) -> dict[str, Any]:
+    sanitized = sanitize_provider_draft_text(text)
+    if not sanitized["content"].strip():
+        raise RuntimeError("模型没有返回可用正文（可能只有思考内容），未创建新草稿。")
+    return sanitized
 
 
 class DraftGenerationService:
@@ -167,6 +183,8 @@ class DraftGenerationService:
             if stream_callback is not None:
                 provider_request = replace(provider_request, stream_callback=stream_callback)
             response = generate_with_provider(self.store, provider_request)
+            sanitized = validated_draft_text(response.text)
+            check_cancelled()
         except Exception as exc:
             if chapter_preexisted:
                 with self.store.lock():
@@ -180,7 +198,6 @@ class DraftGenerationService:
             raise
         draft_id = new_draft_id()
         created_at = utc_stamp()
-        sanitized = sanitize_provider_draft_text(response.text)
         with self.store.lock():
             version = self.next_chapter_draft_version(request.chapter_id)
             version_label = f"ver{version}"
@@ -195,6 +212,7 @@ class DraftGenerationService:
                 "version_label": version_label,
                 "created_at": created_at,
                 "content": sanitized["content"],
+                "output_incomplete": finish_reason_truncated(response.finish_reason),
                 "provider": {
                     "role": "writer",
                     "provider": response.provider,
@@ -249,6 +267,7 @@ class DraftGenerationService:
                 provider=response.provider,
                 model=response.model,
                 usage=response.usage,
+                output_incomplete=finish_reason_truncated(response.finish_reason),
             )
 
     def generate_context_draft(
@@ -260,24 +279,32 @@ class DraftGenerationService:
     ) -> DraftGenerationResult:
         from .context_assembler import ContextAssemblerService
 
-        role_config = get_model_role_config(self.store, "writer")
+        role_config = get_effective_model_role_config(self.store, "writer", feature_id="draft_generation")
+        config = self.store.read_config()
+        system_prompt = request.system_prompt or effective_generation_settings(config).get("prompting", {}).get("system_prompt", "")
+        limit = input_budget(config, requested=max_context_tokens, feature_id="draft_generation", max_tokens=request.max_tokens)
+        reserve = estimate_input_tokens(system_prompt, request.prompt) + 512
+        if reserve > limit:
+            raise RuntimeError("写作要求已超过可用输入预算，请提高上下文上限或缩短要求；未发送请求。")
         render = ContextAssemblerService(self.store).prompt_render_dry_run(
             prompt=request.prompt,
-            system_prompt=request.system_prompt,
-            max_context_tokens=max_context_tokens,
+            system_prompt=system_prompt,
+            max_context_tokens=max(0, limit - reserve),
             chapter_id=request.chapter_id,
             include_prompt_text=True,
             include_context_text=True,
         ).to_dict()
         rendered_prompt = render_context_prompt(render)
-        metadata = {**request.metadata, "context_aware_generation": True}
+        capacity_check(config, rendered_prompt, system_prompt, feature_id="draft_generation",
+                       input_limit=limit, max_tokens=request.max_tokens, model=role_config.model)
+        metadata = {**request.metadata, "context_aware_generation": True, "input_token_limit": limit}
         if final_assembly_gate_id:
             metadata["final_assembly_gate_id"] = final_assembly_gate_id
         context_request = DraftGenerationRequest(
             chapter_id=request.chapter_id,
             title=request.title,
             prompt=rendered_prompt,
-            system_prompt=request.system_prompt,
+            system_prompt=system_prompt,
             temperature=request.temperature,
             top_p=request.top_p,
             top_k=request.top_k,
@@ -306,7 +333,7 @@ class DraftGenerationService:
         provider: str,
         model: str,
         finish_reason: str = "",
-        usage: dict[str, int] | None = None,
+        usage: dict[str, Any] | None = None,
         request_summary: dict[str, Any] | None = None,
         artifact_metadata: dict[str, Any] | None = None,
     ) -> DraftGenerationResult:
@@ -314,7 +341,8 @@ class DraftGenerationService:
         with self.store.lock():
             validate_chapter_id(chapter_id)
             title = str(title or "").strip()
-            sanitized = sanitize_provider_draft_text(content)
+            sanitized = validated_draft_text(content)
+            check_cancelled()
             draft_id = new_draft_id()
             created_at = utc_stamp()
             version = self.next_chapter_draft_version(chapter_id)
@@ -333,6 +361,7 @@ class DraftGenerationService:
                 "version_label": version_label,
                 "created_at": created_at,
                 "content": sanitized["content"],
+                "output_incomplete": finish_reason_truncated(finish_reason),
                 "provider": {
                     "role": str(provider_role or ""),
                     "provider": str(provider or ""),
@@ -379,6 +408,7 @@ class DraftGenerationService:
                 provider=str(provider or ""),
                 model=str(model or ""),
                 usage=provider_usage,
+                output_incomplete=finish_reason_truncated(finish_reason),
             )
 
     def list_drafts(self) -> list[dict[str, Any]]:
@@ -677,6 +707,8 @@ class DraftGenerationService:
                     raise DraftGenerationError(f"Draft is not committable: {draft_id}")
                 confirmed_index = self._read_confirmed_index()
                 existing_confirmed = next((item for item in confirmed_index if item.get("chapter_id") == chapter_id), None)
+                previous_content = (str(self.read_confirmed_chapter(chapter_id).get("content") or "")
+                                    if existing_confirmed else None)
                 if existing_confirmed is not None and not replace_existing:
                     raise DraftGenerationError(f"Confirmed chapter already exists: {chapter_id}")
                 commit_gate = accepted_review_commit_gate(self.store, draft)
@@ -764,6 +796,8 @@ class DraftGenerationService:
                     path=str(artifact_path),
                     committed_at=committed_at,
                     checkpoint=checkpoint,
+                    memory_reminder=(self._memory_edit_reminder(chapter_id)
+                                     if previous_content is not None and previous_content != artifact["content"] else None),
                 )
             except Exception as exc:
                 if chapter_id and not isinstance(exc, DraftCommitGateError):
@@ -845,9 +879,16 @@ class DraftGenerationService:
 
     def update_draft_content(self, draft_id: str, *, text: str) -> dict[str, Any]:
         self.store.initialize()
+        content = str(text or "")
+        current = self.read_draft(draft_id)
+        if self._saved_content_matches(draft_id, current, content):
+            return {"draft_id": draft_id, "chapter_id": str(current.get("chapter_id") or ""),
+                    "content_chars": len(content), "changed": False, "synced_confirmed_chapter": ""}
         with self.store.lock():
             draft_entry = self._draft_index_entry(draft_id)
             draft = self.read_draft(draft_id)
+            if self._saved_content_matches(draft_id, draft, content):
+                return {"draft_id": draft_id, "changed": False, "synced_confirmed_chapter": ""}
             updated_at = utc_stamp()
             draft["content"] = str(text or "")
             draft["edited_at"] = updated_at
@@ -866,7 +907,39 @@ class DraftGenerationService:
                 "edited_at": updated_at,
                 "content_chars": len(str(text or "")),
                 "synced_confirmed_chapter": synced_confirmed,
+                "changed": True,
+                "memory_reminder": self._memory_edit_reminder(synced_confirmed),
             }
+
+    def _saved_content_matches(self, draft_id: str, draft: dict[str, Any], text: str) -> bool:
+        if str(draft.get("content") or "") != text:
+            return False
+        entry = self._draft_index_entry(draft_id)
+        if draft.get("edited_at") and (entry.get("edited_at") != draft["edited_at"] or entry.get("content_chars") != len(text)):
+            return False
+        for confirmed in self._read_confirmed_index():
+            if confirmed.get("source_draft_id") != draft_id:
+                continue
+            artifact = self.store.read_json(str(confirmed["path"]), default={})
+            if not isinstance(artifact, dict) or str(artifact.get("content") or "") != text:
+                return False
+        return True
+
+    def _memory_edit_reminder(self, chapter_id: str) -> dict[str, Any] | None:
+        if not chapter_id:
+            return None
+        bank = self.store.read_json(self.store.data_file_path("memory_bank.json"), default={})
+        items = bank.get("items", []) if isinstance(bank, dict) else []
+        for item in items:
+            if not isinstance(item, dict) or not str(item.get("text") or "").strip():
+                continue
+            sources = item.get("source_chapter_ids") or []
+            if not sources or chapter_id in sources:
+                return {"chapter_id": chapter_id, "message":
+                        "你修改了已确认章节，记忆银行可能仍保留旧信息。建议结合本次修改，"
+                        "手工核对人物、事件和时间线，并在记忆银行中修正相关内容。"
+                        "如果只是润色措辞，可忽略本次提醒。程序不会自动改写记忆。"}
+        return None
 
     def next_chapter_draft_version(self, chapter_id: str) -> int:
         validate_chapter_id(chapter_id)

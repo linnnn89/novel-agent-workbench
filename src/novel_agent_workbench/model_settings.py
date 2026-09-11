@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 
@@ -94,6 +95,17 @@ def is_deepseek_v4_flash_0731(model_id: str) -> bool:
     if "vision" in value:
         return False
     return "v4-flash-0731" in value
+
+
+def supports_deepseek_thinking(model_id: str) -> bool:
+    """Recognize switchable text models, excluding R1/distill/vision models."""
+    value = str(model_id or "").strip().lower().replace("_", "-")
+    name = value.rsplit("/", 1)[-1].split(":", 1)[0]
+    if any(word in name for word in ("vision", "vl", "distill", "r1")):
+        return False
+    return name in {"deepseek-flash", "deepseek-pro", "deepseek-chat", "deepseek-reasoner"} or bool(
+        re.fullmatch(r"deepseek-v(?:3\.[2-9]|[4-9](?:\.\d+)?|[1-9]\d+(?:\.\d+)?)(?:-[a-z0-9.]+)*", name)
+    )
 
 
 def make_model_ref(profile_id: str, model_id: str) -> str:
@@ -298,7 +310,10 @@ def resolve_model_role_mapping(
         "model": str(model.get("model_id") or split_model_ref(model_ref)[1]),
         "base_url": str(profile.get("base_url") or ""),
         "api_key_ref": str(profile.get("api_key_ref") or ""),
-        "settings": {"timeout_seconds": profile.get("timeout_seconds", 300.0)},
+        "settings": {
+            "timeout_seconds": profile.get("timeout_seconds", 300.0),
+            "thinking_protocol": model.get("thinking_protocol") or profile.get("thinking_protocol") or "auto",
+        },
     }
 
 

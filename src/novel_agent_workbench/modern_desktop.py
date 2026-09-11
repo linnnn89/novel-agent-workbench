@@ -5,10 +5,12 @@ import os
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 from .application_service import WorkbenchApplicationService
+from .task_control import JobControl, JobCancelled, current_job, job_scope
 from .ui_presenters import (
     default_planning_id,
     default_projects_root,
@@ -376,6 +378,9 @@ class WorkbenchBridge:
         self._busy = False
         self._busy_lock = threading.Lock()
         self._run_log: list[str] = []
+        self._job_control: JobControl | None = None
+        self._job_number = 0
+        self._job_flushers: list[Callable[[], None]] = []
 
     def bind_window(self, window: Any) -> None:
         global _ACTIVE_WINDOW
@@ -408,6 +413,9 @@ class WorkbenchBridge:
     def _push(self, event: str, payload: Any = None) -> None:
         if _ACTIVE_WINDOW is None:
             return
+        control = current_job()
+        if control is not None and isinstance(payload, dict):
+            payload = {**payload, "job_id": control.job_id}
         script = f"window.__workbenchPush({json.dumps(event)}, {json.dumps(_jsonable(payload), ensure_ascii=False)})"
         try:
             _ACTIVE_WINDOW.evaluate_js(script)
@@ -419,6 +427,10 @@ class WorkbenchBridge:
             if self._busy:
                 return False
             self._busy = True
+            self._job_number += 1
+            self._job_control = JobControl()
+            self._job_control.job_id = self._job_number
+            self._job_flushers = []
             return True
 
     def _end_job(self) -> None:
@@ -435,30 +447,68 @@ class WorkbenchBridge:
         if not self._begin_job():
             return _fail("已有任务正在进行，请等待完成。")
         self._log(f"开始任务: {name}")
+        control = self._job_control
+        self._push("job_started", {"job_id": control.job_id})
 
         def run() -> None:
-            try:
-                result = worker()
-            except Exception as exc:
-                self._log(f"任务失败: {name}  {exc}")
-                self._push(on_done, {"ok": False, "error": str(exc)})
-            else:
-                self._log(f"任务完成: {name}")
-                self._push(on_done, _ok(_jsonable(result)))
-            finally:
+            with job_scope(control):
+                try:
+                    control.check()
+                    result = worker()
+                except Exception as exc:
+                    self._log(f"任务结束: {name}  {exc}")
+                    payload = {"ok": False, "error": str(exc), "cancelled": isinstance(exc, JobCancelled)}
+                else:
+                    self._log(f"任务完成: {name}")
+                    payload = _ok(_jsonable(result))
+                for flush in self._job_flushers:
+                    flush()
                 self._end_job()
+                self._push(on_done, payload)
 
         threading.Thread(target=run, name=name, daemon=True).start()
-        return _ok({"started": True})
+        return _ok({"started": True, "job_id": control.job_id})
+
+    def cancel_job(self, job_id: int = 0) -> dict[str, Any]:
+        with self._busy_lock:
+            control = self._job_control if self._busy else None
+            if control is None or (job_id and control.job_id != job_id):
+                return _ok({"stopping": False, "message": "任务已结束。"})
+            stopping = control.cancel()
+        return _ok({"stopping": stopping, "message": "正在停止，请稍候…" if stopping else "结果已返回，正在保存，请稍候。"})
 
     def _stream_hooks(self, content_event: str, *, chapter_id: str = "") -> tuple[Callable[[str], None], Callable[[str], None], Callable[[], None]]:
         seen = {"reason": False, "content": False}
+        buffered: dict[str, list[str]] = {}
+        buffered_chars = 0
+        last_flush = time.monotonic()
+        control = current_job()
 
         def payload(text: str) -> dict[str, Any]:
             data = {"text": text}
             if chapter_id:
                 data["chapter_id"] = chapter_id
             return data
+
+        def flush() -> None:
+            nonlocal last_flush, buffered_chars
+            if control is None or not control.event.is_set():
+                for event, chunks in buffered.items():
+                    self._push(event, payload("".join(chunks)))
+            buffered.clear()
+            buffered_chars = 0
+            last_flush = time.monotonic()
+
+        self._job_flushers.append(flush)
+
+        def emit(event: str, chunk: str) -> None:
+            nonlocal buffered_chars
+            if control:
+                control.check()
+            buffered.setdefault(event, []).append(chunk)
+            buffered_chars += len(chunk)
+            if time.monotonic() - last_flush >= 0.05 or buffered_chars >= 2048:
+                flush()
 
         def mark_sent() -> None:
             self._push("think_status", {"phase": "sent"})
@@ -467,13 +517,13 @@ class WorkbenchBridge:
             if not seen["reason"]:
                 seen["reason"] = True
                 self._push("think_status", {"phase": "thinking"})
-            self._push("think_chunk", payload(chunk))
+            emit("think_chunk", chunk)
 
         def on_content(chunk: str) -> None:
             if not seen["content"]:
                 seen["content"] = True
                 self._push("think_status", {"phase": "writing"})
-            self._push(content_event, payload(chunk))
+            emit(content_event, chunk)
 
         return on_content, on_reason, mark_sent
 
@@ -792,6 +842,7 @@ class WorkbenchBridge:
                 adapter=str(data.get("adapter") or "openai_compatible"),
                 base_url=str(data.get("base_url") or ""),
                 timeout_seconds=timeout,
+                thinking_protocol=str(data.get("thinking_protocol") or "auto"),
             )
             profile_id = str(profile.get("profile_id") or "")
             new_key = str(data.get("api_key") or "").strip()
@@ -1020,6 +1071,15 @@ class WorkbenchBridge:
                 ]
                 if cache:
                     parts.append(cache)
+                usage = item.get("usage") or {}
+                parts.append(f"tokens={usage.get('prompt_tokens', '?')}+{usage.get('completion_tokens', '?')}")
+                reasoning = usage.get("completion_tokens_details", {}).get("reasoning_tokens")
+                if reasoning is not None:
+                    parts.append(f"reasoning={reasoning}")
+                if "cost" in usage:
+                    parts.append(f"cost=${usage['cost']:.6f}")
+                if keys.get("elapsed_seconds") is not None:
+                    parts.append(f"{keys['elapsed_seconds']}s")
                 if meta:
                     parts.append(", ".join(str(key) for key in meta))
                 lines.append("  ".join(parts))

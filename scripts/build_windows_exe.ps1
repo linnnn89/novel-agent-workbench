@@ -94,7 +94,7 @@ try {
     if (-not $SkipInstall) {
         Write-Host "[3/6] Installing build dependencies"
         & $VenvPython -m pip install --upgrade pip
-        & $VenvPython -m pip install pyinstaller pillow "pywebview>=5.0"
+        & $VenvPython -m pip install pyinstaller pillow "pywebview>=5.0" "deepseek-tokenizer==0.3.0"
     }
     else {
         Write-Host "[3/6] Skipping dependency install"
@@ -132,6 +132,7 @@ try {
         --add-data "$AssetsPath;novel_agent_workbench\assets" `
         --add-data "$ModernUiPath;novel_agent_workbench\modern_ui" `
         --collect-all webview `
+        --collect-all deepseek_tokenizer `
         --collect-all clr_loader `
         --hidden-import novel_agent_workbench.modern_desktop `
         --hidden-import novel_agent_workbench.desktop_app `

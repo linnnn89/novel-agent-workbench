@@ -84,6 +84,7 @@
             <button class="btn ghost" id="rewriteBtn" type="button">重新生成</button>
             <button class="btn quiet" id="refineBtn" type="button" disabled title="需要先完成 AI 审稿">根据审稿精修</button>
             <button class="btn outline" id="reviewBtn" type="button">AI 审稿</button>
+            <button class="btn outline" id="cancelJobBtn" type="button" hidden>停止任务</button>
             <button class="btn primary" id="confirmBtn" type="button">确认稿件</button>
           </div>
         </section>
@@ -148,6 +149,7 @@
         </div>
         <div class="studio-tabs" id="studioTabs"></div>
         <p class="studio-status" id="studioStatus"></p>
+        <button class="btn outline compact" id="cancelStudioJobBtn" type="button" hidden>停止任务</button>
         <button class="btn quiet compact" id="studioClose" type="button">关闭</button>
       </header>
       <div class="studio-body" id="studioBody"></div>

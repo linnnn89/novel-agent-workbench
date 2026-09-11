@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from math import ceil
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -21,7 +20,8 @@ from .config import (
 )
 from .context_previews import ContextUpdatePreviewService
 from .chapters import ChapterWorkflowService
-from .context_assembler import ContextAssemblerService, DEFAULT_CHARS_PER_TOKEN
+from .context_assembler import ContextAssemblerService
+from .token_budget import capacity_check, estimate_input_tokens, input_budget
 from .context_queue import ContextUpdateQueueService
 from .corpus_boundaries import CorpusBoundaryService
 from .corpus_profiler import profile_corpus
@@ -655,6 +655,7 @@ class WorkbenchApplicationService:
         base_url: str,
         adapter: str = "openai_compatible",
         timeout_seconds: float = 300.0,
+        thinking_protocol: str | None = None,
     ) -> dict[str, Any]:
         name = str(display_name or "").strip()
         if not name:
@@ -663,6 +664,9 @@ class WorkbenchApplicationService:
         settings = self._read_global_settings()
         profiles = settings.get("provider_profiles") if isinstance(settings.get("provider_profiles"), dict) else {}
         existing = profiles.get(clean_id) if isinstance(profiles.get(clean_id), dict) else {}
+        protocol = thinking_protocol if thinking_protocol is not None else existing.get("thinking_protocol", "auto")
+        if protocol not in {"auto", "deepseek", "openrouter", "siliconflow", "unsupported"}:
+            raise ValueError("不支持的思考控制接口。")
         adapter_id = str(adapter or existing.get("adapter") or "openai_compatible").strip()
         if get_provider_adapter(adapter_id) is None:
             raise ValueError(f"未注册的接入适配器：{adapter_id}")
@@ -676,6 +680,7 @@ class WorkbenchApplicationService:
                 "base_url": str(base_url or "").strip(),
                 "api_key_ref": key_ref,
                 "timeout_seconds": timeout_seconds,
+                "thinking_protocol": protocol,
                 "built_in": clean_id in BUILTIN_PROVIDER_PROFILES,
             },
         )
@@ -1100,10 +1105,10 @@ class WorkbenchApplicationService:
             title=title,
             instruction=instruction,
         )
-        input_limit = max_context_tokens or settings.get("context", {}).get("max_context_tokens") or 32768
-        input_limit = int(input_limit)
+        input_limit = input_budget(store.read_config(), requested=max_context_tokens,
+                                   feature_id="ai_refinement", role="reviser", max_tokens=max_tokens)
         mandatory_prompt = render_ai_refinement_prompt({}, draft=draft, review=review, instruction=instruction)
-        mandatory_tokens = estimate_refinement_input_tokens(system_prompt, mandatory_prompt)
+        mandatory_tokens = estimate_refinement_input_tokens(system_prompt, mandatory_prompt) + 512
         if mandatory_tokens >= input_limit:
             raise RuntimeError("原稿、审稿和精修要求的估算长度已达到上下文上限，请提高上下文 Token 上限后重试；未发送请求。")
         render = ContextAssemblerService(store).prompt_render_dry_run(
@@ -1150,6 +1155,7 @@ class WorkbenchApplicationService:
                         "draft_id": draft_id,
                         "review_id": str(review.get("review_id") or ""),
                         "context_aware_refinement": True,
+                        "input_token_limit": input_limit,
                     },
                 ),
             )
@@ -1859,40 +1865,15 @@ class WorkbenchApplicationService:
 
 
 def estimate_refinement_input_tokens(system_prompt: str, prompt: str) -> int:
-    # Use the existing estimator consistently; this is not a model tokenizer.
-    return ceil((len(system_prompt) + len(prompt)) / DEFAULT_CHARS_PER_TOKEN) + 16
+    return estimate_input_tokens(system_prompt, prompt)
 
 
 def refinement_capacity_check(
     config: dict[str, Any], prompt: str, system_prompt: str, *,
     input_limit: int, max_tokens: int | None, role: str,
 ) -> dict[str, Any]:
-    estimated_input = estimate_refinement_input_tokens(system_prompt, prompt)
-    if estimated_input > input_limit:
-        raise RuntimeError(
-            f"精修完整输入估算为 {estimated_input} tokens，超过上下文上限 {input_limit}；"
-            "请提高上限或减少上下文资料。原稿和审稿没有被截断，未发送请求。"
-        )
-    sampling = effective_generation_settings(config).get("sampling", {})
-    output_budget = int(max_tokens if max_tokens is not None else sampling.get("max_tokens") or 16)
-    ref = effective_model_ref(config, "ai_refinement", role)
-    model = config.get("model_profiles", {}).get(ref, {})
-    try:
-        context_limit = int(model.get("context_length") or 0)
-    except (TypeError, ValueError, OverflowError):
-        context_limit = 0
-    if context_limit > 0 and estimated_input + output_budget > context_limit:
-        raise RuntimeError(
-            f"精修输入估算 {estimated_input} 加输出预算 {output_budget} 超过模型上下文容量 "
-            f"{context_limit}；请减少上下文或输出预算，未发送请求。"
-        )
-    return {
-        "estimated_input_tokens": estimated_input,
-        "output_token_budget": output_budget,
-        "estimated_total_tokens": estimated_input + output_budget,
-        "model_context_limit": context_limit or None,
-        "token_estimator": f"ceil(chars / {DEFAULT_CHARS_PER_TOKEN}) + 16; approximate",
-    }
+    return capacity_check(config, prompt, system_prompt, feature_id="ai_refinement", role=role,
+                          input_limit=input_limit, max_tokens=max_tokens)
 
 
 def ai_refinement_system_prompt(project_system_prompt: str = "") -> str:

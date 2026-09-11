@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .chapters import chapter_id_number, chapter_number_width, format_chapter_id, format_chapter_number
-from .context_assembler import DEFAULT_CHARS_PER_TOKEN
+from .token_budget import count_text_tokens
 from .memory_bank import DEFAULT_MEMORY_TARGET_TOKENS, normalize_memory_target_tokens
 from .storage import DEFAULT_PROJECTS_DIRNAME
 
@@ -146,12 +146,7 @@ def memory_progress_number(memory_item: dict[str, Any]) -> int:
 
 
 def estimate_memory_text_tokens(text: str) -> int:
-    value = str(text or "").strip()
-    if not value:
-        return 0
-    cjk_chars = sum(1 for character in value if is_cjk_character(character))
-    other_chars = sum(1 for character in value if not character.isspace() and not is_cjk_character(character))
-    return cjk_chars + ceil(other_chars / DEFAULT_CHARS_PER_TOKEN)
+    return count_text_tokens(str(text or "").strip())
 
 
 def is_cjk_character(character: str) -> bool:

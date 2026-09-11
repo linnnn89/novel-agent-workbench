@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
-from math import ceil
 from typing import Any
 
 from .config import FORMAL_CONTEXT_PRIORITY_ORDER, effective_generation_settings
@@ -11,6 +10,7 @@ from .formal_context import FormalContextPlanService
 from .planning_library import item_id as planning_item_id
 from .planning_library import normalize_library
 from .storage import ProjectStore
+from .token_budget import DEFAULT_INPUT_BUDGET, count_text_tokens, estimate_input_tokens, tokenizer_description
 
 
 DEFAULT_CHARS_PER_TOKEN = 4
@@ -72,7 +72,7 @@ class ContextAssemblerService:
         self.store.initialize()
         config = self.store.read_config()
         context_policy = config.get("context_policy") if isinstance(config, dict) else {}
-        configured_budget = safe_int(context_policy.get("max_context_tokens"), default=32768)
+        configured_budget = safe_int(context_policy.get("max_context_tokens"), default=DEFAULT_INPUT_BUDGET)
         budget = max_context_tokens if isinstance(max_context_tokens, int) and max_context_tokens > 0 else configured_budget
         candidates = build_candidates(self.store)
         selected: list[dict[str, Any]] = []
@@ -101,8 +101,8 @@ class ContextAssemblerService:
                 "max_context_tokens": budget,
                 "estimated_used_tokens": used_tokens,
                 "estimated_remaining_tokens": max(budget - used_tokens, 0),
-                "estimator": f"ceil(chars / {DEFAULT_CHARS_PER_TOKEN})",
-                "real_tokenizer": "not_implemented",
+                "estimator": tokenizer_description(),
+                "real_tokenizer": "local_when_available; metadata_only_items_estimated",
             },
             provider_api_boundary={
                 "llm_api_accepts_priority_fields": False,
@@ -127,8 +127,8 @@ class ContextAssemblerService:
         self.store.initialize()
         config = self.store.read_config()
         context_policy = config.get("context_policy") if isinstance(config, dict) else {}
-        configured_budget = safe_int(context_policy.get("max_context_tokens"), default=32768)
-        budget = max_context_tokens if isinstance(max_context_tokens, int) and max_context_tokens > 0 else configured_budget
+        configured_budget = safe_int(context_policy.get("max_context_tokens"), default=DEFAULT_INPUT_BUDGET)
+        budget = max_context_tokens if isinstance(max_context_tokens, int) and max_context_tokens >= 0 else configured_budget
         package_items = planning_library_package_candidates(self.store, chapter_id=chapter_id, include_text=include_text)
         package_items.extend(memory_bank_package_candidates(self.store, include_text=include_text))
         package_items.extend(
@@ -173,8 +173,8 @@ class ContextAssemblerService:
                 "max_context_tokens": budget,
                 "estimated_used_tokens": used_tokens,
                 "estimated_remaining_tokens": max(budget - used_tokens, 0),
-                "estimator": f"ceil(chars / {DEFAULT_CHARS_PER_TOKEN})",
-                "real_tokenizer": "not_implemented",
+                "estimator": tokenizer_description(),
+                "real_tokenizer": "local_when_available",
             },
             provider_api_boundary={
                 "provider_called": False,
@@ -267,10 +267,8 @@ class ContextAssemblerService:
                 "target_chapter_chars": len(target_chapter_value),
                 "recent_confirmed_chapter_count": selected_recent_chapter_count(context_package["sections"]),
                 "estimated_total_chars": len(prompt_value) + len(system_prompt_value) + len(target_chapter_value) + context_chars,
-                "estimated_total_tokens": ceil(
-                    (len(prompt_value) + len(system_prompt_value) + len(target_chapter_value) + context_chars)
-                    / DEFAULT_CHARS_PER_TOKEN
-                ),
+                "estimated_total_tokens": estimate_input_tokens(system_prompt_value, prompt_value + target_chapter_value)
+                + sum(safe_int(item.get("estimated_tokens"), default=0) for item in context_package["sections"]),
             },
             context_package=context_package,
             rendered_messages=rendered_messages,
@@ -314,7 +312,7 @@ def planning_library_candidates(store: ProjectStore) -> list[dict[str, Any]]:
                 "title": item.get("title"),
                 "priority": safe_int(item.get("priority"), default=10),
                 "memory_weight": adherence_weight(str(item.get("adherence_level") or "balanced")),
-                "estimated_tokens": ceil(char_count / DEFAULT_CHARS_PER_TOKEN),
+                "estimated_tokens": count_text_tokens(text) if char_count else 0,
                 "char_count": char_count,
                 "reason": "active_planning_reference" if active else "planning_item_inactive",
                 "contains_text": False,
@@ -342,7 +340,7 @@ def formal_context_plan_candidates(store: ProjectStore) -> list[dict[str, Any]]:
                 continue
             category_id = str(category.get("category_id") or "")
             memory_weight = safe_float(category.get("memory_weight"), default=1.0)
-            estimated_tokens = ceil((char_count * memory_weight) / DEFAULT_CHARS_PER_TOKEN)
+            estimated_tokens = char_count  # Metadata-only: conservatively allow one token per character.
             candidates.append(
                 {
                     "source_type": "formal_context_plan",
@@ -383,7 +381,7 @@ def memory_bank_candidates(store: ProjectStore) -> list[dict[str, Any]]:
                 "category_id": category_id,
                 "priority": priority_rank(category_id),
                 "memory_weight": memory_weight,
-                "estimated_tokens": ceil((char_count * memory_weight) / DEFAULT_CHARS_PER_TOKEN),
+                "estimated_tokens": count_text_tokens(str(item.get("text") or "")) or char_count,
                 "char_count": char_count,
                 "reason": "existing_memory_bank_item" if enabled else "memory_item_disabled",
                 "contains_text": False,
@@ -418,7 +416,7 @@ def memory_bank_package_candidates(store: ProjectStore, *, include_text: bool) -
             "section_order": 40,
             "priority": priority_rank(category_id),
             "memory_weight": memory_weight,
-            "estimated_tokens": ceil((len(text) * memory_weight) / DEFAULT_CHARS_PER_TOKEN),
+            "estimated_tokens": count_text_tokens(text) + (32 if text else 0),
             "char_count": len(text),
             "text_status": item.get("text_status"),
             "ready": ready,
@@ -477,7 +475,7 @@ def recent_confirmed_chapter_package_candidates(
             "section_order": 80,
             "priority": 80 + index,
             "memory_weight": 1.0,
-            "estimated_tokens": ceil(len(text) / DEFAULT_CHARS_PER_TOKEN),
+            "estimated_tokens": count_text_tokens(text) + (32 if text else 0),
             "char_count": len(text),
             "text_status": "confirmed_chapter",
             "ready": ready,
@@ -541,7 +539,7 @@ def planning_library_package_candidates(
             "section_order": planning_section_order(item_type),
             "priority": safe_int(item.get("priority"), default=10),
             "memory_weight": adherence_weight(str(item.get("adherence_level") or "balanced")),
-            "estimated_tokens": ceil(char_count / DEFAULT_CHARS_PER_TOKEN),
+            "estimated_tokens": count_text_tokens(text) + 32 if char_count else 0,
             "char_count": char_count,
             "original_char_count": original_char_count,
             "chapter_plan_extract_status": chapter_plan_extract_status,
@@ -720,8 +718,8 @@ def context_warnings(store: ProjectStore) -> list[str]:
     policy = config.get("context_policy") if isinstance(config, dict) else {}
     warnings: list[str] = [
         "dry_run_only_no_provider_call",
-        "real_tokenizer_not_implemented",
-        "final_prompt_rendering_not_implemented",
+        "token_counts_are_estimates_until_provider_usage_returns",
+        "complete_provider_request_checked_again_before_sending",
     ]
     if isinstance(policy, dict) and policy.get("world_book_enabled"):
         warnings.append("world_book_enabled_world_building_memory_weight_may_be_reduced")

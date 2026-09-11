@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .storage import atomic_write_json_file
+from .task_control import open_request, check_cancelled, current_job
 
 
 MODEL_CATALOG_CACHE_FILENAME = "model_catalog_cache.json"
@@ -74,14 +75,19 @@ def fetch_model_catalog(
         method="GET",
     )
     try:
-        with urllib.request.urlopen(request, timeout=min(60.0, max(1.0, float(timeout_seconds)))) as response:
+        with open_request(request, timeout=min(60.0, max(1.0, float(timeout_seconds)))) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise ModelCatalogError(f"模型目录请求失败：HTTP {int(exc.code)}。") from exc
     except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
+        check_cancelled()
         raise ModelCatalogError(f"模型目录请求失败：{exc}") from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ModelCatalogError("模型目录返回了无法解析的 JSON。") from exc
+    check_cancelled()
+    control = current_job()
+    if control:
+        control.begin_saving()
     return normalize_catalog_payload(payload, provider_profile_id=provider_profile_id)
 
 

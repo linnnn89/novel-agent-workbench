@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+from hashlib import sha256
 import socket
 import time
 import urllib.error
@@ -10,14 +12,16 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from .config import default_model_role
+from .config import default_model_role, effective_generation_settings
 from .model_settings import (
     FEATURE_IDS,
     draft_reasoning_effort_from_settings,
-    is_deepseek_v4_flash_0731,
+    supports_deepseek_thinking,
     resolve_model_role_mapping,
 )
 from .storage import ProjectStore, utc_stamp
+from .token_budget import capacity_check
+from .task_control import check_cancelled, current_job, interruptible_wait, open_request
 
 
 MODEL_ROLES = {"writer", "scorer", "reviser"}
@@ -182,7 +186,7 @@ class ProviderRealTestResult:
     error_type: str
     base_url_host: str
     finish_reason: str
-    usage: dict[str, int]
+    usage: dict[str, Any]
     response_text_chars: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -238,7 +242,7 @@ class ProviderRequest:
 @dataclass(frozen=True, slots=True)
 class ProviderResponse:
     text: str
-    usage: dict[str, int]
+    usage: dict[str, Any]
     model: str
     provider: str
     finish_reason: str
@@ -358,6 +362,7 @@ class OpenAICompatibleProviderClient(ProviderClient):
             request = replace(request, stream_callback=on_content, reasoning_callback=on_reasoning)
         retry_delays = TRANSIENT_PROVIDER_RETRY_DELAYS_SECONDS
         for attempt_index in range(len(retry_delays) + 1):
+            check_cancelled()
             try:
                 status_code, data = send_openai_compatible_chat_completion(
                     role_config=self.role_config,
@@ -369,6 +374,7 @@ class OpenAICompatibleProviderClient(ProviderClient):
             except urllib.error.HTTPError as exc:
                 raise ProviderError(f"HTTP error {int(exc.code)} from provider.", error_type="http_error") from exc
             except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
+                check_cancelled()
                 if emitted:
                     raise ProviderError(
                         "模型已开始输出后连接中断，未自动重试或保存为完成稿。",
@@ -378,7 +384,7 @@ class OpenAICompatibleProviderClient(ProviderClient):
                     attempts = attempt_index + 1
                     message = f"{network_error_message('provider generation', exc)} Attempts: {attempts}."
                     raise ProviderError(message, error_type="network_error") from exc
-                time.sleep(retry_delays[attempt_index])
+                interruptible_wait(retry_delays[attempt_index])
         if not 200 <= status_code < 300:
             raise ProviderError(f"HTTP error {status_code} from provider.", error_type="http_error")
         first_choice = first_response_choice(data)
@@ -717,18 +723,33 @@ def real_generation_blocking_audit_codes(store: ProjectStore) -> list[str]:
 
 def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> ProviderResponse:
     call_id = str(uuid4())
+    started_at = time.monotonic()
     client: ProviderClient | None = None
     try:
         client = create_provider_client(store, request.role, feature_id=request.feature_id)
+        check_cancelled()
+        if request.max_tokens is None:
+            request = replace(request, max_tokens=int(effective_generation_settings(store.read_config()).get("sampling", {}).get("max_tokens") or 16))
+        capacity = capacity_check(store.read_config(), request.prompt, request.system_prompt or "",
+                                  feature_id=request.feature_id, role=request.role,
+                                  max_tokens=request.max_tokens, model=client.role_config.model,
+                                  input_limit=request.metadata.get("input_token_limit"))
+        request = replace(request, metadata={**request.metadata, **capacity})
         extra = {}
         if request.feature_id in {"draft_generation", "ai_refinement"}:
-            extra = v4_flash_0731_thinking_payload(
+            extra = deepseek_thinking_switch_payload(
                 client.role_config,
                 draft_reasoning_effort_from_settings(store.read_config()),
             )
         if extra:
             request = replace(request, extra_body={**dict(request.extra_body or {}), **extra})
+        control = current_job()
+        if control:
+            control.start_request()
         response = client.generate(request)
+        if control:
+            control.begin_saving()
+        request = replace(request, metadata={**request.metadata, "elapsed_seconds": round(time.monotonic() - started_at, 3)})
         append_provider_call_log(
             store,
             provider_call_log_entry(
@@ -1154,13 +1175,14 @@ def send_openai_compatible_chat_completion(
         http_request.add_header("Authorization", f"Bearer {api_key}")
     if role_config.provider == OPENROUTER_PROVIDER_ID:
         http_request.add_header("X-OpenRouter-Title", "NovelAgentWorkbench")
-    with urllib.request.urlopen(http_request, timeout=timeout_seconds) as response:
+    with open_request(http_request, timeout=timeout_seconds) as response:
         status_code = int(getattr(response, "status", 200))
         if stream_response:
             return status_code, read_openai_compatible_stream_response(
                 response,
                 stream_callback=request.stream_callback,
                 reasoning_callback=request.reasoning_callback,
+                idle_timeout_seconds=timeout_seconds,
             )
         response_body = response.read()
     return status_code, parse_openai_compatible_json_response(response_body)
@@ -1184,16 +1206,6 @@ def http_response_socket(response: Any) -> Any | None:
         if candidate is not None and hasattr(candidate, "settimeout"):
             return candidate
     return None
-
-
-def clear_http_response_timeout(response: Any) -> None:
-    sock = http_response_socket(response)
-    if sock is None:
-        return
-    try:
-        sock.settimeout(None)
-    except OSError:
-        return
 
 
 def parse_openai_compatible_json_response(response_body: bytes) -> dict[str, Any]:
@@ -1244,6 +1256,7 @@ def read_openai_compatible_stream_response(
     *,
     stream_callback: Callable[[str], None] | None = None,
     reasoning_callback: Callable[[str], None] | None = None,
+    idle_timeout_seconds: float = 300.0,
 ) -> dict[str, Any]:
     if not hasattr(response, "readline"):
         return parse_openai_compatible_json_response(response.read())
@@ -1251,9 +1264,13 @@ def read_openai_compatible_stream_response(
     finish_reason = ""
     completed = False
     usage: dict[str, Any] = {}
-    idle_timeout_cleared = False
+    last_progress = time.monotonic()
     while True:
+        check_cancelled()
         line = response.readline()
+        check_cancelled()
+        if time.monotonic() - last_progress > idle_timeout_seconds:
+            raise ProviderError("模型长时间没有输出内容或思考，已停止等待。", error_type="stream_timeout")
         if not line:
             break
         stripped = line.strip()
@@ -1287,10 +1304,9 @@ def read_openai_compatible_stream_response(
         if content is None:
             content = message.get("content") if isinstance(message, dict) else ""
         reasoning_content = extract_stream_reasoning(delta, message)
+        if reasoning_content or content:
+            last_progress = time.monotonic()
         if reasoning_content:
-            if not idle_timeout_cleared:
-                clear_http_response_timeout(response)
-                idle_timeout_cleared = True
             if reasoning_callback is not None:
                 reasoning_callback(reasoning_content)
         if content:
@@ -1348,24 +1364,48 @@ def provider_request_format(role_config: ModelRoleConfig) -> str:
 
 
 def provider_format_payload(role_config: ModelRoleConfig) -> dict[str, Any]:
+    if role_config.settings.get("thinking_protocol") == "unsupported":
+        return {}
     if role_config.provider == DEEPSEEK_PROVIDER_ID:
         return {"thinking": deepseek_thinking_payload(role_config)}
     return {}
 
 
-def v4_flash_0731_thinking_payload(role_config: ModelRoleConfig, effort: str) -> dict[str, Any]:
-    if not is_deepseek_v4_flash_0731(role_config.model):
+def deepseek_thinking_switch_payload(role_config: ModelRoleConfig, effort: str) -> dict[str, Any]:
+    protocol = str(role_config.settings.get("thinking_protocol") or "auto").lower()
+    if protocol == "unsupported":
         return {}
+    if protocol == "auto":
+        if not supports_deepseek_thinking(role_config.model):
+            return {}
+        if role_config.provider == OPENROUTER_PROVIDER_ID:
+            protocol = "openrouter"
+        elif role_config.provider == CHUTES_PROVIDER_ID:
+            protocol = "openrouter"
+        elif role_config.provider == SILICONFLOW_PROVIDER_ID:
+            protocol = "siliconflow"
+        elif role_config.provider == DEEPSEEK_PROVIDER_ID or safe_url_host(role_config.base_url) == "api.deepseek.com":
+            protocol = "deepseek"
+        else:
+            return {}
     level = str(effort or "none").strip().lower()
     if level not in {"none", "low", "high", "max"}:
         level = "none"
-    if role_config.provider == DEEPSEEK_PROVIDER_ID:
+    if protocol == "siliconflow":
+        return {"enable_thinking": level != "none"}
+    if protocol == "deepseek":
         if level == "none":
             return {"thinking": {"type": "disabled"}}
         return {"thinking": {"type": "enabled"}, "reasoning_effort": level}
+    if protocol != "openrouter":
+        return {}
     if level == "none":
         return {"reasoning": {"enabled": False}}
     return {"reasoning": {"enabled": True, "effort": level}}
+
+
+# Backwards compatibility for local scripts importing the former function name.
+v4_flash_0731_thinking_payload = deepseek_thinking_switch_payload
 
 
 def deepseek_thinking_payload(role_config: ModelRoleConfig) -> dict[str, Any]:
@@ -1390,13 +1430,19 @@ def thinking_mode_restricts_sampling(request: ProviderRequest, role_config: Mode
     if str(extra.get("reasoning_effort") or "").strip().lower() in {"low", "high", "max"}:
         return True
     reasoning = extra.get("reasoning")
+    if isinstance(reasoning, dict) and reasoning.get("enabled") is False:
+        return False
     if isinstance(reasoning, dict) and str(reasoning.get("effort") or "").strip().lower() in {"low", "high", "max"}:
         return True
     thinking = extra.get("thinking")
+    if isinstance(thinking, dict) and thinking.get("type") == "disabled":
+        return False
+    if extra.get("enable_thinking") is True:
+        return True
     if isinstance(thinking, dict) and str(thinking.get("type") or "").strip().lower() == "enabled":
         return True
     if role_config.provider == DEEPSEEK_PROVIDER_ID:
-        return deepseek_thinking_payload(role_config).get("type") == "enabled"
+        return role_config.settings.get("thinking_protocol") != "unsupported" and deepseek_thinking_payload(role_config).get("type") == "enabled"
     return False
 
 
@@ -1406,7 +1452,7 @@ def provider_supported_sampling_keys(role_config: ModelRoleConfig, request: Prov
     if request is not None and thinking_mode_restricts_sampling(request, role_config):
         return {"max_tokens", "stream"}
     if provider == DEEPSEEK_PROVIDER_ID:
-        if deepseek_thinking_payload(role_config).get("type") == "enabled":
+        if request is None and deepseek_thinking_payload(role_config).get("type") == "enabled":
             return {"max_tokens", "stream"}
         return keys
     if provider == OPENROUTER_PROVIDER_ID:
@@ -1483,8 +1529,8 @@ def choice_text(choice: dict[str, Any]) -> str:
     return str(content or "")
 
 
-def safe_usage(value: dict[str, Any]) -> dict[str, int]:
-    safe: dict[str, int] = {}
+def safe_usage(value: dict[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
     for key in (
         "prompt_tokens",
         "completion_tokens",
@@ -1493,8 +1539,24 @@ def safe_usage(value: dict[str, Any]) -> dict[str, int]:
         "prompt_cache_miss_tokens",
     ):
         item = value.get(key)
-        if isinstance(item, int):
+        if isinstance(item, int) and not isinstance(item, bool) and item >= 0:
             safe[key] = item
+    for group, keys in (("prompt_tokens_details", ("cached_tokens", "cache_write_tokens")),
+                        ("completion_tokens_details", ("reasoning_tokens",))):
+        details = value.get(group)
+        if isinstance(details, dict):
+            clean = {key: details[key] for key in keys
+                     if type(details.get(key)) is int and details[key] >= 0}
+            if clean:
+                safe[group] = clean
+    cached = safe.get("prompt_tokens_details", {}).get("cached_tokens")
+    if cached is not None:
+        safe.setdefault("prompt_cache_hit_tokens", cached)
+        if "prompt_tokens" in safe:
+            safe.setdefault("prompt_cache_miss_tokens", max(0, safe["prompt_tokens"] - cached))
+    cost = value.get("cost")
+    if type(cost) in (int, float) and math.isfinite(cost) and cost >= 0:
+        safe["cost"] = cost
     return safe
 
 
@@ -1585,12 +1647,13 @@ def provider_call_log_entry(
     role_config: ModelRoleConfig,
     status: str,
     error_type: str,
-    usage: dict[str, int],
+    usage: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "call_id": call_id,
         "timestamp": utc_stamp(),
         "role": request.role,
+        "feature_id": request.feature_id,
         "provider": role_config.provider,
         "model": role_config.model,
         "status": status,
@@ -1600,6 +1663,10 @@ def provider_call_log_entry(
             "prompt_chars": len(request.prompt),
             "system_prompt_chars": len(request.system_prompt or ""),
             "metadata_keys": sorted(str(key) for key in request.metadata),
+            "estimated_input_tokens": request.metadata.get("estimated_input_tokens"),
+            "token_estimator": request.metadata.get("token_estimator"),
+            "elapsed_seconds": request.metadata.get("elapsed_seconds"),
+            "system_prompt_sha256": sha256((request.system_prompt or "").encode("utf-8")).hexdigest(),
         },
     }
 
