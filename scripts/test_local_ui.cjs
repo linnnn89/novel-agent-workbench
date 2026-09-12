@@ -106,10 +106,11 @@ async function check(name, test) { await test(); checks++; console.log(`PASS ${n
     const c = harness();
     c.call = async (name) => {
       if (name === "save_draft") throw new Error("写入失败");
+      if (name === "chapter_input") return { chapter_id: "chapter_2", title: "", prompt: "写作" };
       assert.equal(name, "suggest_chapter"); return { chapter_id: "chapter_2", default_prompt: "写作" };
     };
     // Inputs and form layout are presentation-only doubles.
-    c.input = value => ({ value }); c.field = () => ({});
+    c.input = value => ({ value, addEventListener() {} }); c.field = () => ({});
     await c.generateChapter();
     await c.dialog.actions.find(a => a.label === "生成草稿").onClick();
     assert.equal(c.S.draftId, "old"); assert.equal(c.get("editor").value, "尚未保存的新正文");
