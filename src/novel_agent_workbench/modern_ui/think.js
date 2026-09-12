@@ -12,6 +12,8 @@ const ThinkTrace = (() => {
   let timer = null;
   let home = null;
   let homeNext = null;
+  let follow = true;
+  let scrollPosition = 0;
 
   function mount(host) {
     const bar = el("thinkBar");
@@ -52,33 +54,41 @@ const ThinkTrace = (() => {
     expanded = Boolean(open);
     const body = el("thinkBarBody");
     const toggle = el("thinkBarToggle");
-    if (body) body.hidden = !expanded;
+    if (body) {
+      if (!body.hidden) scrollPosition = body.scrollTop;
+      body.hidden = !expanded;
+      if (expanded) body.scrollTop = follow ? body.scrollHeight : scrollPosition;
+    }
     if (toggle) toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  }
+
+  function renderTime() {
+    const meta = el("thinkBarMeta");
+    if (!meta) return;
+    const secs = seconds();
+    meta.textContent = secs ? `${phase === "sent" ? "已等待 " : ""}${secs}s` : "";
   }
 
   function render() {
     const bar = el("thinkBar");
     const title = el("thinkBarTitle");
-    const meta = el("thinkBarMeta");
     const body = el("thinkBarBody");
     if (!bar || !title || !body) return;
     bar.classList.toggle("active", phase === "sent" || phase === "thinking" || phase === "writing");
     bar.classList.toggle("done", phase === "done");
     bar.classList.toggle("failed", phase === "failed");
     title.textContent = titleForPhase();
-    const secs = seconds();
-    if (meta) {
-      if (phase === "done" || phase === "failed") meta.textContent = secs ? `${secs}s` : "";
-      else if (phase === "thinking" || phase === "writing") meta.textContent = secs ? `${secs}s` : "";
-      else meta.textContent = secs ? `已等待 ${secs}s` : "";
+    renderTime();
+    const content = text || ({
+      thinking: "模型已接入，正在思考…",
+      writing: "模型已接入，正在输出正文。这次没有单独的思考链。",
+      done: "这次没有单独的思考链。",
+      failed: "请求已结束。",
+    }[phase] || WAITING);
+    if (body.textContent !== content) {
+      body.textContent = content;
+      if (!body.hidden) body.scrollTop = follow ? body.scrollHeight : scrollPosition;
     }
-    if (text) body.textContent = text;
-    else if (phase === "thinking") body.textContent = "模型已接入，正在思考…";
-    else if (phase === "writing") body.textContent = "模型已接入，正在输出正文。这次没有单独的思考链。";
-    else if (phase === "done") body.textContent = "这次没有单独的思考链。";
-    else if (phase === "failed") body.textContent = "请求已结束。";
-    else body.textContent = WAITING;
-    if (text) body.scrollTop = body.scrollHeight;
   }
 
   function show() {
@@ -99,12 +109,14 @@ const ThinkTrace = (() => {
     phase = "sent";
     text = "";
     dismissed = false;
+    follow = true;
+    scrollPosition = 0;
     startedAt = Date.now();
     elapsed = 0;
     render();
     setExpanded(true);
     show();
-    timer = setInterval(render, 1000);
+    timer = setInterval(renderTime, 1000);
     return activeJob;
   }
 
@@ -114,21 +126,16 @@ const ThinkTrace = (() => {
     if (nextPhase === "thinking" && phase === "writing") return;
     phase = nextPhase;
     render();
-    if (!dismissed && (phase === "sent" || phase === "thinking" || (phase === "writing" && !text))) {
-      setExpanded(true);
-      show();
-    }
+    if (!dismissed) show();
   }
 
   function append(chunk) {
     const piece = String(chunk || "");
     if (!piece || phase === "idle") return;
-    phase = "thinking";
-    dismissed = false;
+    if (phase !== "writing") phase = "thinking";
     text += piece;
     render();
-    setExpanded(true);
-    show();
+    if (!dismissed) show();
   }
 
   function finish(ok) {
@@ -137,7 +144,7 @@ const ThinkTrace = (() => {
     elapsed = startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 1000)) : 0;
     phase = ok === false ? "failed" : "done";
     render();
-    if (!text) {
+    if (!text || dismissed) {
       hide();
       return;
     }
@@ -188,6 +195,12 @@ const ThinkTrace = (() => {
         setExpanded(!expanded);
       });
     }
+    const body = el("thinkBarBody");
+    body?.addEventListener("scroll", () => {
+      if (body.hidden || el("thinkBar")?.hidden) return;
+      scrollPosition = body.scrollTop;
+      follow = body.scrollHeight - body.clientHeight - body.scrollTop < 48;
+    });
     bound = true;
   }
 

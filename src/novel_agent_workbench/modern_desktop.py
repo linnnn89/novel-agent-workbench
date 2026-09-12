@@ -47,7 +47,7 @@ from .config import default_generation_settings
 from .memory_bank import normalize_memory_target_tokens
 from .model_settings import FEATURE_DEFINITIONS
 from .providers import format_prompt_cache_usage
-from .reviews import REVIEW_TRUNCATED_NOTICE, review_output_truncated
+from .reviews import REVIEW_TRUNCATED_NOTICE, draft_content_fingerprint, review_output_truncated
 from .storage import ProjectLockError, atomic_write_json_file, utc_stamp
 
 
@@ -658,8 +658,20 @@ class WorkbenchBridge:
         if draft_id not in draft_ids:
             draft_ids.append(draft_id)
         index = draft_ids.index(draft_id)
+        has_review = False
         try:
             review = self.app.find_ai_review_for_draft(project_id, draft_id)
+            has_review = review is not None
+            # A current, truncated review remains readable, but cannot authorize refinement.
+            if review is None:
+                fingerprint = draft_content_fingerprint(draft.get("content"))
+                for entry in reversed(self.app.list_reviews(project_id)):
+                    if entry.get("draft_id") != draft_id or entry.get("review_type") != "ai":
+                        continue
+                    candidate = self.app.read_review(project_id, str(entry.get("review_id") or ""))
+                    if review_output_truncated(candidate) and candidate.get("source_content_sha256") == fingerprint:
+                        review = candidate
+                        break
         except Exception:
             review = None
         return _ok(
@@ -675,7 +687,7 @@ class WorkbenchBridge:
                 "output_incomplete": bool(draft.get("output_incomplete")),
                 "draft_ids": draft_ids,
                 "index": index,
-                "has_review": review is not None,
+                "has_review": has_review,
                 "review": self._review_payload(project_id, review) if review else None,
             }
         )
@@ -996,20 +1008,24 @@ class WorkbenchBridge:
         chapter_ids = [str(item) for item in (data.get("chapter_ids") or []) if str(item)]
         target = normalize_memory_target_tokens(data.get("target_tokens"))
         try:
-            self.app.set_memory_text(
-                project_id,
-                memory_id,
-                text,
-                source_chapter_ids=chapter_ids,
-                target_token_budget=target,
-            )
-            self.app.set_memory_item_enabled(
-                project_id,
-                memory_id,
-                enabled=bool(data.get("enabled", True)),
-                reason_code="modern_toggle",
-                target_token_budget=target,
-            )
+            # Share the job-start lock so a UI regression cannot save across an active request.
+            with self._busy_lock:
+                if self._busy:
+                    return _fail("任务正在进行，记忆尚未保存。请停止或等待任务结束后再保存。")
+                self.app.set_memory_text(
+                    project_id,
+                    memory_id,
+                    text,
+                    source_chapter_ids=chapter_ids,
+                    target_token_budget=target,
+                )
+                self.app.set_memory_item_enabled(
+                    project_id,
+                    memory_id,
+                    enabled=bool(data.get("enabled", True)),
+                    reason_code="modern_toggle",
+                    target_token_budget=target,
+                )
         except Exception as exc:
             return _fail(f"保存记忆库失败: {exc}")
         return self.memory_state(project_id)

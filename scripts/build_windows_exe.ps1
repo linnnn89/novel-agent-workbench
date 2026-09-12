@@ -207,6 +207,12 @@ try {
         Write-Host "[3/6] Skipping dependency install"
     }
 
+    Write-Host "Checking critical UI workflows with isolated test data"
+    & $VenvPython scripts\verify_feedback_ui.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "Critical UI workflow checks failed. Build stopped; the installed program is unchanged."
+    }
+
     if ($RegenerateIcon -or -not (Test-Path $IconPath)) {
         Write-Host "[4/6] Regenerating Windows icon"
         & $VenvPython scripts\generate_windows_icon.py

@@ -119,6 +119,8 @@ async function closeStudio({ discard = false } = {}) {
   studio.memoryLive = null;
   studio.memoryBusy = false;
   studio.memoryLiveText = "";
+  studio.memoryResultChapterIds = null;
+  studio.memoryJobChapterIds = null;
   studio.savedForm = "";
   studio.modelEdit = null;
   refreshStudioSaveStatus();
@@ -751,6 +753,8 @@ async function openMemoryStudio() {
   studio.memoryLive = null;
   studio.memoryBusy = false;
   studio.memoryLiveText = "";
+  studio.memoryResultChapterIds = null;
+  studio.memoryJobChapterIds = null;
   openStudioShell({ kicker: currentProject()?.title || state.projectId, title: "记忆库" });
   $("studioTabs").innerHTML = "";
   studio.memory = await call("memory_state", state.projectId);
@@ -771,18 +775,21 @@ function renderMemoryStudio() {
   const rec = el("button", "btn quiet compact", "勾选建议");
   rec.type = "button";
   rec.addEventListener("click", () => {
+    if (studio.memoryBusy) return;
     studio.checked = new Set(data.recommended || []);
     renderMemoryStudio();
   });
   const all = el("button", "btn quiet compact", "全选");
   all.type = "button";
   all.addEventListener("click", () => {
+    if (studio.memoryBusy) return;
     studio.checked = new Set((data.chapters || []).map((item) => item.chapter_id));
     renderMemoryStudio();
   });
   const none = el("button", "btn quiet compact", "清空");
   none.type = "button";
   none.addEventListener("click", () => {
+    if (studio.memoryBusy) return;
     studio.checked = new Set();
     renderMemoryStudio();
   });
@@ -795,6 +802,7 @@ function renderMemoryStudio() {
     box.type = "checkbox";
     box.checked = studio.checked.has(chapter.chapter_id);
     box.addEventListener("change", () => {
+      if (studio.memoryBusy) return;
       if (box.checked) studio.checked.add(chapter.chapter_id);
       else studio.checked.delete(chapter.chapter_id);
       renderMemoryStudio();
@@ -871,6 +879,16 @@ function renderMemoryStudio() {
   const body = $("studioBody");
   body.innerHTML = "";
   body.append(wrap);
+  syncMemoryBusy();
+}
+
+function syncMemoryBusy() {
+  if (studio.mode !== "memory") return;
+  // Keep the trace and Stop button usable while protecting the request's inputs.
+  $("studioBody").querySelectorAll("input, select, button").forEach(control => {
+    control.disabled = Boolean(studio.memoryBusy);
+  });
+  if (studio.memoryEditor) studio.memoryEditor.readOnly = Boolean(studio.memoryBusy);
 }
 
 async function saveMemoryStudio() {
@@ -881,11 +899,12 @@ async function saveMemoryStudio() {
       project_id: state.projectId,
       memory_id: studio.memory.memory?.memory_id || "main_memory_bank",
       text: studio.memoryEditor.value,
-      chapter_ids: [...studio.checked],
+      chapter_ids: [...(studio.memoryResultChapterIds ?? studio.checked)],
       target_tokens: studio.memoryTarget.value,
       enabled: studio.memoryEnabled.checked,
     });
     studio.checked = new Set();
+    studio.memoryResultChapterIds = null;
     renderMemoryStudio();
     markStudioSaved();
     loadOverview(state.projectId).catch(() => {});
@@ -938,6 +957,8 @@ async function reloadMemoryStudio() {
     studio.checked = new Set(studio.memory.recommended || []);
     studio.memoryLiveText = "";
     studio.memoryBusy = false;
+    studio.memoryResultChapterIds = null;
+    studio.memoryJobChapterIds = null;
     renderMemoryStudio();
     markStudioSaved();
     toast("已从磁盘重新加载已保存记忆。");
@@ -977,13 +998,19 @@ async function previewMemory(kind, view) {
 }
 
 async function runMemoryJob(name, label) {
-  if (!studio.memoryEditor) return;
+  if (!studio.memoryEditor || studio.saving) return;
   if (blockIfGenerating() || !(await flushSave()).ok || blockIfGenerating()) return;
+  const request = memoryJobPayload();
+  // An unsaved result may be extended or compressed before the user saves it.
+  studio.memoryJobChapterIds = [...new Set([
+    ...(studio.memoryResultChapterIds || []),
+    ...(name === "generate_memory" ? request.chapter_ids : []),
+  ])];
   studio.followMemory = true;
   studio.memoryBackup = studio.memoryEditor.value;
   studio.memoryLiveText = "";
   studio.memoryBusy = true;
-  studio.memoryEditor.readOnly = true;
+  syncMemoryBusy();
   setBusy(true, label || "正在处理记忆…", { veil: false });
   if (studio.memoryLive) {
     studio.memoryLive.hidden = false;
@@ -992,27 +1019,20 @@ async function runMemoryJob(name, label) {
   ThinkTrace.start();
   setStudioStatus(label || "请求已发出，正在等待模型接入…");
   try {
-    await call(name, memoryJobPayload());
+    await call(name, request);
   } catch (error) {
-    setBusy(false);
-    studio.memoryBusy = false;
-    ThinkTrace.finish(false);
-    if (studio.memoryEditor && studio.memoryBackup != null) {
-      studio.memoryEditor.value = studio.memoryBackup;
-      studio.memoryEditor.readOnly = false;
-    }
-    setStudioStatus("");
-    toast(error.message);
+    finishMemoryJob({ ok: false, error: error.message, cancelled: error.cancelled });
   }
 }
 
 function finishMemoryJob(payload) {
   setBusy(false);
-  if (studio.memoryEditor) studio.memoryEditor.readOnly = false;
   if (studio.mode !== "memory") return;
   studio.memoryBusy = false;
+  syncMemoryBusy();
   ThinkTrace.finish(payload?.ok !== false);
   if (!payload?.ok) {
+    studio.memoryJobChapterIds = null;
     if (studio.memoryEditor && studio.memoryBackup != null) {
       studio.memoryEditor.value = studio.memoryBackup;
     }
@@ -1023,7 +1043,9 @@ function finishMemoryJob(payload) {
   const text = payload.data?.text || studio.memoryLiveText || "";
   if (studio.memoryEditor && text) {
     studio.memoryEditor.value = text;
+    studio.memoryResultChapterIds = studio.memoryJobChapterIds;
   }
+  studio.memoryJobChapterIds = null;
   studio.memoryLiveText = "";
   if (studio.memoryLive) {
     studio.memoryLive.textContent = "";

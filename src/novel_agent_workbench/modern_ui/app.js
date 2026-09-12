@@ -26,6 +26,7 @@ const state = {
   hasReview: false,
   reviewBadge: false,
   reviewText: "",
+  reviewNotice: "",
   model: null,
   lastSavedAt: 0,
   projectId: "",
@@ -752,6 +753,8 @@ async function selectProject(projectId) {
     state.draftIndex = -1;
     state.hasReview = false;
     state.reviewText = "";
+    state.reviewNotice = "";
+    state.reviewBox = null;
     state.dirty = false;
     state.savedSnapshot = null;
     state.inputBudgetNotice = null;
@@ -815,6 +818,8 @@ async function openChapter(projectId, chapter) {
     $("versionLabel").textContent = "—";
     state.hasReview = false;
     state.reviewText = "";
+    state.reviewNotice = "";
+    state.reviewBox = null;
     setReviewBadge(false);
     updateDock();
     if (state.inspectorTab === "review") renderInspector();
@@ -855,6 +860,8 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
   state.saveError = "";
   state.hasReview = Boolean(draft.has_review);
   state.reviewText = draft.review?.details || draft.review?.comment || "";
+  state.reviewNotice = draft.review?.truncated ? "审稿意见被截断，可能不完整。可阅读或复制；请重新审稿后再精修。" : "";
+  state.reviewBox = null;
   setReviewBadge(false);
   state.lastSavedAt = Date.now();
   updateCountPill();
@@ -1067,7 +1074,7 @@ function beginStream(projectId, chapterId, title) {
   state.streamSource = { projectId: state.projectId, chapterId: state.chapterId, draftId: state.draftId,
     draftIds: [...state.draftIds], draftIndex: state.draftIndex, content: $("editor").value,
     title: $("draftTitle").textContent, hint: $("draftHint").textContent,
-    version: $("versionLabel").textContent, hasReview: state.hasReview, reviewText: state.reviewText };
+    version: $("versionLabel").textContent, hasReview: state.hasReview, reviewText: state.reviewText, reviewNotice: state.reviewNotice };
   state.follow = true;
   state.streamProjectId = projectId;
   state.streamChapterId = chapterId;
@@ -1103,7 +1110,7 @@ async function finishDraft(payload) {
     const source = state.streamSource;
     if (source) {
       Object.assign(state, { projectId: source.projectId, chapterId: source.chapterId, draftId: source.draftId,
-        draftIds: source.draftIds, draftIndex: source.draftIndex, hasReview: source.hasReview, reviewText: source.reviewText });
+        draftIds: source.draftIds, draftIndex: source.draftIndex, hasReview: source.hasReview, reviewText: source.reviewText, reviewNotice: source.reviewNotice });
       $("editor").value = source.content;
       $("draftTitle").textContent = source.title;
       $("draftHint").textContent = source.hint;
@@ -1206,6 +1213,7 @@ async function reviewDraft() {
   box.className = "review-stream";
   box.textContent = "";
   state.reviewBox = box;
+  state.reviewNotice = "";
   setInspectorTab("review");
   const pane = $("pane-review");
   pane.innerHTML = "";
@@ -1217,32 +1225,31 @@ async function reviewDraft() {
     const result = await call("ai_review", state.projectId, state.draftId);
     if (result?.existing) {
       state.inputBudgetRetry = null;
-      setBusy(false);
-      ThinkTrace.finish(true);
-      state.hasReview = true;
-      state.reviewText = result.review.details || result.review.comment || "";
-      updateDock();
-      setInspectorTab("review");
-      if (result.review.truncated) toast(result.review.truncated_notice || "审稿意见被截断，可能不完整。");
+      finishReview({ ok: true, data: result.review });
       return;
     }
   } catch (error) {
-    setBusy(false);
-    ThinkTrace.finish(false);
-    toast(error.message);
+    finishReview({ ok: false, error: error.message, cancelled: error.cancelled });
   }
 }
 
 function finishReview(payload) {
   setBusy(false);
   ThinkTrace.finish(payload?.ok !== false);
-  if (!payload?.ok) {
-    toast(payload?.error || "审稿失败");
-    return;
-  }
   const review = payload.data || {};
-  state.hasReview = !review.truncated && !state.dirty;
-  state.reviewText = review.details || review.comment || "暂无说明";
+  if (!payload?.ok) {
+    state.hasReview = false;
+    state.reviewText = state.reviewBox?.textContent || "";
+    state.reviewNotice = payload?.cancelled
+      ? "审稿已停止。已返回的片段可阅读或复制；请重新审稿后再精修。"
+      : `审稿失败：${payload?.error || "未收到完整结果"}。可重新点击「AI 审稿」。`;
+  } else {
+    state.hasReview = !review.truncated && !state.dirty;
+    state.reviewText = review.details || review.comment || "暂无说明";
+    state.reviewNotice = review.truncated
+      ? "审稿意见被截断，可能不完整。可阅读或复制；请重新审稿后再精修。"
+      : state.dirty ? "正文已修改，这份意见供参考；请重新审稿后再精修。" : "";
+  }
   state.reviewBox = null;
   updateDock();
   if (state.inspectorTab === "review") {
@@ -1250,8 +1257,9 @@ function finishReview(payload) {
     renderReviewPane();
   } else {
     setReviewBadge(true);
-    if (!review.truncated) toast("审稿意见已就绪");
+    if (payload?.ok && !review.truncated) toast("审稿意见已就绪");
   }
+  if (!payload?.ok) { toast(payload?.error || state.reviewNotice); return; }
   if (review.truncated) toast(review.truncated_notice || "审稿意见被截断，可能不完整。");
   loadOverview(state.projectId).catch(() => {});
 }
@@ -1351,14 +1359,16 @@ function renderReviewPane() {
     pane.append(elNote("打开草稿后，这里显示该稿的 AI 审稿意见。"));
     return;
   }
-  if (!state.hasReview) {
-    pane.append(elNote("这一稿还没有审稿。点底部「AI 审稿」后，意见会出现在这里，不会挡住正文。"));
+  if (state.reviewNotice) pane.append(elNote(state.reviewNotice));
+  if (!state.reviewText) {
+    if (!state.reviewNotice) pane.append(elNote("这一稿还没有审稿。点底部「AI 审稿」后，意见会出现在这里，不会挡住正文。"));
     return;
   }
   const body = document.createElement("div");
   body.className = "review-stream";
   body.textContent = state.reviewText || "暂无说明";
-  pane.append(elNote("审稿意见与正文并排，可边看边改。"), body);
+  if (!state.reviewNotice) pane.append(elNote("审稿意见与正文并排，可边看边改。"));
+  pane.append(body);
 }
 
 async function renderPlanningPane(kind) {
@@ -1967,6 +1977,8 @@ function clearEditorBuffer() {
   $("versionLabel").textContent = "—";
   state.hasReview = false;
   state.reviewText = "";
+  state.reviewNotice = "";
+  state.reviewBox = null;
   setReviewBadge(false);
   updateCountPill();
   updateDock();
