@@ -401,6 +401,7 @@ class WorkbenchBridge:
         self.app = WorkbenchApplicationService.open(projects_root)
         self._busy = False
         self._busy_lock = threading.Lock()
+        self._chapter_input_lock = threading.Lock()
         self._run_log: list[str] = []
         self._job_control: JobControl | None = None
         self._job_number = 0
@@ -630,6 +631,25 @@ class WorkbenchBridge:
             return _fail(f"新建作品失败: {exc}")
         return _ok({"project": _jsonable(created), "workspace": build_workspace_tree(self.app)})
 
+    def chapter_input(self, project_id: str, chapter_id: str, title: str, prompt: str,
+                      projects_root: str, restore: bool = False) -> dict[str, Any]:
+        """Keep one pending new-chapter form per project, using atomic disk writes."""
+        try:
+            with self._busy_lock:
+                if Path(projects_root).resolve() != self.projects_root:
+                    return _fail("项目库已切换，章节输入缓存未写入。")
+                store = self.app._open_store(project_id)
+            with self._chapter_input_lock:
+                path = store.data_dir / "pending_chapter_input.json"
+                previous = store.read_json(path, default={})
+                if restore and previous and previous.get("chapter_id", "").strip() == chapter_id.strip():
+                    return _ok(previous)
+                value = {"chapter_id": chapter_id, "title": title, "prompt": prompt}
+                store.write_json(path, value)
+                return _ok(value)
+        except Exception as exc:
+            return _fail(f"保存章节输入缓存失败: {exc}")
+
     def suggest_chapter(self, project_id: str) -> dict[str, Any]:
         try:
             settings = self.app.generation_settings(project_id)
@@ -720,8 +740,12 @@ class WorkbenchBridge:
 
         def worker() -> dict[str, Any]:
             on_content, on_reason, mark_sent = self._stream_hooks("draft_chunk", chapter_id=chapter)
+            store = self.app._open_store(project_id)
+            cache_path = store.data_dir / "pending_chapter_input.json"
+            with self._chapter_input_lock:
+                cached = store.read_json(cache_path, default={})
             mark_sent()
-            return self.app.generate_context_draft(
+            result = self.app.generate_context_draft(
                 project_id,
                 chapter_id=chapter,
                 title=str(title or "").strip(),
@@ -732,6 +756,14 @@ class WorkbenchBridge:
                 metadata={"ui_action": "modern_generate_draft"},
                 **kwargs,
             )
+            # Clear only the form belonging to this successful request.
+            if not result.get("output_incomplete"):
+                with self._chapter_input_lock:
+                    if (cached and cached.get("chapter_id", "").strip() == chapter
+                            and cached.get("prompt", "").strip() == user_prompt
+                            and store.read_json(cache_path, default={}) == cached):
+                        store.write_json(cache_path, {})
+            return result
 
         return self._run_job("ModernDraftGenerate", worker, on_done="draft_done")
 

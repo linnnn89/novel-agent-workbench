@@ -143,3 +143,15 @@
 - 当前源码重新验证：Python 42 项通过，界面逻辑 21 项通过，原有精修界面回归通过，git diff --check 通过。
 - 远端 main 与起始 HEAD 一致；仓库没有 CI 工作流、分支保护或规则集。将以独立分支创建 PR，核对最新 PR head 和检查状态后合并，不将无 CI 描述为 CI 通过。
 - 已知限制延续：真实 WebView/EXE 窗口交互、真实服务商请求及 TLS/DNS 中止未验收。二进制和用户数据不纳入源码 PR；本地 EXE 已更新。
+
+
+## 2026-09-12（北京时间）
+
+### 本地与云端对齐及正式 EXE 重建
+
+- origin/main 领先本地 6 个提交；以云端为准 fast-forward 到 71d5074e53a1c20b70441f0db41310538985283e，远端实时核对一致。本地原有两处安卓文档修改保存在 stash：pre-cloud-sync-2026-09-12-local-android-notes，未覆盖或丢弃。
+- 用户明确同意在项目 .venv 安装云端锁定依赖 deepseek-tokenizer==0.3.0（约 1.9 MB），未升级其他包；分词器本地运行通过。
+- 验证：安装依赖后 46 项 Python 回归全部通过，21 项本地 UI 回归及精修 JS 交互检查通过。未运行真实模型或个人数据库启动测试。
+- 使用云端构建脚本 -SkipInstall 完成正式 EXE 更新，逐文件程序指纹校验通过。旧程序保留于 old/program-backup-20260912-085727-143bb2，用户数据目录保留。
+- 正式 EXE：dist/NovelAgentWorkbench/NovelAgentWorkbench.exe；build_info commit 与云端一致，构建时 local_changes=false。界面四个文件与源码逐字节一致，分词器模块及资源已打包。EXE SHA-256：8BC95F6FCC2AB6B8F6982143FF4675EE8652A57B70905EA7C582B5424B5072A4。
+- 此记录在构建后追加，仅为本地工作记录，未推送云端；源码没有额外修改。旧 ZIP 未刷新，应运行本次正式 EXE。

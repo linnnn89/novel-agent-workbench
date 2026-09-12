@@ -1000,16 +1000,31 @@ async function createProject() {
   });
 }
 
+let chapterInputSave = Promise.resolve();
+
 async function generateChapter() {
   if (blockIfGenerating()) return;
   if (!state.projectId) {
     toast("请先选择或新建一个作品。");
     return;
   }
-  const suggestion = await call("suggest_chapter", state.projectId);
-  const chapter = input(suggestion.chapter_id);
-  const title = input("");
-  const prompt = input(suggestion.default_prompt, { area: true });
+  const projectId = state.projectId;
+  const projectsRoot = state.projectsRoot;
+  await chapterInputSave;
+  const suggestion = await call("suggest_chapter", projectId);
+  const cached = await call("chapter_input", projectId, suggestion.chapter_id, "", suggestion.default_prompt, projectsRoot, true);
+  if (projectId !== state.projectId || projectsRoot !== state.projectsRoot) return;
+  const chapter = input(cached.chapter_id);
+  const title = input(cached.title);
+  const prompt = input(cached.prompt, { area: true });
+  const saveInput = () => {
+    const values = [chapter.value, title.value, prompt.value];
+    chapterInputSave = chapterInputSave.catch(() => {}).then(() =>
+      call("chapter_input", projectId, ...values, projectsRoot));
+    chapterInputSave.catch(error => toast(error.message));
+    return chapterInputSave;
+  };
+  for (const control of [chapter, title, prompt]) control.addEventListener("input", saveInput);
   openModal({
     title: "生成新章节",
     desc: "先确认章节与写作目标。只有点击生成后才会调用模型。",
@@ -1024,7 +1039,7 @@ async function generateChapter() {
         label: "检查发送材料",
         onClick: async () => {
           try {
-            const projectId = state.projectId;
+            await saveInput();
             const chapterId = chapter.value.trim();
             const chapterTitle = title.value.trim() || chapterId;
             const userPrompt = prompt.value;
@@ -1048,11 +1063,11 @@ async function generateChapter() {
         label: "生成草稿",
         style: "primary",
         onClick: async () => {
-          const projectId = state.projectId;
           const chapterId = chapter.value.trim();
           const chapterTitle = title.value.trim() || chapterId;
           const userPrompt = prompt.value;
           try {
+            await saveInput();
             if (!(await flushSave()).ok) return;
             if (blockIfGenerating()) return;
             closeModal();
@@ -2343,9 +2358,6 @@ function bindEvents() {
   });
   $("studioClose").addEventListener("click", () => closeStudio());
   $("drawerClose").addEventListener("click", closeDrawer);
-  $("modal").addEventListener("click", (event) => {
-    if (event.target === $("modal")) closeModal();
-  });
   document.addEventListener("click", () => {
     hideTreeMenu();
     hideModelMenu();
@@ -2426,6 +2438,8 @@ window.__workbenchPush = function workbenchPush(event, payload) {
 
 window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose(attemptId = 0) {
   state.closeAttempt = Number(attemptId) || 0;
+  try { await chapterInputSave; }
+  catch (error) { toast(error.message); return { ok: false, error: error.message }; }
   if (state.changingRoot) return { ok: false, error: "正在切换项目库，请稍候。" };
   if (state.generating) {
     const error = "请等待当前任务完成，或点击“停止任务”后再关闭。";
