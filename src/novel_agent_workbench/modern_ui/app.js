@@ -2379,6 +2379,8 @@ window.__workbenchPush = function workbenchPush(event, payload) {
     if (payload.job_id > state.lastJobId) {
       state.lastJobId = payload.job_id;
       state.activeJobId = payload.job_id;
+      // The backend counts all jobs, including jobs without a thinking panel.
+      if (window.ThinkTrace) ThinkTrace.acceptJob(payload.job_id);
       state.inputBudgetNotice = null;
       $("inputBudgetPanel").hidden = true;
       $("inputBudgetEntry").hidden = true;

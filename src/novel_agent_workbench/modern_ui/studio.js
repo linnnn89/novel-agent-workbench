@@ -102,6 +102,7 @@ function requireProject() {
 async function closeStudio({ discard = false } = {}) {
   if (!discard && !(await guardStudioLeave())) return false;
   $("studio").hidden = true;
+  ThinkTrace.mount();
   $("studioBody").innerHTML = "";
   $("studioTabs").innerHTML = "";
   setStudioStatus("");
@@ -146,6 +147,7 @@ function openStudioShell({ kicker, title }) {
   $("studioKicker").textContent = kicker;
   $("studioTitle").textContent = title;
   $("studio").hidden = false;
+  ThinkTrace.mount(studio.mode === "memory" ? $("studioThinkHost") : null);
   setStudioStatus("");
 }
 

@@ -1,5 +1,5 @@
 const ThinkTrace = (() => {
-  const WAITING = "请求已发出。模型接入后，思考链会显示在这里。在此之前请不要重复发送。";
+  const WAITING = "请求已发出，正在等待模型返回内容。接口返回的思考文本会显示在这里；部分模型不提供思考文本。无需重复发送，可点击「停止任务」结束等待。";
   let jobId = 0;
   let activeJob = 0;
   let phase = "idle";
@@ -9,6 +9,22 @@ const ThinkTrace = (() => {
   let startedAt = 0;
   let elapsed = 0;
   let expanded = false;
+  let timer = null;
+  let home = null;
+  let homeNext = null;
+
+  function mount(host) {
+    const bar = el("thinkBar");
+    if (!bar) return;
+    if (!home) { home = bar.parentNode; homeNext = bar.nextSibling; }
+    if (host) host.appendChild(bar);
+    else home.insertBefore(bar, homeNext);
+  }
+
+  function stopTimer() {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+  }
 
   function el(id) {
     return document.getElementById(id);
@@ -54,7 +70,7 @@ const ThinkTrace = (() => {
     if (meta) {
       if (phase === "done" || phase === "failed") meta.textContent = secs ? `${secs}s` : "";
       else if (phase === "thinking" || phase === "writing") meta.textContent = secs ? `${secs}s` : "";
-      else meta.textContent = "";
+      else meta.textContent = secs ? `已等待 ${secs}s` : "";
     }
     if (text) body.textContent = text;
     else if (phase === "thinking") body.textContent = "模型已接入，正在思考…";
@@ -77,6 +93,7 @@ const ThinkTrace = (() => {
   }
 
   function start() {
+    stopTimer();
     jobId += 1;
     activeJob = jobId;
     phase = "sent";
@@ -87,6 +104,7 @@ const ThinkTrace = (() => {
     render();
     setExpanded(true);
     show();
+    timer = setInterval(render, 1000);
     return activeJob;
   }
 
@@ -115,6 +133,7 @@ const ThinkTrace = (() => {
 
   function finish(ok) {
     if (phase === "idle") return;
+    stopTimer();
     elapsed = startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 1000)) : 0;
     phase = ok === false ? "failed" : "done";
     render();
@@ -132,6 +151,7 @@ const ThinkTrace = (() => {
   }
 
   function dispose() {
+    stopTimer();
     jobId += 1;
     activeJob = 0;
     phase = "idle";
@@ -172,6 +192,10 @@ const ThinkTrace = (() => {
   }
 
   return {
+    mount,
+    acceptJob(id) {
+      activeJob = id;
+    },
     start,
     finish,
     close,
