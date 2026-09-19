@@ -1051,9 +1051,14 @@ function finishMemoryJob(payload) {
     studio.memoryLive.textContent = "";
     studio.memoryLive.hidden = true;
   }
-  setStudioStatus("AI 已生成记忆正文，请审阅后保存。");
+  const truncated = Boolean(payload.data?.output_incomplete);
+  setStudioStatus(truncated
+    ? "输出在模型上限处被截断，正文可能不完整；请核对结尾后保存，或提高“记忆目标 tokens”重新生成。"
+    : "AI 已生成记忆正文，请审阅后保存。");
   refreshStudioSaveStatus();
-  toast("记忆正文已生成，尚未保存。");
+  toast(truncated
+    ? "记忆正文被输出上限截断，请核对结尾后再保存。"
+    : "记忆正文已生成，尚未保存。");
 }
 
 async function openPlanningStudio(kind, options = {}) {

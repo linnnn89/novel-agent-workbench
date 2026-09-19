@@ -12,7 +12,7 @@ from .config import (
     DEFAULT_MEMORY_GENERATION_TASK_PROMPT,
     memory_prompt_settings,
 )
-from .drafts import sanitize_provider_draft_text
+from .drafts import finish_reason_truncated, sanitize_provider_draft_text
 from .providers import ProviderRequest, generate_with_provider, provider_request_role_or_writer_fallback
 from .storage import ProjectStore, utc_stamp
 
@@ -21,7 +21,9 @@ DEFAULT_MEMORY_TARGET_TOKENS = 5000
 DEFAULT_MEMORY_AUTO_SUMMARY_CHAPTER_INTERVAL = 5
 DEFAULT_MEMORY_GENERATION_TEMPERATURE = 0.2
 DEFAULT_MEMORY_GENERATION_TOP_P = 1.0
-DEFAULT_MEMORY_GENERATION_MAX_TOKENS = 8000
+# Reasoning models bill their thinking against the same output budget, so the
+# request needs room for a long thinking pass on top of the requested memory length.
+MEMORY_GENERATION_REASONING_HEADROOM_TOKENS = 8000
 SECRET_LIKE_PATTERNS = [
     re.compile(r"\bsk-[A-Za-z0-9_\-]{6,}\b"),
     re.compile(r"\bcpk_[A-Za-z0-9_.\-]{12,}\b"),
@@ -64,6 +66,7 @@ class MemoryBankGenerationResult:
     provider: str
     model: str
     finish_reason: str
+    output_incomplete: bool
     usage: dict[str, Any]
     request_summary: dict[str, Any]
 
@@ -343,6 +346,7 @@ class MemoryBankService:
             provider=response.provider,
             model=response.model,
             finish_reason=response.finish_reason,
+            output_incomplete=finish_reason_truncated(response.finish_reason),
             usage=response.usage,
             request_summary={
                 "prompt_chars": len(request.prompt),
@@ -391,6 +395,7 @@ class MemoryBankService:
             provider=response.provider,
             model=response.model,
             finish_reason=response.finish_reason,
+            output_incomplete=finish_reason_truncated(response.finish_reason),
             usage=response.usage,
             request_summary={
                 "prompt_chars": len(request.prompt),
@@ -873,8 +878,13 @@ def memory_generation_source_chapter_ids(chapters: list[dict[str, Any]]) -> list
 
 
 def memory_generation_max_tokens(target_tokens: int) -> int:
-    normalize_memory_target_tokens(target_tokens)
-    return DEFAULT_MEMORY_GENERATION_MAX_TOKENS
+    """Output budget for one memory update.
+
+    Thinking tokens are counted inside max_tokens, so a fixed cap left almost no
+    room for the memory text whenever the model thought for long, which cut the
+    generated memory mid-sentence."""
+    target = normalize_memory_target_tokens(target_tokens)
+    return target + MEMORY_GENERATION_REASONING_HEADROOM_TOKENS
 
 
 def safe_memory_prompt_value(value: object) -> str:
