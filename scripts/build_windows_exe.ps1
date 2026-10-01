@@ -260,6 +260,13 @@ try {
     if (-not (Test-Path $StagingAppDir)) {
         throw "PyInstaller did not create expected staging output: $StagingAppDir"
     }
+    # Editable-install provenance can contain the builder's private repository
+    # URL. It is optional package metadata and is not needed by the runtime.
+    foreach ($metadata in Get-ChildItem -LiteralPath (Join-Path $StagingAppDir '_internal') -Directory -Filter '*.dist-info') {
+        $provenance = Join-Path $metadata.FullName 'direct_url.json'
+        Assert-BuildPath $provenance
+        if (Test-Path -LiteralPath $provenance) { Remove-Item -LiteralPath $provenance -Force }
+    }
     $FinalExe = Join-Path $FinalAppDir "NovelAgentWorkbench.exe"
     Write-Host "[6/6] Verifying and publishing, with automatic rollback on failure"
     Publish-WindowsApp -Candidate $StagingAppDir -Destination $FinalAppDir -WorkDirectory $RunBuildRoot

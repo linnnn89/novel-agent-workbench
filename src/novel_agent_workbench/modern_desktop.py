@@ -44,9 +44,10 @@ from .ui_presenters import (
     visible_chapter_record_rows,
 )
 from .config import default_generation_settings
+from .drafts import DraftGenerationService, sanitize_provider_draft_text
 from .memory_bank import normalize_memory_target_tokens
 from .model_settings import FEATURE_DEFINITIONS
-from .providers import format_prompt_cache_usage
+from .providers import format_prompt_cache_usage, get_effective_model_role_config
 from .reviews import REVIEW_TRUNCATED_NOTICE, draft_content_fingerprint, review_output_truncated
 from .storage import ProjectLockError, atomic_write_json_file, utc_stamp
 
@@ -474,11 +475,13 @@ class WorkbenchBridge:
         if len(self._run_log) > 500:
             self._run_log = self._run_log[-400:]
 
-    def _run_job(self, name: str, worker: Callable[[], Any], *, on_done: str) -> dict[str, Any]:
+    def _run_job(self, name: str, worker: Callable[[], Any], *, on_done: str,
+                 partial_draft: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self._begin_job():
             return _fail("已有任务正在进行，请等待完成。")
         self._log(f"开始任务: {name}")
         control = self._job_control
+        control.partial_draft = {**partial_draft, "chunks": []} if partial_draft else None
         self._push("job_started", {"job_id": control.job_id})
 
         def run() -> None:
@@ -489,6 +492,20 @@ class WorkbenchBridge:
                 except Exception as exc:
                     self._log(f"任务结束: {name}  {exc}")
                     payload = {"ok": False, "error": str(exc), "cancelled": isinstance(exc, JobCancelled)}
+                    if isinstance(exc, JobCancelled) and control.keep_partial and control.partial_draft:
+                        partial = "".join(control.partial_draft["chunks"])
+                        if sanitize_provider_draft_text(partial)["content"].strip():
+                            try:
+                                # The request remains cancelled. Only this separate local
+                                # save is allowed to finish while the worker stays busy.
+                                with job_scope(JobControl()):
+                                    result = self._save_cancelled_draft(control.partial_draft, partial)
+                                payload = {**_ok(result), "cancelled": True, "partial_saved": True}
+                            except Exception as save_error:
+                                self._log(f"中止草稿保存失败: {save_error}")
+                                payload.update(error=f"任务已停止，但草稿保存失败: {save_error}", partial_text=partial)
+                        else:
+                            payload["error"] = "任务已停止，尚未收到可保存的正文，未创建新版本。"
                     if isinstance(exc, InputBudgetExceeded):
                         payload["input_budget"] = exc.report
                 else:
@@ -502,12 +519,22 @@ class WorkbenchBridge:
         threading.Thread(target=run, name=name, daemon=True).start()
         return _ok({"started": True, "job_id": control.job_id})
 
-    def cancel_job(self, job_id: int = 0) -> dict[str, Any]:
+    def _save_cancelled_draft(self, pending: dict[str, Any], content: str) -> dict[str, Any]:
+        store = self.app._runtime_store(pending["project_id"])
+        role = get_effective_model_role_config(store, pending["role"], feature_id=pending["feature_id"])
+        return DraftGenerationService(store).save_provider_draft_version(
+            chapter_id=pending["chapter_id"], title=pending["title"], content=content,
+            provider_role=role.role, provider=role.provider, model=role.model,
+            finish_reason="cancelled", output_incomplete=True,
+            artifact_metadata={"generation_cancelled": True, "source_draft_id": pending.get("source_draft_id", "")},
+        ).to_dict()
+
+    def cancel_job(self, job_id: int = 0, save_partial: bool = False) -> dict[str, Any]:
         with self._busy_lock:
             control = self._job_control if self._busy else None
             if control is None or (job_id and control.job_id != job_id):
                 return _ok({"stopping": False, "message": "任务已结束。"})
-            stopping = control.cancel()
+            stopping = control.cancel(keep_partial=bool(save_partial) and bool(getattr(control, "partial_draft", None)))
         return _ok({"stopping": stopping, "message": "正在停止，请稍候…" if stopping else "结果已返回，正在保存，请稍候。"})
 
     def _stream_hooks(self, content_event: str, *, chapter_id: str = "") -> tuple[Callable[[str], None], Callable[[str], None], Callable[[], None]]:
@@ -553,6 +580,12 @@ class WorkbenchBridge:
             emit("think_chunk", chunk)
 
         def on_content(chunk: str) -> None:
+            if control and getattr(control, "partial_draft", None) and content_event == "draft_chunk":
+                # Freeze all received text at the cancellation boundary, including
+                # the tail not yet delivered by the UI batching timer.
+                with control.lock:
+                    control.check()
+                    control.partial_draft["chunks"].append(chunk)
             if not seen["content"]:
                 seen["content"] = True
                 self._push("think_status", {"phase": "writing"})
@@ -654,6 +687,10 @@ class WorkbenchBridge:
         try:
             settings = self.app.generation_settings(project_id)
             chapter_id = suggest_next_chapter_id(self.app.list_chapters(project_id))
+            store = self.app._open_store(project_id)
+            pending = store.read_json(store.data_dir / "pending_chapter_input.json", default={})
+            if pending.get("chapter_id", "").strip():
+                chapter_id = pending["chapter_id"].strip()
         except Exception:
             settings = {}
             chapter_id = "chapter_001"
@@ -705,6 +742,7 @@ class WorkbenchBridge:
                 "version_label": str(draft.get("version_label") or draft_version_text(draft, index)),
                 "content": str(draft.get("content") or ""),
                 "output_incomplete": bool(draft.get("output_incomplete")),
+                "generation_cancelled": bool(draft.get("generation_cancelled")),
                 "draft_ids": draft_ids,
                 "index": index,
                 "has_review": has_review,
@@ -765,7 +803,10 @@ class WorkbenchBridge:
                         store.write_json(cache_path, {})
             return result
 
-        return self._run_job("ModernDraftGenerate", worker, on_done="draft_done")
+        return self._run_job("ModernDraftGenerate", worker, on_done="draft_done", partial_draft={
+            "project_id": project_id, "chapter_id": chapter, "title": str(title or "").strip(),
+            "role": "writer", "feature_id": "draft_generation",
+        })
 
     def rewrite_draft(self, project_id: str, draft_id: str, instruction: str = "") -> dict[str, Any]:
         try:
@@ -802,7 +843,10 @@ class WorkbenchBridge:
                 **kwargs,
             )
 
-        return self._run_job("ModernDraftRewrite", worker, on_done="draft_done")
+        return self._run_job("ModernDraftRewrite", worker, on_done="draft_done", partial_draft={
+            "project_id": project_id, "chapter_id": chapter_id, "title": str(draft.get("title") or ""),
+            "role": "writer", "feature_id": "draft_generation", "source_draft_id": draft_id,
+        })
 
     def refine_draft(self, project_id: str, draft_id: str, instruction: str = "") -> dict[str, Any]:
         try:
@@ -829,7 +873,10 @@ class WorkbenchBridge:
                 **kwargs,
             )
 
-        return self._run_job("ModernDraftRefine", worker, on_done="draft_done")
+        return self._run_job("ModernDraftRefine", worker, on_done="draft_done", partial_draft={
+            "project_id": project_id, "chapter_id": chapter_id, "title": str(draft.get("title") or ""),
+            "role": "reviser", "feature_id": "ai_refinement", "source_draft_id": draft_id,
+        })
 
     def ai_review(self, project_id: str, draft_id: str) -> dict[str, Any]:
         try:

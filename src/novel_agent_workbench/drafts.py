@@ -347,6 +347,7 @@ class DraftGenerationService:
         provider: str,
         model: str,
         finish_reason: str = "",
+        output_incomplete: bool = False,
         usage: dict[str, Any] | None = None,
         request_summary: dict[str, Any] | None = None,
         artifact_metadata: dict[str, Any] | None = None,
@@ -365,6 +366,7 @@ class DraftGenerationService:
             summary = dict(request_summary or {})
             summary["response_sanitizer"] = sanitized["summary"]
             provider_usage = dict(usage or {})
+            output_incomplete = output_incomplete or finish_reason_truncated(finish_reason)
             artifact = {
                 "schema_version": 1,
                 "status": "draft",
@@ -375,7 +377,7 @@ class DraftGenerationService:
                 "version_label": version_label,
                 "created_at": created_at,
                 "content": sanitized["content"],
-                "output_incomplete": finish_reason_truncated(finish_reason),
+                "output_incomplete": output_incomplete,
                 "provider": {
                     "role": str(provider_role or ""),
                     "provider": str(provider or ""),
@@ -422,7 +424,7 @@ class DraftGenerationService:
                 provider=str(provider or ""),
                 model=str(model or ""),
                 usage=provider_usage,
-                output_incomplete=finish_reason_truncated(finish_reason),
+                output_incomplete=output_incomplete,
             )
 
     def list_drafts(self) -> list[dict[str, Any]]:
