@@ -22,15 +22,19 @@ class JobControl:
         self.lock = threading.Lock()
         self.connection = None
         self.saving = False
+        self.keep_partial = False
 
     def check(self):
         if self.event.is_set():
             raise JobCancelled()
 
-    def cancel(self) -> bool:
+    def cancel(self, *, keep_partial: bool = False) -> bool:
         with self.lock:
             if self.saving:
                 return False
+            if self.event.is_set():
+                return True
+            self.keep_partial = keep_partial
             self.event.set()
             sock = getattr(self.connection, "sock", None)
             if sock is not None:

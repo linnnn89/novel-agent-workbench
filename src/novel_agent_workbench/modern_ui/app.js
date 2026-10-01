@@ -47,6 +47,7 @@ const state = {
   savedSnapshot: null,
   navigationId: 0,
   activeJobId: 0,
+  stopDraftJobId: 0,
   lastJobId: 0,
   memoryReminders: [],
   memoryReminderShown: new Set(),
@@ -848,7 +849,9 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
   state.draftIndex = draft.index ?? -1;
   $("draftTitle").textContent = `${draft.chapter_id} · ${draft.title}`;
   $("draftHint").textContent = `${draft.version_label} · ${draft.status_label} · 编辑会自动保存`;
-  if (draft.output_incomplete) {
+  if (draft.generation_cancelled) {
+    $("draftHint").textContent += " · 手动停止后保存，请核对并补全";
+  } else if (draft.output_incomplete) {
     $("draftHint").textContent += " · 输出已截断：这是不完整候选，请核对并补全";
   }
   $("versionLabel").textContent = draft.version_label;
@@ -1118,10 +1121,11 @@ function appendEditor(text, chapterId = "") {
 }
 
 async function finishDraft(payload) {
+  if (state.stopDraftJobId) closeModal();
   const projectId = state.streamProjectId || state.projectId;
   ThinkTrace.finish(payload?.ok !== false);
   if (!payload?.ok) {
-    const partial = $("editor").value;
+    const partial = payload.partial_text || $("editor").value;
     const source = state.streamSource;
     if (source) {
       Object.assign(state, { projectId: source.projectId, chapterId: source.chapterId, draftId: source.draftId,
@@ -1147,7 +1151,9 @@ async function finishDraft(payload) {
     await refreshWorkspace();
     if (draftId) {
       await loadDraft(projectId, draftId, { silent: true, force: true });
-      toast(payload.data?.output_incomplete
+      toast(payload.partial_saved
+        ? "任务已停止，已接收正文保存为本章的新草稿版本，请核对或补全。"
+        : payload.data?.output_incomplete
         ? "输出达到上限，已保存为不完整候选。请核对结尾、补全或提高 Max Tokens 后重试。"
         : "新草稿已写入，尚未成为确认稿。");
     }
@@ -1155,6 +1161,40 @@ async function finishDraft(payload) {
   finally { setBusy(false); state.streamSource = null; }
   state.streamProjectId = "";
   state.streamChapterId = "";
+}
+
+async function stopTask() {
+  if (!state.generating || !state.activeJobId) return;
+  const jobId = state.activeJobId;
+  const stop = async (savePartial) => {
+    if (state.activeJobId !== jobId || !state.generating) return;
+    try {
+      const result = await call("cancel_job", jobId, savePartial);
+      toast(result.message);
+      if (result.stopping && state.generating && state.activeJobId === jobId) {
+        ["cancelJobBtn", "cancelStudioJobBtn"].forEach(id => {
+          $(id).disabled = true;
+          $(id).textContent = "正在停止…";
+        });
+      }
+    } catch (error) { toast(error.message); }
+  };
+  if (!state.streamSource) { await stop(false); return; }
+  if (state.stopDraftJobId === jobId) return;
+  const body = document.createElement("p");
+  body.textContent = "是否将已接收的草稿保存为本章的新版本？选择“是”会保存截至停止时收到的正文；选择“否”会丢弃本次输出并恢复原稿。本次发送要求缓存会保留。";
+  openModal({
+    title: "停止任务并保存草稿？",
+    desc: "作出选择后将终止当前 API 请求。新版本仍是草稿，需另行确认稿件。",
+    body,
+    actions: [
+      { label: "返回", onClick: closeModal },
+      { label: "否，丢弃并停止", onClick: async () => { closeModal(); await stop(false); } },
+      { label: "是，保存并停止", style: "primary", onClick: async () => { closeModal(); await stop(true); } },
+    ],
+  });
+  state.stopDraftJobId = jobId;
+  state.modalCancel = () => { state.stopDraftJobId = 0; };
 }
 
 async function rewriteDraft() {
@@ -2333,18 +2373,6 @@ function bindEvents() {
   $("rewriteBtn").addEventListener("click", () => rewriteDraft().catch((error) => toast(error.message)));
   $("refineBtn").addEventListener("click", () => refineDraft().catch((error) => toast(error.message)));
   $("reviewBtn").addEventListener("click", () => reviewDraft().catch((error) => toast(error.message)));
-  const stopTask = async () => {
-    try {
-      const result = await call("cancel_job", state.activeJobId);
-      toast(result.message);
-      if (result.stopping && state.generating) {
-        ["cancelJobBtn", "cancelStudioJobBtn"].forEach(id => {
-          $(id).disabled = true;
-          $(id).textContent = "正在停止…";
-        });
-      }
-    } catch (error) { toast(error.message); }
-  };
   $("cancelJobBtn").addEventListener("click", stopTask);
   $("cancelStudioJobBtn").addEventListener("click", stopTask);
   $("confirmBtn").addEventListener("click", () => confirmDraft().catch((error) => toast(error.message)));
