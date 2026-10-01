@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$Quiet,
     [string]$InstallPath = (Join-Path $env:LOCALAPPDATA 'Programs\NovelAgentWorkbench'),
     [switch]$NoShortcuts,
@@ -103,9 +103,10 @@ try {
     $zip = [IO.Compression.ZipFile]::OpenRead($archive)
     try {
         foreach ($entry in $zip.Entries) {
-            $resolved = [IO.Path]::GetFullPath((Join-Path $stage $entry.FullName))
+            $entryName = $entry.FullName.Replace('\', '/')
+            $resolved = [IO.Path]::GetFullPath((Join-Path $stage $entryName))
             if (-not $resolved.StartsWith($stage + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '安装包路径无效。' }
-            if ($entry.FullName -notmatch '^NovelAgentWorkbench/(?:$|NovelAgentWorkbench\.exe$|LICENSE$|_internal(?:/.*)?$)') {
+            if ($entryName -notmatch '^NovelAgentWorkbench/(?:$|NovelAgentWorkbench\.exe$|LICENSE$|_internal(?:/.*)?$)') {
                 throw '安装包包含非程序文件。'
             }
         }

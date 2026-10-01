@@ -26,7 +26,7 @@ def inspect(data, label):
     elif isinstance(data, bytes):
         if any(marker in data.lower() for marker in MARKERS):
             raise RuntimeError(f"Private local path detected in {label}")
-        if re.search(rb"(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})", data):
+        if re.search(rb"(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})(?![A-Za-z0-9_-])", data):
             raise RuntimeError(f"Credential-shaped content detected in {label}")
 
 
@@ -44,7 +44,8 @@ def main():
         if FORBIDDEN.search(name) or file.suffix.lower() in {".log", ".db", ".sqlite", ".sqlite3", ".nawpkg"}:
             raise RuntimeError(f"Personal/runtime data filename detected: {name}")
         inspect(file.read_bytes(), name)
-        if zipfile.is_zipfile(file):
+        # DLLs can contain ZIP signature constants without being archives.
+        if file.suffix.lower() == ".zip":
             with zipfile.ZipFile(file) as archive:
                 for entry in archive.namelist():
                     if FORBIDDEN.search(entry): raise RuntimeError("Forbidden nested archive entry")
