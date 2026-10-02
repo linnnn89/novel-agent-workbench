@@ -514,17 +514,28 @@ class DraftGenerationService:
         self.store.write_json(self.index_path, {"schema_version": 1, "drafts": kept})
         return {"removed": removed, "skipped": skipped, "remaining_count": len(kept)}
 
-    def delete_chapter_drafts(self, chapter_id: str) -> dict[str, Any]:
+    def delete_draft(self, draft_id: str) -> dict[str, Any]:
+        entry = self._draft_index_entry(draft_id)
+        return self.delete_chapter_drafts(str(entry["chapter_id"]), draft_id=draft_id)
+
+    def delete_chapter_drafts(self, chapter_id: str, *, draft_id: str = "") -> dict[str, Any]:
         validate_chapter_id(chapter_id)
         self.store.initialize()
         with self.store.lock():
-            checkpoint = self.store.create_checkpoint(label=f"pre_delete_{chapter_id}_drafts")
+            selected_draft_id = draft_id
             confirmed_entries = [
                 item for item in self._read_confirmed_index() if str(item.get("chapter_id") or "") == chapter_id
             ]
             retained_source_draft_ids = {
                 str(item.get("source_draft_id") or "") for item in confirmed_entries if item.get("source_draft_id")
             }
+            if selected_draft_id:
+                entry = self._draft_index_entry(selected_draft_id)
+                if entry.get("chapter_id") != chapter_id:
+                    raise DraftGenerationError("草稿版本不属于该章节。")
+                if selected_draft_id in retained_source_draft_ids:
+                    raise DraftGenerationError("这个版本是当前确认稿，请先确认其他版本，或使用“删除已确认章节”。")
+            checkpoint = self.store.create_checkpoint(label=f"pre_delete_{chapter_id}_drafts")
             draft_index = self.store.read_json(self.index_path, default={"schema_version": 1, "drafts": []})
             draft_entries = (
                 draft_index.get("drafts")
@@ -538,7 +549,8 @@ class DraftGenerationService:
             for item in draft_entries:
                 if not isinstance(item, dict):
                     continue
-                if str(item.get("chapter_id") or "") != chapter_id:
+                if (str(item.get("chapter_id") or "") != chapter_id
+                        or (selected_draft_id and item.get("draft_id") != selected_draft_id)):
                     kept_drafts.append(item)
                     continue
                 draft_id = str(item.get("draft_id") or "")
@@ -550,14 +562,15 @@ class DraftGenerationService:
                 retired = retire_indexed_artifact(self.store, item.get("path"))
                 if retired:
                     retired_paths.append(retired)
-            retired_paths.extend(
-                retire_orphan_chapter_artifacts(
-                    self.store,
-                    self.drafts_dir,
-                    f"{safe_filename(chapter_id)}__*.json",
-                    retained_source_draft_ids,
+            if not selected_draft_id:
+                retired_paths.extend(
+                    retire_orphan_chapter_artifacts(
+                        self.store,
+                        self.drafts_dir,
+                        f"{safe_filename(chapter_id)}__*.json",
+                        retained_source_draft_ids,
+                    )
                 )
-            )
             self.store.write_json(self.index_path, {"schema_version": 1, "drafts": kept_drafts})
 
             removed_reviews = self._delete_related_index_entries(
@@ -567,6 +580,7 @@ class DraftGenerationService:
                 draft_ids=deleted_draft_ids,
                 retained_draft_ids=retained_source_draft_ids,
                 retired_paths=retired_paths,
+                chapter_wide=not bool(selected_draft_id),
             )
             removed_revision_requests = self._delete_related_index_entries(
                 index_path=self.store.data_dir / "revision_requests_index.json",
@@ -575,9 +589,17 @@ class DraftGenerationService:
                 draft_ids=deleted_draft_ids,
                 retained_draft_ids=retained_source_draft_ids,
                 retired_paths=retired_paths,
+                chapter_wide=not bool(selected_draft_id),
             )
             workflow = ChapterWorkflowService(self.store)
-            if confirmed_entries:
+            remaining = [item for item in kept_drafts if item.get("chapter_id") == chapter_id]
+            if selected_draft_id and remaining:
+                workflow.forget_deleted_draft(
+                    chapter_id, selected_draft_id, remaining,
+                    removed_review_ids=set(removed_reviews),
+                    removed_revision_request_ids=set(removed_revision_requests),
+                )
+            elif confirmed_entries:
                 retained_draft_id = next(iter(retained_source_draft_ids), "")
                 title = str(confirmed_entries[0].get("title") or chapter_id)
                 workflow.mark_committed(
@@ -1106,6 +1128,7 @@ class DraftGenerationService:
         draft_ids: set[str],
         retained_draft_ids: set[str],
         retired_paths: list[str],
+        chapter_wide: bool = True,
     ) -> list[str]:
         index = self.store.read_json(index_path, default={"schema_version": 1, list_key: []})
         items = index.get(list_key) if isinstance(index, dict) and isinstance(index.get(list_key), list) else []
@@ -1118,7 +1141,7 @@ class DraftGenerationService:
             item_draft_id = str(item.get("draft_id") or "")
             item_chapter_id = str(item.get("chapter_id") or "")
             should_remove = item_draft_id in draft_ids or (
-                item_chapter_id == chapter_id and item_draft_id not in retained_draft_ids
+                chapter_wide and item_chapter_id == chapter_id and item_draft_id not in retained_draft_ids
             )
             if not should_remove:
                 kept.append(item)

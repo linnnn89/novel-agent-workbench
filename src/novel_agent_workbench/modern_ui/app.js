@@ -1716,6 +1716,8 @@ function menuItemsFor(target) {
       { label: "要求重写（重新随机）", onClick: () => runOnDraft(projectId, draft.draft_id, rewriteDraft) },
       { label: "根据审稿精修", onClick: () => runOnDraft(projectId, draft.draft_id, refineDraft) },
       "-",
+      { label: "删除此版本", danger: true, onClick: () => deleteDraft(projectId, chapter, draft) },
+      "-",
       ...shared,
     ];
   }
@@ -1894,6 +1896,48 @@ async function deleteProject(project) {
       if (state.projectId) await selectProject(state.projectId);
       toast("作品已移入回收站。");
     },
+  });
+}
+
+async function deleteDraft(projectId, chapter, draft) {
+  if (blockIfGenerating() || !(await flushSave()).ok) return;
+  const note = document.createElement("p");
+  note.textContent = `将删除 ${chapter.chapter_id} 的 ${draft.version_label || "此版本"}，以及该版本的审稿和精修请求。其他版本和已确认章节会保留，相关文件先移入回收站。当前确认稿的来源版本不能单独删除。`;
+  openModal({
+    title: "删除此版本",
+    desc: chapter.title || chapter.chapter_id,
+    body: note,
+    actions: [
+      { label: "取消", onClick: closeModal },
+      {
+        label: "删除版本",
+        style: "success",
+        onClick: async () => {
+          if (blockIfGenerating() || !(await flushSave()).ok) return;
+          const editingChapter = state.projectId === projectId && state.chapterId === chapter.chapter_id;
+          const deletingCurrent = state.projectId === projectId && state.draftId === draft.draft_id;
+          let result;
+          try {
+            result = await call("delete_draft", projectId, draft.draft_id);
+          } catch (error) {
+            toast(error.message);
+            return;
+          }
+          closeModal();
+          state.workspace = result.workspace || [];
+          if (deletingCurrent) clearEditorBuffer();
+          renderTree();
+          const updated = state.workspace.find(p => p.project_id === projectId)?.chapters
+            ?.find(c => c.chapter_id === chapter.chapter_id);
+          if (editingChapter && updated?.drafts?.length) {
+            const nextId = deletingCurrent ? updated.drafts.at(-1).draft_id : state.draftId;
+            await loadDraft(projectId, nextId, { force: true, silent: true });
+          }
+          await loadOverview(projectId);
+          toast("该版本已移入回收站。");
+        },
+      },
+    ],
   });
 }
 

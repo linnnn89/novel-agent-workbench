@@ -973,6 +973,9 @@ class WorkbenchApplicationService:
     def remove_missing_draft_index_entries(self, project_id: str, draft_ids: list[str]) -> dict[str, Any]:
         return DraftGenerationService(self._open_store(project_id)).remove_missing_draft_index_entries(draft_ids)
 
+    def delete_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
+        return DraftGenerationService(self._open_store(project_id)).delete_draft(draft_id)
+
     def delete_chapter_drafts(self, project_id: str, chapter_id: str) -> dict[str, Any]:
         return DraftGenerationService(self._open_store(project_id)).delete_chapter_drafts(chapter_id)
 
