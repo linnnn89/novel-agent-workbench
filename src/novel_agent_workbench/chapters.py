@@ -88,6 +88,35 @@ class ChapterWorkflowService:
             "remaining_count": len(kept),
         }
 
+    def forget_deleted_draft(
+        self, chapter_id: str, draft_id: str, remaining: list[dict[str, Any]], *,
+        removed_review_ids: set[str], removed_revision_request_ids: set[str],
+    ) -> None:
+        index = self._read_index()
+        latest = max(remaining, key=lambda item: (int(item.get("version") or 0), str(item.get("created_at") or "")))
+        for chapter in index["chapters"]:
+            if chapter.get("chapter_id") != chapter_id:
+                continue
+            changed = False
+            if chapter.get("latest_draft_id") == draft_id:
+                chapter["latest_draft_id"] = str(latest.get("draft_id") or "")
+                changed = True
+            if chapter.get("latest_revision_draft_id") == draft_id:
+                chapter["latest_revision_draft_id"] = ""
+                changed = True
+            if chapter.get("latest_review_id") in removed_review_ids:
+                chapter["latest_review_id"] = ""
+                chapter["latest_review_decision"] = {}
+                changed = True
+            if chapter.get("latest_revision_request_id") in removed_revision_request_ids:
+                chapter["latest_revision_request_id"] = ""
+                changed = True
+            if changed:
+                chapter["status"] = "committed" if chapter.get("confirmed_chapter_id") else "draft_ready"
+                chapter["error_summary"] = {}
+                chapter["updated_at"] = utc_stamp()
+        self.store.write_json(self.path, index)
+
     def rename(self, chapter_id: str, *, title: str) -> dict[str, Any]:
         name = title.strip()
         if not name:

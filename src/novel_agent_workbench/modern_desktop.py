@@ -689,8 +689,11 @@ class WorkbenchBridge:
             chapter_id = suggest_next_chapter_id(self.app.list_chapters(project_id))
             store = self.app._open_store(project_id)
             pending = store.read_json(store.data_dir / "pending_chapter_input.json", default={})
-            if pending.get("chapter_id", "").strip():
-                chapter_id = pending["chapter_id"].strip()
+            pending_id = str(pending.get("chapter_id") or "").strip()
+            confirmed_ids = {str(item.get("chapter_id") or "")
+                             for item in self.app.list_confirmed_chapters(project_id)}
+            if pending_id and pending_id not in confirmed_ids:
+                chapter_id = pending_id
         except Exception:
             settings = {}
             chapter_id = "chapter_001"
@@ -1702,6 +1705,17 @@ class WorkbenchBridge:
         except Exception as exc:
             return _fail(f"删除作品失败: {exc}")
         return _ok({"result": _jsonable(result), "workspace": build_workspace_tree(self.app)})
+
+    def delete_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
+        try:
+            with self._busy_lock:
+                if self._busy:
+                    return _fail("请先停止或等待当前任务完成，再删除版本。")
+                result = self.app.delete_draft(project_id, draft_id)
+                workspace = build_workspace_tree(self.app)
+        except Exception as exc:
+            return _fail(f"删除草稿版本失败: {exc}")
+        return _ok({"result": _jsonable(result), "workspace": workspace})
 
     def delete_chapter_drafts(self, project_id: str, chapter_id: str) -> dict[str, Any]:
         try:
