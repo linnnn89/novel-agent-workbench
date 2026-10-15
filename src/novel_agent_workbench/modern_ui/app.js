@@ -1881,11 +1881,14 @@ function confirmTyped({ title, desc, phrase, onConfirm }) {
 }
 
 async function deleteProject(project) {
+  if (blockIfGenerating()) return;
   confirmTyped({
     title: "删除作品",
     desc: `将删除整个作品：${project.title}\n\n作品目录会移入回收站，草稿、定稿、设置和本作品密钥都会一起移走。`,
     phrase: "确认删除",
     onConfirm: async () => {
+      // A task may have started after the confirmation dialog was opened.
+      if (blockIfGenerating() || !(await flushSave()).ok || blockIfGenerating()) return;
       const result = await call("delete_project", project.project_id, "确认删除");
       state.workspace = result.workspace || [];
       state.projectId = state.workspace[0]?.project_id || "";

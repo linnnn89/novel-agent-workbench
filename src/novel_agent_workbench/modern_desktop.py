@@ -1701,10 +1701,16 @@ class WorkbenchBridge:
         if str(confirm_text or "").strip() != "确认删除":
             return _fail("未输入“确认删除”，已取消。")
         try:
-            result = self.app.delete_project(project_id)
+            # Serialize with _begin_job: checking busy without holding this lock
+            # through deletion leaves a window for a worker to start on the project.
+            with self._busy_lock:
+                if self._busy:
+                    return _fail("请先停止或等待当前任务完成，再删除作品。")
+                result = self.app.delete_project(project_id)
+                workspace = build_workspace_tree(self.app)
         except Exception as exc:
             return _fail(f"删除作品失败: {exc}")
-        return _ok({"result": _jsonable(result), "workspace": build_workspace_tree(self.app)})
+        return _ok({"result": _jsonable(result), "workspace": workspace})
 
     def delete_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
         try:

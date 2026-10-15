@@ -163,5 +163,36 @@ async function check(name, test) { await test(); checks++; console.log(`PASS ${n
     resolvers.first(data("first")); await first;
     assert.equal(c.S.draftId, "second"); assert.equal(c.get("editor").readOnly, false);
   });
+  await check("生成中禁止打开删除作品确认", async () => {
+    const c = harness(); c.S.generating = true;
+    let dialog; c.confirmTyped = options => { dialog = options; };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    assert.equal(dialog, undefined);
+    assert.equal(c.calls.length, 0);
+  });
+  await check("删除确认期间启动任务则禁止删除", async () => {
+    const c = harness(); let dialog;
+    c.confirmTyped = options => { dialog = options; };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    c.S.generating = true;
+    await dialog.onConfirm();
+    assert.equal(c.calls.length, 0);
+  });
+  await check("删除作品前保存失败保留原稿", async () => {
+    const c = harness(); let dialog;
+    c.confirmTyped = options => { dialog = options; };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    await dialog.onConfirm();
+    assert.deepEqual(c.calls.map(call => call[0]), ["save_draft"]);
+    assert.equal(c.get("editor").value, "尚未保存的新正文");
+  });
+  await check("删除前等待保存时启动任务则禁止删除", async () => {
+    const c = harness(); let dialog;
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async (name) => { c.calls.push([name]); c.S.generating = true; return {}; };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    await dialog.onConfirm();
+    assert.deepEqual(c.calls.map(call => call[0]), ["save_draft"]);
+  });
   console.log(`Completed ${checks} UI regression checks.`);
 })().catch(error => { console.error(error); process.exitCode = 1; });
