@@ -41,6 +41,8 @@ const state = {
   importing: false,
   follow: true,
   saveQueue: Promise.resolve(),
+  saveEpochs: new Map(),
+  deletingProject: null,
   saveTimer: 0,
   saveError: "",
   dirty: false,
@@ -728,13 +730,14 @@ async function flushSave() {
     try { return await pending; }
     finally {
       state.flushPromise = null;
-      if (!state.closing && !state.generating && !state.importing) editor.readOnly = wasReadOnly;
+      if (!state.closing && !state.generating && !state.importing && !state.deletingProject) editor.readOnly = wasReadOnly;
     }
   })();
   return state.flushPromise;
 }
 
 function blockIfGenerating() {
+  if (state.deletingProject) { toast("正在删除作品，请稍候。"); return true; }
   if (state.changingRoot) { toast("正在切换项目库，请稍候。"); return true; }
   if (!state.generating) return false;
   toast("请等待当前生成完成。");
@@ -829,18 +832,21 @@ async function openChapter(projectId, chapter) {
 }
 
 async function loadDraft(projectId, draftId, { silent = false, force = false } = {}) {
+  if (state.deletingProject) return false;
   if (!force && blockIfGenerating()) return false;
   if (!force && state.draftId) {
     if (!(await flushSave()).ok) return false;
   }
   const navigationId = ++state.navigationId;
+  const projectKey = saveProjectKey(state.projectsRoot, projectId);
+  const projectEpoch = state.saveEpochs.get(projectKey) || 0;
   $("editor").readOnly = true;
   let draft;
   try { draft = await call("open_draft", projectId, draftId); }
   finally {
-    if (navigationId === state.navigationId) $("editor").readOnly = state.closing || state.generating;
+    if (navigationId === state.navigationId) $("editor").readOnly = state.closing || state.generating || Boolean(state.deletingProject);
   }
-  if (navigationId !== state.navigationId) return false;
+  if (navigationId !== state.navigationId || state.deletingProject || (state.saveEpochs.get(projectKey) || 0) !== projectEpoch) return false;
   state.projectId = draft.project_id;
   state.chapterId = draft.chapter_id;
   state.draftId = draft.draft_id;
@@ -880,44 +886,64 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
 
 function scheduleSave() {
   updateCountPill();
-  if (!state.draftId || $("editor").readOnly || state.importing) return;
+  if (!state.draftId || $("editor").readOnly || state.importing || state.deletingProject) return;
   state.dirty = true;
   $("savePill").textContent = "保存中…";
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(saveDraft, 700);
 }
 
+function saveProjectKey(projectsRoot, projectId) {
+  return JSON.stringify([projectsRoot, projectId]);
+}
+
+function invalidateProjectSaves(projectsRoot, projectId) {
+  const key = saveProjectKey(projectsRoot, projectId);
+  state.saveEpochs.set(key, (state.saveEpochs.get(key) || 0) + 1);
+}
+
 async function saveDraft() {
-  // importing 与 readOnly 都必须挡住：saveDraft 原先只认 readOnly，覆盖导入后旧缓冲会写回磁盘。
-  if (!state.projectId || !state.draftId || $("editor").readOnly || state.importing) return { ok: true };
-  const projectId = state.projectId;
-  const draftId = state.draftId;
-  const text = $("editor").value;
-  const projectsRoot = state.projectsRoot;
-  // Serialize writes so a slower earlier request cannot overwrite newer editor text.
-  const queuedSave = state.saveQueue
-    .catch(() => {})
-    .then(() => {
-      const previous = state.savedSnapshot;
-      if (previous?.projectsRoot === projectsRoot && previous.projectId === projectId && previous.draftId === draftId && previous.text === text) return { changed: false };
-      return call("save_draft", projectId, draftId, text, projectsRoot);
-    });
+  if (!state.projectId || !state.draftId || $("editor").readOnly || state.importing || state.deletingProject) return { ok: true };
+  const snapshot = {
+    projectId: state.projectId, draftId: state.draftId,
+    text: $("editor").value, projectsRoot: state.projectsRoot,
+    navigationId: state.navigationId,
+  };
+  const key = saveProjectKey(snapshot.projectsRoot, snapshot.projectId);
+  const epoch = state.saveEpochs.get(key) || 0;
+  const valid = () => (state.saveEpochs.get(key) || 0) === epoch;
+  const current = () => valid() && state.projectsRoot === snapshot.projectsRoot
+    && state.projectId === snapshot.projectId && state.draftId === snapshot.draftId
+    && state.navigationId === snapshot.navigationId;
+  const queuedSave = state.saveQueue.catch(() => {}).then(() => {
+    if (!valid()) return { discarded: true };
+    const previous = state.savedSnapshot;
+    if (previous && previous.projectsRoot === snapshot.projectsRoot && previous.projectId === snapshot.projectId
+      && previous.draftId === snapshot.draftId && previous.text === snapshot.text) return { changed: false };
+    return call("save_draft", snapshot.projectId, snapshot.draftId, snapshot.text, snapshot.projectsRoot);
+  });
   state.saveQueue = queuedSave.catch(() => {});
   try {
     const result = await queuedSave;
-    state.savedSnapshot = { projectsRoot, projectId, draftId, text };
-    if (result?.memory_reminder) queueMemoryReminder(projectId, result.memory_reminder);
-    if (projectId === state.projectId && draftId === state.draftId && text === $("editor").value) {
-      state.saveError = "";
-      state.dirty = false;
-      state.lastSavedAt = Date.now();
-      refreshSavePill();
+    if (!valid() || result?.discarded) return { ok: true, discarded: true };
+    if (result?.memory_reminder) queueMemoryReminder(snapshot.projectId, result.memory_reminder);
+    if (current()) {
+      state.savedSnapshot = snapshot;
+      if (snapshot.text === $("editor").value) {
+        state.saveError = "";
+        state.dirty = false;
+        state.lastSavedAt = Date.now();
+        refreshSavePill();
+      }
     }
     return { ok: true };
   } catch (error) {
-    state.saveError = error.message || "保存失败";
-    $("savePill").textContent = "保存失败";
-    toast(error.message);
+    if (!valid()) return { ok: true, discarded: true };
+    if (current()) {
+      state.saveError = error.message || "保存失败";
+      $("savePill").textContent = "保存失败";
+      toast(error.message);
+    }
     return { ok: false, error: error.message || "保存失败" };
   }
 }
@@ -1886,33 +1912,57 @@ async function deleteProject(project) {
     title: "删除作品",
     desc: `将删除整个作品：${project.title}\n\n作品目录会移入回收站，草稿、定稿、设置和本作品密钥都会一起移走。该作品尚未保存的编辑将被放弃，不会先尝试保存。`,
     phrase: "确认删除",
-    onConfirm: async () => {
-      // A task may have started after the confirmation dialog was opened.
-      if (blockIfGenerating()) return;
-      const deletingCurrent = state.projectId === project.project_id;
-      const wasReadOnly = $("editor").readOnly;
-      if (deletingCurrent) {
-        clearTimeout(state.saveTimer);
-        state.saveTimer = 0;
-        $("editor").readOnly = true;
-      }
-      try {
-        const result = await call("delete_project", project.project_id, "确认删除");
-        state.workspace = result.workspace || [];
-        // Deleting another project must not discard or save the current buffer.
-        if (state.projectId === project.project_id) {
-          clearEditorBuffer();
-          state.projectId = "";
-        }
-        renderTree();
-        toast("作品已移入回收站。");
-      } finally {
-        if (deletingCurrent && !state.generating && !state.closing) {
-          $("editor").readOnly = wasReadOnly;
-        }
-      }
-    },
+    onConfirm: () => performProjectDeletion(project.project_id),
   });
+}
+
+async function performProjectDeletion(projectId) {
+  if (blockIfGenerating() || state.importing || state.closing) return;
+  const operation = { projectId, projectsRoot: state.projectsRoot,
+    current: state.projectId === projectId, wasReadOnly: $("editor").readOnly,
+    hadPendingSave: Boolean(state.saveTimer) };
+  state.deletingProject = operation;
+  // Invalidate queued calls AND their callbacks before sending the deletion.
+  // Already-dispatched disk writes are handled by the backend admission protocol.
+  invalidateProjectSaves(operation.projectsRoot, projectId);
+  if (operation.current) {
+    state.navigationId += 1;
+    clearTimeout(state.saveTimer);
+    state.saveTimer = 0;
+    $("editor").readOnly = true;
+  }
+  let committed = false;
+  let nextProject = "";
+  try {
+    const result = await call("delete_project", projectId, "确认删除");
+    committed = true;
+    state.workspace = Array.isArray(result.workspace) ? result.workspace
+      : state.workspace.filter(item => item.project_id !== projectId);
+    if (operation.current) {
+      clearEditorBuffer();
+      state.projectId = "";
+      nextProject = state.workspace[0]?.project_id || "";
+      $("projectChip").textContent = "未选择作品";
+    }
+    renderTree();
+    toast(result.warning || "作品已移入回收站。");
+  } finally {
+    state.deletingProject = null;
+    if (operation.current && !state.generating && !state.closing && !state.importing) {
+      $("editor").readOnly = operation.wasReadOnly;
+      // Restore only a previously scheduled save, once. No retry loop and no
+      // save-success dependency on deletion. Dirty text survives a failed delete.
+      if (!committed && operation.hadPendingSave && state.dirty) {
+        state.saveTimer = setTimeout(saveDraft, 700);
+      }
+    }
+  }
+  // Preserve the existing next-project selection after deleting the active one.
+  // Selection/refresh failure is not a failed deletion.
+  if (committed && nextProject) {
+    try { await selectProject(nextProject); }
+    catch (error) { toast(`作品已删除，打开下一作品失败：${error.message}`); }
+  }
 }
 
 async function deleteDraft(projectId, chapter, draft) {
@@ -2528,6 +2578,7 @@ window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose(at
   state.closeAttempt = Number(attemptId) || 0;
   try { await chapterInputSave; }
   catch (error) { toast(error.message); return { ok: false, error: error.message }; }
+  if (state.deletingProject) return { ok: false, error: "正在删除作品，请稍候。" };
   if (state.changingRoot) return { ok: false, error: "正在切换项目库，请稍候。" };
   if (state.generating) {
     const error = "请等待当前任务完成，或点击“停止任务”后再关闭。";

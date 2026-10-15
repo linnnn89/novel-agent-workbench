@@ -54,7 +54,7 @@ class DeleteProjectBusyTests(unittest.TestCase):
         self.assertFalse(self.store.root.exists())
         self.assertTrue(Path(result["data"]["result"]["trashed_path"]).exists())
 
-    def test_delete_holds_job_start_lock_through_storage_operation(self):
+    def test_deletion_reservation_blocks_jobs_without_holding_state_lock(self):
         entered, release, finished = threading.Event(), threading.Event(), threading.Event()
         original = WorkbenchApplicationService.delete_project
         results = []
@@ -76,7 +76,10 @@ class DeleteProjectBusyTests(unittest.TestCase):
                 acquired = self.bridge._busy_lock.acquire(blocking=False)
                 if acquired:
                     self.bridge._busy_lock.release()
-                self.assertFalse(acquired, "_begin_job must not enter during deletion")
+                self.assertTrue(acquired, "disk I/O must not hold the state lock")
+                self.assertFalse(self.bridge._begin_job())
+                self.assertFalse(self.bridge.save_draft("test", "d", "x")["ok"])
+                self.assertFalse(self.bridge.cancel_job()["data"]["stopping"])
             finally:
                 release.set()
                 thread.join(5)
@@ -97,7 +100,7 @@ class DeleteProjectBusyTests(unittest.TestCase):
         self.assertFalse(self.bridge.save_draft("test", "draft", "late text")["ok"])
         self.assertFalse(self.store.root.exists())
 
-    def test_inflight_save_holds_same_lock_as_deletion(self):
+    def test_stalled_save_rejects_delete_immediately_without_blocking_control(self):
         entered, release = threading.Event(), threading.Event()
         results = []
         def paused_save(*args, **kwargs):
@@ -113,12 +116,61 @@ class DeleteProjectBusyTests(unittest.TestCase):
                 acquired = self.bridge._busy_lock.acquire(blocking=False)
                 if acquired:
                     self.bridge._busy_lock.release()
-                self.assertFalse(acquired)
+                self.assertTrue(acquired)
+                rejected = self.bridge.delete_project("test", "确认删除")
+                self.assertFalse(rejected["ok"])
+                self.assertIn("尚未结束", rejected["error"])
+                self.assertTrue(self.store.root.exists())
+                self.assertFalse(self.bridge._begin_job())
+                self.assertFalse(self.bridge.cancel_job()["data"]["stopping"])
             finally:
                 release.set()
                 thread.join(5)
         self.assertFalse(results[0]["ok"])
         self.assertTrue(self.bridge.delete_project("test", "确认删除")["ok"])
+
+    def test_refresh_failure_after_delete_is_committed_success(self):
+        with patch("novel_agent_workbench.modern_desktop.build_workspace_tree", side_effect=OSError("refresh failed")):
+            result = self.bridge.delete_project("test", "确认删除")
+        self.assertTrue(result["ok"])
+        self.assertIn("warning", result["data"])
+        self.assertFalse(self.store.root.exists())
+        self.assertTrue(self.bridge._begin_job())
+        self.bridge._end_job()
+
+    def test_operation_reservation_released_on_any_exception(self):
+        with self.assertRaises(ValueError):
+            with self.bridge._local_operation("test"):
+                raise ValueError("failure")
+        self.assertTrue(self.bridge._begin_job())
+        self.bridge._end_job()
+
+    def test_stale_library_save_rejected_before_disk_access(self):
+        with patch.object(WorkbenchApplicationService, "update_draft_content") as write:
+            result = self.bridge.save_draft("test", "d", "text", str(self.bridge.projects_root / "other"))
+        self.assertFalse(result["ok"])
+        write.assert_not_called()
+
+    def test_inspections_can_coexist_but_block_mutation_and_job(self):
+        with self.bridge._local_operation("inspect one", inspection=True):
+            with self.bridge._local_operation("inspect two", inspection=True):
+                self.assertEqual(self.bridge._active_inspections, 2)
+                self.assertFalse(self.bridge._begin_job())
+                self.assertFalse(self.bridge.delete_project("test", "确认删除")["ok"])
+                acquired = self.bridge._busy_lock.acquire(blocking=False)
+                self.assertTrue(acquired)
+                if acquired:
+                    self.bridge._busy_lock.release()
+        self.assertEqual(self.bridge._active_inspections, 0)
+        self.assertTrue(self.bridge.delete_project("test", "确认删除")["ok"])
+
+    def test_inspection_failure_releases_lease(self):
+        with self.assertRaises(ValueError):
+            with self.bridge._local_operation("inspect", inspection=True):
+                raise ValueError("bad data")
+        self.assertEqual(self.bridge._active_inspections, 0)
+        self.assertTrue(self.bridge._begin_job())
+        self.bridge._end_job()
 
     def test_confirmation_still_required(self):
         self.assertFalse(self.bridge.delete_project("test", "")["ok"])
