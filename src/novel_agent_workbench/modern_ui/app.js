@@ -43,6 +43,7 @@ const state = {
   saveQueue: Promise.resolve(),
   saveEpochs: new Map(),
   deletingProject: null,
+  exportingTxt: false,
   saveTimer: 0,
   saveError: "",
   dirty: false,
@@ -730,13 +731,14 @@ async function flushSave() {
     try { return await pending; }
     finally {
       state.flushPromise = null;
-      if (!state.closing && !state.generating && !state.importing && !state.deletingProject) editor.readOnly = wasReadOnly;
+      if (!state.closing && !state.generating && !state.importing && !state.deletingProject && !state.exportingTxt) editor.readOnly = wasReadOnly;
     }
   })();
   return state.flushPromise;
 }
 
 function blockIfGenerating() {
+  if (state.exportingTxt) { toast("正在另存为 TXT，请稍候。"); return true; }
   if (state.deletingProject) { toast("正在删除作品，请稍候。"); return true; }
   if (state.changingRoot) { toast("正在切换项目库，请稍候。"); return true; }
   if (!state.generating) return false;
@@ -832,7 +834,7 @@ async function openChapter(projectId, chapter) {
 }
 
 async function loadDraft(projectId, draftId, { silent = false, force = false } = {}) {
-  if (state.deletingProject) return false;
+  if (state.deletingProject || state.exportingTxt) return false;
   if (!force && blockIfGenerating()) return false;
   if (!force && state.draftId) {
     if (!(await flushSave()).ok) return false;
@@ -844,9 +846,9 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
   let draft;
   try { draft = await call("open_draft", projectId, draftId); }
   finally {
-    if (navigationId === state.navigationId) $("editor").readOnly = state.closing || state.generating || Boolean(state.deletingProject);
+    if (navigationId === state.navigationId) $("editor").readOnly = state.closing || state.generating || Boolean(state.deletingProject) || state.exportingTxt;
   }
-  if (navigationId !== state.navigationId || state.deletingProject || (state.saveEpochs.get(projectKey) || 0) !== projectEpoch) return false;
+  if (navigationId !== state.navigationId || state.deletingProject || state.exportingTxt || (state.saveEpochs.get(projectKey) || 0) !== projectEpoch) return false;
   state.projectId = draft.project_id;
   state.chapterId = draft.chapter_id;
   state.draftId = draft.draft_id;
@@ -1777,6 +1779,7 @@ function menuItemsFor(target) {
     { label: "模型服务", onClick: () => openModelStudio() },
     { label: "打开作品文件夹", onClick: () => call("open_folder", "project", projectId) },
     // 树上只导出被右键的这一部；导入不挂在这里，避免以为会覆盖这一行。
+    { label: "整部作品另存为 TXT…", onClick: () => openTxtExportSheet(projectId) },
     { label: "导出作品包…", onClick: () => exportProjectPackage(projectId) },
     "-",
     { label: "删除作品", danger: true, onClick: () => deleteProject(target.project) },
@@ -2191,6 +2194,54 @@ async function changeDataRoot() {
   }
 }
 
+function openTxtExportSheet(projectId = state.projectId) {
+  if (blockIfGenerating()) return;
+  if (!projectId) return toast("请先选择作品。");
+  const root = state.projectsRoot;
+  const run = async (scope) => {
+    closeModal();
+    if (root !== state.projectsRoot) return toast("项目库已切换，请重新选择作品。");
+    await exportProjectTxt(projectId, scope);
+  };
+  openModal({
+    title: "整部作品另存为 TXT",
+    body: document.createElement("div"),
+    desc: "按章节顺序合并为一个 TXT。整部作品每章优先采用已确认正文，没有确认稿时采用最新版本草稿；不重复导出历史版本，不包含仅有大纲的空章节。UTF-8 BOM 编码、CRLF 换行，保留正文段落。",
+    actions: [
+      { label: "取消", onClick: closeModal },
+      { label: "仅已确认章节…", onClick: () => run("confirmed") },
+      { label: "整部作品（含未确认草稿）…", style: "primary", onClick: () => run("whole") },
+    ],
+  });
+}
+
+async function exportProjectTxt(projectId, scope = "whole") {
+  if (blockIfGenerating() || state.importing || state.closing) return;
+  if (!projectId) return toast("请先选择作品。");
+  const root = state.projectsRoot;
+  if (projectId === state.projectId && !(await flushSave()).ok) return;
+  // Saving yields to the event loop: recheck admission and root afterwards.
+  if (blockIfGenerating() || state.importing || state.closing) return;
+  if (root !== state.projectsRoot) return toast("项目库已切换，请重新导出。");
+  const editor = $("editor");
+  const wasReadOnly = editor.readOnly;
+  const hadPendingSave = Boolean(state.saveTimer);
+  clearTimeout(state.saveTimer);
+  state.saveTimer = 0;
+  state.exportingTxt = true;
+  editor.readOnly = true;
+  try {
+    const result = await call("export_txt", projectId, scope, root);
+    toast(`已另存为 TXT：${result.chapter_count} 章，其中未确认草稿 ${result.draft_count || 0} 章。`);
+  } catch (error) {
+    if (!error.cancelled) toast(error.message);
+  } finally {
+    state.exportingTxt = false;
+    if (!state.generating && !state.closing && !state.importing && !state.deletingProject && !state.exportingTxt) editor.readOnly = wasReadOnly;
+    if (hadPendingSave && state.dirty) scheduleSave();
+  }
+}
+
 async function exportProjectPackage(projectId) {
   if (blockIfGenerating()) return;
   if (!projectId) {
@@ -2232,7 +2283,7 @@ function openPackageSheet() {
   body.append(exportCurrent, importPkg);
   openModal({
     title: "导入导出",
-    desc: "把整部作品打包带走，或从作品包恢复到当前项目库。作品包包含草稿、大纲、人物、记忆和审稿，不含 API Key。「导出 TXT」仍然只导出已确认章节正文。",
+    desc: "把整部作品打包带走，或从作品包恢复到当前项目库。作品包包含草稿、大纲、人物、记忆和审稿，不含 API Key。「整部作品另存为 TXT」用于合并章节正文，可选择包含未确认章节的最新草稿。",
     body,
     actions: [{ label: "取消", onClick: closeModal }],
   });
@@ -2459,16 +2510,7 @@ function bindEvents() {
       toast(error.message);
     }
   });
-  $("exportBtn").addEventListener("click", async () => {
-    if (!state.projectId) return toast("请先选择作品。");
-    try {
-      if (blockIfGenerating() || !(await flushSave()).ok) return;
-      await call("export_txt", state.projectId);
-      toast("已导出 TXT。");
-    } catch (error) {
-      if (!error.cancelled) toast(error.message);
-    }
-  });
+  $("exportBtn").addEventListener("click", () => openTxtExportSheet());
   $("packageBtn").addEventListener("click", () => openPackageSheet());
   $("prevBtn").addEventListener("click", async () => {
     if (state.draftIndex > 0) {
@@ -2578,6 +2620,7 @@ window.__workbenchFlushBeforeClose = async function workbenchFlushBeforeClose(at
   state.closeAttempt = Number(attemptId) || 0;
   try { await chapterInputSave; }
   catch (error) { toast(error.message); return { ok: false, error: error.message }; }
+  if (state.exportingTxt) return { ok: false, error: "正在另存为 TXT，请稍候。" };
   if (state.deletingProject) return { ok: false, error: "正在删除作品，请稍候。" };
   if (state.changingRoot) return { ok: false, error: "正在切换项目库，请稍候。" };
   if (state.generating) {

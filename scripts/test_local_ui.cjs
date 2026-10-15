@@ -283,5 +283,69 @@ async function check(name, test) { await test(); checks++; console.log(`PASS ${n
     assert.equal(c.S.projectId, ""); assert.equal(c.S.workspace.length, 0);
     assert.equal(c.lastToast, "请手动刷新");
   });
+  await check("TXT 保存失败不打开另存为", async () => {
+    const c = harness(); await c.exportProjectTxt("p");
+    assert.deepEqual(c.calls.map(x => x[0]), ["save_draft"]);
+    assert.equal(c.S.exportingTxt, false);
+  });
+  await check("TXT 固定目标作品与项目库并传递范围", async () => {
+    const c = harness(); c.S.projectsRoot = "root-A";
+    c.call = async (name, ...args) => {
+      c.calls.push([name, ...args]);
+      return name === "export_txt" ? { chapter_count: 3, draft_count: 2 } : {};
+    };
+    await c.exportProjectTxt("p", "whole");
+    assert.deepEqual(c.calls.map(x => x[0]), ["save_draft", "export_txt"]);
+    assert.deepEqual(c.calls[1], ["export_txt", "p", "whole", "root-A"]);
+    assert.match(c.lastToast, /3 章.*2 章/);
+    assert.equal(c.S.exportingTxt, false); assert.equal(c.get("editor").readOnly, false);
+  });
+  await check("TXT 另存为期间禁止重复导出导航和关闭", async () => {
+    const c = harness(); let finish;
+    c.call = async name => name === "export_txt" ? await new Promise(r => { finish = r; }) : {};
+    const exporting = c.exportProjectTxt("p");
+    for (let i = 0; i < 10 && !finish; i++) await Promise.resolve();
+    assert.equal(c.S.exportingTxt, true); assert.equal(c.get("editor").readOnly, true);
+    assert.equal(await c.loadDraft("other", "x", { force: true }), false);
+    assert.equal(await c.selectProject("other"), false);
+    assert.equal((await c.window.__workbenchFlushBeforeClose()).ok, false);
+    await c.exportProjectTxt("other");
+    finish({ chapter_count: 1 }); await exporting;
+    assert.equal(c.S.exportingTxt, false); assert.equal(c.get("editor").readOnly, false);
+  });
+  await check("TXT 取消与失败恢复编辑器且取消不报错", async () => {
+    for (const cancelled of [true, false]) {
+      const c = harness(); c.get("editor").readOnly = true;
+      c.call = async () => { throw Object.assign(new Error("写入失败"), { cancelled }); };
+      await c.exportProjectTxt("p");
+      assert.equal(c.S.exportingTxt, false); assert.equal(c.get("editor").readOnly, true);
+      assert.equal(c.lastToast, cancelled ? undefined : "写入失败");
+    }
+  });
+  await check("TXT 导出其他作品后恢复当前草稿保存计时", async () => {
+    const c = harness(); let scheduled = 0;
+    c.S.saveTimer = 1; c.S.dirty = true;
+    c.scheduleSave = () => { scheduled++; };
+    c.call = async (name, ...args) => { c.calls.push([name, ...args]); return { chapter_count: 1 }; };
+    await c.exportProjectTxt("other", "confirmed");
+    assert.deepEqual(c.calls.map(x => x[0]), ["export_txt"]);
+    assert.equal(c.calls[0][1], "other"); assert.equal(scheduled, 1);
+    assert.equal(c.S.projectId, "p"); assert.equal(c.get("editor").value, "尚未保存的新正文");
+  });
+  await check("TXT 保存期间切换项目库拒绝跨库导出", async () => {
+    const c = harness(); c.S.projectsRoot = "A";
+    c.flushSave = async () => { c.S.projectsRoot = "B"; return { ok: true }; };
+    await c.exportProjectTxt("p"); assert.equal(c.calls.length, 0);
+    assert.match(c.lastToast, /项目库已切换/);
+  });
+  await check("TXT 范围选择绑定右键作品", async () => {
+    const c = harness(); c.closeModal = () => {}; let args;
+    c.exportProjectTxt = async (...values) => { args = values; };
+    c.openTxtExportSheet("other");
+    await c.dialog.actions[2].onClick();
+    assert.deepEqual(args, ["other", "whole"]);
+    await c.dialog.actions[1].onClick();
+    assert.deepEqual(args, ["other", "confirmed"]);
+  });
   console.log(`Completed ${checks} UI regression checks.`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

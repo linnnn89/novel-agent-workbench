@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .application_service import WorkbenchApplicationService
+from .exports import safe_txt_filename
 from .task_control import JobControl, JobCancelled, current_job, job_scope
 from .token_budget import InputBudgetExceeded
 from .ui_presenters import (
@@ -77,7 +78,7 @@ USER_GUIDE_TEXT = """基本流程
 5. 点击“生成新章节”，需要时可先预览将发送给模型的结构，再生成草稿。
 6. 草稿经过审稿、改写、确认后，才会进入后续上下文和定稿流程。
 7. 记忆库可查看已保存记忆、预览发送结构，再按勾选章节生成或压缩。
-8. 右侧「导入导出」可以把整部作品打包为作品包（.nawpkg）带走或恢复，不含 API Key。导出 TXT 仍然只导出已确认章节正文。
+8. 右侧「导入导出」可以把整部作品打包为作品包（.nawpkg）带走或恢复，不含 API Key。整部作品另存为 TXT 可选择全部正文或仅已确认章节；全部正文每章优先取已确认稿，否则取最新草稿。
 
 安全边界
 --------
@@ -1452,7 +1453,7 @@ class WorkbenchBridge:
             [
                 "导出设置",
                 "--------",
-                "TXT: 可用。导出范围为当前作品的已确认章节，不包含草稿、审稿记录、API Key 或本地私密设置。",
+                "TXT: 可用。整部作品每章优先取已确认正文，否则取最新草稿；也可选择仅已确认章节。不包含审稿、记忆或 API Key。编码 UTF-8 BOM，换行 CRLF。",
                 "DOCX：开发中。整部作品的打包迁移请用右侧「导入导出」，不要与 TXT 文稿混淆。",
                 "",
                 f"TXT设置: {settings.get('txt_enabled', '默认启用')}",
@@ -1550,29 +1551,32 @@ class WorkbenchBridge:
     def new_planning_id(self, item_type: str) -> dict[str, Any]:
         return _ok({"planning_id": default_planning_id(item_type)})
 
-    def export_txt(self, project_id: str) -> dict[str, Any]:
+    def export_txt(self, project_id: str, scope: str = "confirmed", projects_root: str = "") -> dict[str, Any]:
         try:
             import webview
         except ImportError:
             return _fail("当前环境还没有安装 pywebview。")
         if _ACTIVE_WINDOW is None:
             return _fail("窗口尚未就绪。")
-        title = next(
-            (str(item.get("title") or project_id) for item in self.app.list_projects() if item.get("project_id") == project_id),
-            project_id,
-        )
-        safe_name = re.sub(r'[<>:"/\\|?*]+', "_", title).strip() or project_id
-        selected = _ACTIVE_WINDOW.create_file_dialog(
-            webview.SAVE_DIALOG,
-            save_filename=f"{safe_name}.txt",
-            file_types=("文本文件 (*.txt)",),
-        )
-        if not selected:
-            return _fail("已取消导出。", cancelled=True)
-        path = selected[0] if isinstance(selected, (list, tuple)) else selected
         try:
-            with self._local_operation("导出正文") as app:
-                result = app.export_confirmed_chapters_txt(project_id, path)
+            if scope not in {"whole", "confirmed"}:
+                raise ValueError("未知的 TXT 导出范围。")
+            # Reserve this root/project throughout the native dialog and export.
+            # The state mutex is never held while the user chooses a destination.
+            with self._local_operation("另存为 TXT", projects_root=projects_root) as app:
+                title = str(app._open_store(project_id).read_project_meta().get("title") or project_id)
+                selected = _ACTIVE_WINDOW.create_file_dialog(
+                    webview.SAVE_DIALOG,
+                    save_filename=safe_txt_filename(title),
+                    file_types=("文本文件 (*.txt)",),
+                )
+                if not selected:
+                    return _fail("已取消导出。", cancelled=True)
+                path = selected[0] if isinstance(selected, (list, tuple)) else selected
+                # Do not silently change a path after the native overwrite confirmation.
+                if Path(path).suffix.lower() != ".txt":
+                    raise ValueError("请使用 .txt 扩展名另存为。")
+                result = app.export_manuscript_txt(project_id, path, scope=scope)
         except Exception as exc:
             self._log(f"导出TXT失败: project={project_id} error={exc}")
             return _fail(f"导出失败: {exc}")
