@@ -1884,20 +1884,33 @@ async function deleteProject(project) {
   if (blockIfGenerating()) return;
   confirmTyped({
     title: "删除作品",
-    desc: `将删除整个作品：${project.title}\n\n作品目录会移入回收站，草稿、定稿、设置和本作品密钥都会一起移走。`,
+    desc: `将删除整个作品：${project.title}\n\n作品目录会移入回收站，草稿、定稿、设置和本作品密钥都会一起移走。该作品尚未保存的编辑将被放弃，不会先尝试保存。`,
     phrase: "确认删除",
     onConfirm: async () => {
       // A task may have started after the confirmation dialog was opened.
-      if (blockIfGenerating() || !(await flushSave()).ok || blockIfGenerating()) return;
-      const result = await call("delete_project", project.project_id, "确认删除");
-      state.workspace = result.workspace || [];
-      state.projectId = state.workspace[0]?.project_id || "";
-      state.chapterId = "";
-      state.draftId = "";
-      $("editor").value = "";
-      renderTree();
-      if (state.projectId) await selectProject(state.projectId);
-      toast("作品已移入回收站。");
+      if (blockIfGenerating()) return;
+      const deletingCurrent = state.projectId === project.project_id;
+      const wasReadOnly = $("editor").readOnly;
+      if (deletingCurrent) {
+        clearTimeout(state.saveTimer);
+        state.saveTimer = 0;
+        $("editor").readOnly = true;
+      }
+      try {
+        const result = await call("delete_project", project.project_id, "确认删除");
+        state.workspace = result.workspace || [];
+        // Deleting another project must not discard or save the current buffer.
+        if (state.projectId === project.project_id) {
+          clearEditorBuffer();
+          state.projectId = "";
+        }
+        renderTree();
+        toast("作品已移入回收站。");
+      } finally {
+        if (deletingCurrent && !state.generating && !state.closing) {
+          $("editor").readOnly = wasReadOnly;
+        }
+      }
     },
   });
 }

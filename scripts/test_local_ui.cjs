@@ -178,21 +178,45 @@ async function check(name, test) { await test(); checks++; console.log(`PASS ${n
     await dialog.onConfirm();
     assert.equal(c.calls.length, 0);
   });
-  await check("删除作品前保存失败保留原稿", async () => {
+  await check("保存故障不阻止明确确认删除作品", async () => {
     const c = harness(); let dialog;
+    c.S.dirty = true; c.S.saveError = "磁盘写入失败"; c.S.saveTimer = 99;
     c.confirmTyped = options => { dialog = options; };
+    c.call = async (name) => {
+      c.calls.push([name]);
+      if (name === "save_draft") throw new Error("永久保存故障");
+      return { workspace: [] };
+    };
     await c.deleteProject({ project_id: "p", title: "作品" });
     await dialog.onConfirm();
-    assert.deepEqual(c.calls.map(call => call[0]), ["save_draft"]);
+    assert.deepEqual(c.calls.map(call => call[0]), ["delete_project"]);
+    assert.equal(c.S.saveTimer, 0);
+    assert.equal(c.S.dirty, false);
+    assert.equal(c.get("editor").value, "");
+  });
+  await check("删除其他作品保留当前未保存正文", async () => {
+    const c = harness(); let dialog;
+    c.S.dirty = true; c.S.saveTimer = 99;
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async name => { c.calls.push([name]); return { workspace: [] }; };
+    await c.deleteProject({ project_id: "other", title: "其他作品" });
+    await dialog.onConfirm();
+    assert.deepEqual(c.calls.map(call => call[0]), ["delete_project"]);
+    assert.equal(c.S.projectId, "p");
+    assert.equal(c.S.dirty, true);
+    assert.equal(c.S.saveTimer, 99);
     assert.equal(c.get("editor").value, "尚未保存的新正文");
   });
-  await check("删除前等待保存时启动任务则禁止删除", async () => {
+  await check("删除失败保留正文并恢复编辑", async () => {
     const c = harness(); let dialog;
+    c.S.dirty = true;
     c.confirmTyped = options => { dialog = options; };
-    c.call = async (name) => { c.calls.push([name]); c.S.generating = true; return {}; };
+    c.call = async () => { throw new Error("删除失败"); };
     await c.deleteProject({ project_id: "p", title: "作品" });
-    await dialog.onConfirm();
-    assert.deepEqual(c.calls.map(call => call[0]), ["save_draft"]);
+    await assert.rejects(dialog.onConfirm(), /删除失败/);
+    assert.equal(c.get("editor").value, "尚未保存的新正文");
+    assert.equal(c.S.dirty, true);
+    assert.equal(c.get("editor").readOnly, false);
   });
   console.log(`Completed ${checks} UI regression checks.`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

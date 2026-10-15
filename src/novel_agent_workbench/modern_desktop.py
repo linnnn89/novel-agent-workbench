@@ -760,7 +760,10 @@ class WorkbenchBridge:
                 if projects_root and Path(projects_root).resolve() != self.projects_root:
                     return _fail("项目库已切换，旧库的保存请求已停止。请重新打开正确的作品。")
                 app = self.app
-            result = app.update_draft_content(project_id, draft_id, text=str(text or ""))
+                # Serialize an already dispatched save with project deletion.
+                # A late save must check project existence after deletion, not
+                # retain a store that could initialize the removed directory.
+                result = app.update_draft_content(project_id, draft_id, text=str(text or ""))
         except Exception as exc:
             return _fail(f"保存编辑失败: {exc}")
         return _ok(_jsonable(result))

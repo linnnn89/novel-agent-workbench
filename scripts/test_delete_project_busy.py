@@ -90,6 +90,36 @@ class DeleteProjectBusyTests(unittest.TestCase):
         self.bridge._end_job()
         self.assertTrue(self.store.root.exists())
 
+    def test_save_failure_does_not_block_delete_and_late_save_cannot_recreate(self):
+        with patch.object(WorkbenchApplicationService, "update_draft_content", side_effect=OSError("save broken")):
+            self.assertFalse(self.bridge.save_draft("test", "draft", "text")["ok"])
+        self.assertTrue(self.bridge.delete_project("test", "确认删除")["ok"])
+        self.assertFalse(self.bridge.save_draft("test", "draft", "late text")["ok"])
+        self.assertFalse(self.store.root.exists())
+
+    def test_inflight_save_holds_same_lock_as_deletion(self):
+        entered, release = threading.Event(), threading.Event()
+        results = []
+        def paused_save(*args, **kwargs):
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError("test save timed out")
+            raise OSError("save failed")
+        with patch.object(WorkbenchApplicationService, "update_draft_content", side_effect=paused_save):
+            thread = threading.Thread(target=lambda: results.append(self.bridge.save_draft("test", "draft", "text")))
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                acquired = self.bridge._busy_lock.acquire(blocking=False)
+                if acquired:
+                    self.bridge._busy_lock.release()
+                self.assertFalse(acquired)
+            finally:
+                release.set()
+                thread.join(5)
+        self.assertFalse(results[0]["ok"])
+        self.assertTrue(self.bridge.delete_project("test", "确认删除")["ok"])
+
     def test_confirmation_still_required(self):
         self.assertFalse(self.bridge.delete_project("test", "")["ok"])
         self.assertTrue(self.store.root.exists())
