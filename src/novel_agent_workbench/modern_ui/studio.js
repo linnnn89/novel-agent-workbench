@@ -907,7 +907,8 @@ async function saveMemoryStudio() {
     studio.memoryResultChapterIds = null;
     renderMemoryStudio();
     markStudioSaved();
-    loadOverview(state.projectId).catch(() => {});
+    // Keep task buttons locked until the overview inspection releases admission.
+    await loadOverview(state.projectId).catch(() => {});
     toast("记忆库已保存。");
     return true;
   } catch (error) {

@@ -1322,8 +1322,8 @@ async function reviewDraft() {
   }
 }
 
-function finishReview(payload) {
-  setBusy(false);
+async function finishReview(payload) {
+  if (!payload?.ok) setBusy(false);
   ThinkTrace.finish(payload?.ok !== false);
   const review = payload.data || {};
   if (!payload?.ok) {
@@ -1350,7 +1350,10 @@ function finishReview(payload) {
   }
   if (!payload?.ok) { toast(payload?.error || state.reviewNotice); return; }
   if (review.truncated) toast(review.truncated_notice || "审稿意见被截断，可能不完整。");
-  loadOverview(state.projectId).catch(() => {});
+  // Navigation saves must not overlap this completion's overview inspection.
+  try { await loadOverview(state.projectId); }
+  catch (_) {}
+  finally { setBusy(false); }
 }
 
 async function confirmDraft() {

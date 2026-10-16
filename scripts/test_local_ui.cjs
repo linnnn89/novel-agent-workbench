@@ -409,5 +409,62 @@ async function check(name, test) { await test(); checks++; console.log(`PASS ${n
     await c.dialog.actions[1].onClick();
     assert.deepEqual(args, ["other", "confirmed"]);
   });
+  await check("审稿完成等待概览刷新结束后才允许切换稿件", async () => {
+    const c = harness();
+    c.S.generating = true;
+    c.S.draftId = "";
+    c.S.inspectorTab = "book";
+    c.setBusy = busy => { c.S.generating = busy; };
+    c.updateDock = () => {};
+    let finishOverview;
+    c.loadOverview = () => new Promise(resolve => { finishOverview = resolve; });
+    const finishing = c.finishReview({ ok: true, data: { truncated: true, details: "人物动机意见" } });
+    await new Promise(setImmediate);
+    assert.equal(c.S.generating, true, "review completion still owns the overview inspection");
+    assert.equal(await c.loadDraft("p", "new"), false);
+    assert.equal(c.calls.length, 0);
+    finishOverview();
+    await finishing;
+    assert.equal(c.S.generating, false);
+    assert.equal(await c.loadDraft("p", "new"), true);
+    assert.deepEqual(c.calls.map(x => x[0]), ["open_draft"]);
+  });
+  await check("记忆保存等待概览刷新结束后才允许压缩", async () => {
+    const c = harness();
+    const studioSource = fs.readFileSync(path.join(__dirname, "../src/novel_agent_workbench/modern_ui/studio.js"), "utf8");
+    vm.runInContext(studioSource + "\nglobalThis.M = studio;", c);
+    Object.assign(c.M, { mode: "memory", memory: {}, memoryEditor: { value: "已生成的记忆" },
+      memoryTarget: { value: "5000" }, memoryEnabled: { checked: true }, checked: new Set(["chapter_1"]) });
+    c.get("studio").querySelectorAll = () => [];
+    c.get("studioBody").querySelectorAll = () => [];
+    c.renderMemoryStudio = () => {};
+    c.markStudioSaved = () => {};
+    c.setBusy = () => {};
+    c.setStudioStatus = () => {};
+    c.flushSave = async () => ({ ok: true });
+    let finishOverview;
+    let inspecting = false;
+    c.loadOverview = () => { inspecting = true; return new Promise(resolve => {
+      finishOverview = () => { inspecting = false; resolve(); };
+    }); };
+    c.call = async name => {
+      c.calls.push([name]);
+      if (name === "compress_memory" && inspecting) throw new Error("作品资料仍在读取");
+      return {};
+    };
+    let saved = false;
+    const saving = c.saveMemoryStudio().then(result => { saved = true; return result; });
+    await new Promise(setImmediate);
+    assert.equal(inspecting, true);
+    assert.equal(c.M.saving, true, "overview refresh remains part of the save lifecycle");
+    assert.equal(saved, false);
+    await c.runMemoryJob("compress_memory");
+    assert.deepEqual(c.calls.map(x => x[0]), ["save_memory_workspace"]);
+    finishOverview();
+    assert.equal(await saving, true);
+    assert.equal(c.M.saving, false);
+    await c.runMemoryJob("compress_memory");
+    assert.deepEqual(c.calls.map(x => x[0]), ["save_memory_workspace", "compress_memory"]);
+  });
   console.log(`Completed ${checks} UI regression checks.`);
 })().catch(error => { console.error(error); process.exitCode = 1; });
