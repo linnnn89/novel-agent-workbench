@@ -888,10 +888,16 @@ async function loadDraft(projectId, draftId, { silent = false, force = false } =
 
 function scheduleSave() {
   updateCountPill();
-  if (!state.draftId || $("editor").readOnly || state.importing || state.deletingProject) return;
+  if (!state.draftId || $("editor").readOnly || state.importing) return;
   state.dirty = true;
   $("savePill").textContent = "保存中…";
   clearTimeout(state.saveTimer);
+  state.saveTimer = 0;
+  if (state.deletingProject) {
+    // Editing another project remains available; resume its save after deletion.
+    state.deletingProject.hadPendingSave = true;
+    return;
+  }
   state.saveTimer = setTimeout(saveDraft, 700);
 }
 
@@ -1928,10 +1934,10 @@ async function performProjectDeletion(projectId) {
   // Invalidate queued calls AND their callbacks before sending the deletion.
   // Already-dispatched disk writes are handled by the backend admission protocol.
   invalidateProjectSaves(operation.projectsRoot, projectId);
+  clearTimeout(state.saveTimer);
+  state.saveTimer = 0;
   if (operation.current) {
     state.navigationId += 1;
-    clearTimeout(state.saveTimer);
-    state.saveTimer = 0;
     $("editor").readOnly = true;
   }
   let committed = false;
@@ -1953,11 +1959,12 @@ async function performProjectDeletion(projectId) {
     state.deletingProject = null;
     if (operation.current && !state.generating && !state.closing && !state.importing) {
       $("editor").readOnly = operation.wasReadOnly;
-      // Restore only a previously scheduled save, once. No retry loop and no
-      // save-success dependency on deletion. Dirty text survives a failed delete.
-      if (!committed && operation.hadPendingSave && state.dirty) {
-        state.saveTimer = setTimeout(saveDraft, 700);
-      }
+    }
+    // Resume one deferred save for surviving text, including edits made while
+    // deleting another project. A successful current-project deletion discards it.
+    if ((!operation.current || !committed) && operation.hadPendingSave && state.dirty
+      && !state.generating && !state.closing && !state.importing) {
+      state.saveTimer = setTimeout(saveDraft, 700);
     }
   }
   // Preserve the existing next-project selection after deleting the active one.
@@ -1993,17 +2000,29 @@ async function deleteDraft(projectId, chapter, draft) {
             return;
           }
           closeModal();
-          state.workspace = result.workspace || [];
+          state.workspace = Array.isArray(result.workspace) ? result.workspace
+            : state.workspace.map(project => project.project_id !== projectId ? project : {
+              ...project,
+              chapters: (project.chapters || []).map(item => item.chapter_id !== chapter.chapter_id ? item : {
+                ...item, drafts: (item.drafts || []).filter(version => version.draft_id !== draft.draft_id),
+              }).filter(item => item.chapter_id !== chapter.chapter_id
+                || item.drafts.length || item.status === "confirmed"),
+            });
           if (deletingCurrent) clearEditorBuffer();
           renderTree();
           const updated = state.workspace.find(p => p.project_id === projectId)?.chapters
             ?.find(c => c.chapter_id === chapter.chapter_id);
-          if (editingChapter && updated?.drafts?.length) {
-            const nextId = deletingCurrent ? updated.drafts.at(-1).draft_id : state.draftId;
-            await loadDraft(projectId, nextId, { force: true, silent: true });
+          try {
+            if (editingChapter && updated?.drafts?.length) {
+              const nextId = deletingCurrent ? updated.drafts.at(-1).draft_id : state.draftId;
+              await loadDraft(projectId, nextId, { force: true, silent: true });
+            }
+            await loadOverview(projectId);
+          } catch (error) {
+            toast(`${result.warning || "该版本已删除。"} 后续刷新失败：${error.message}`);
+            return;
           }
-          await loadOverview(projectId);
-          toast("该版本已移入回收站。");
+          toast(result.warning || "该版本已移入回收站。");
         },
       },
     ],

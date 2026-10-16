@@ -726,17 +726,16 @@ class WorkbenchBridge:
         try:
             with self._local_operation("准备创作设置", inspection=True) as app:
                 settings = app.generation_settings(project_id)
-            chapter_id = suggest_next_chapter_id(self.app.list_chapters(project_id))
-            store = self.app._open_store(project_id)
-            pending = store.read_json(store.data_dir / "pending_chapter_input.json", default={})
-            pending_id = str(pending.get("chapter_id") or "").strip()
-            confirmed_ids = {str(item.get("chapter_id") or "")
-                             for item in self.app.list_confirmed_chapters(project_id)}
-            if pending_id and pending_id not in confirmed_ids:
-                chapter_id = pending_id
-        except Exception:
-            settings = {}
-            chapter_id = "chapter_001"
+                chapter_id = suggest_next_chapter_id(app.list_chapters(project_id))
+                store = app._open_store(project_id)
+                pending = store.read_json(store.data_dir / "pending_chapter_input.json", default={})
+                pending_id = str(pending.get("chapter_id") or "").strip()
+                confirmed_ids = {str(item.get("chapter_id") or "")
+                                 for item in app.list_confirmed_chapters(project_id)}
+                if pending_id and pending_id not in confirmed_ids:
+                    chapter_id = pending_id
+        except Exception as exc:
+            return _fail(f"准备章节失败: {exc}")
         prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
         return _ok(
             {
@@ -1758,7 +1757,12 @@ class WorkbenchBridge:
         try:
             with self._local_operation("删除版本") as app:
                 result = app.delete_draft(project_id, draft_id)
-                workspace = build_workspace_tree(app)
+                try:
+                    workspace = build_workspace_tree(app)
+                except Exception as exc:
+                    self._log(f"草稿版本已删除，目录刷新失败: {exc}")
+                    return _ok({"result": _jsonable(result), "workspace": None,
+                                "warning": "草稿版本已删除，但目录刷新失败，请手动刷新。"})
         except Exception as exc:
             return _fail(f"删除草稿版本失败: {exc}")
         return _ok({"result": _jsonable(result), "workspace": workspace})

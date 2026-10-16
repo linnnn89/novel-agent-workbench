@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from novel_agent_workbench.drafts import DraftGenerationService
@@ -83,6 +84,54 @@ class ChapterVersionsTest(unittest.TestCase):
         self.api._busy = False
         self.assertTrue(self.api.delete_draft("test", other.draft_id)["ok"])
         self.assertNotIn("chapter_007", [c["chapter_id"] for c in self.api.app.list_chapters("test")])
+
+    def test_suggestion_conflict_is_an_error_not_a_first_chapter_default(self):
+        self.draft()
+        with self.api._local_operation("保存正文"):
+            result = self.api.suggest_chapter("test")
+        self.assertFalse(result["ok"], result)
+        self.assertIn("尚未结束", result["error"])
+        self.assertEqual(self.api.suggest_chapter("test")["data"]["chapter_id"], "chapter_007")
+
+    def test_suggestion_read_failure_is_reported_and_releases_inspection(self):
+        with patch.object(type(self.api.app), "list_chapters", side_effect=OSError("read failed")):
+            result = self.api.suggest_chapter("test")
+        self.assertFalse(result["ok"], result)
+        self.assertIn("read failed", result["error"])
+        self.assertEqual(self.api._active_inspections, 0)
+
+    def test_suggestion_keeps_inspection_until_all_chapter_reads_finish(self):
+        self.draft()
+        original = self.api.app.list_confirmed_chapters
+        def inspect(project_id):
+            self.assertGreater(self.api._active_inspections, 0)
+            self.assertFalse(self.api._begin_job())
+            self.assertFalse(self.api.delete_project("test", "确认删除")["ok"])
+            return original(project_id)
+        with patch.object(type(self.api.app), "list_confirmed_chapters", side_effect=inspect):
+            result = self.api.suggest_chapter("test")
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["data"]["chapter_id"], "chapter_007")
+        self.assertEqual(self.api._active_inspections, 0)
+
+    def test_version_deletion_refresh_failure_is_committed_success(self):
+        for keep_sibling in (False, True):
+            with self.subTest(keep_sibling=keep_sibling):
+                chapter = "chapter_008" if keep_sibling else "chapter_007"
+                target = self.draft(chapter)
+                sibling = self.draft(chapter) if keep_sibling else None
+                with patch("novel_agent_workbench.modern_desktop.build_workspace_tree",
+                           side_effect=OSError("refresh failed")):
+                    result = self.api.delete_draft("test", target.draft_id)
+                self.assertTrue(result["ok"], result)
+                self.assertIsNone(result["data"]["workspace"])
+                self.assertIn("warning", result["data"])
+                remaining = {d["draft_id"] for d in self.api.app.list_drafts("test")}
+                self.assertNotIn(target.draft_id, remaining)
+                if sibling:
+                    self.assertIn(sibling.draft_id, remaining)
+                self.assertTrue(self.api._begin_job())
+                self.api._end_job()
 
 
 if __name__ == "__main__":
