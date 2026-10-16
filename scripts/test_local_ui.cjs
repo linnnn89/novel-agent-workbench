@@ -163,5 +163,251 @@ async function check(name, test) { await test(); checks++; console.log(`PASS ${n
     resolvers.first(data("first")); await first;
     assert.equal(c.S.draftId, "second"); assert.equal(c.get("editor").readOnly, false);
   });
+  await check("生成中禁止打开删除作品确认", async () => {
+    const c = harness(); c.S.generating = true;
+    let dialog; c.confirmTyped = options => { dialog = options; };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    assert.equal(dialog, undefined);
+    assert.equal(c.calls.length, 0);
+  });
+  await check("删除确认期间启动任务则禁止删除", async () => {
+    const c = harness(); let dialog;
+    c.confirmTyped = options => { dialog = options; };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    c.S.generating = true;
+    await dialog.onConfirm();
+    assert.equal(c.calls.length, 0);
+  });
+  await check("保存故障不阻止明确确认删除作品", async () => {
+    const c = harness(); let dialog;
+    c.S.dirty = true; c.S.saveError = "磁盘写入失败"; c.S.saveTimer = 99;
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async (name) => {
+      c.calls.push([name]);
+      if (name === "save_draft") throw new Error("永久保存故障");
+      return { workspace: [] };
+    };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    await dialog.onConfirm();
+    assert.deepEqual(c.calls.map(call => call[0]), ["delete_project"]);
+    assert.equal(c.S.saveTimer, 0);
+    assert.equal(c.S.dirty, false);
+    assert.equal(c.get("editor").value, "");
+  });
+  await check("删除其他作品保留当前未保存正文", async () => {
+    const c = harness(); let dialog;
+    c.S.dirty = true; c.S.saveTimer = 99;
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async name => { c.calls.push([name]); return { workspace: [] }; };
+    await c.deleteProject({ project_id: "other", title: "其他作品" });
+    await dialog.onConfirm();
+    assert.deepEqual(c.calls.map(call => call[0]), ["delete_project"]);
+    assert.equal(c.S.projectId, "p");
+    assert.equal(c.S.dirty, true);
+    assert.notEqual(c.S.saveTimer, 0);
+    assert.equal(c.get("editor").value, "尚未保存的新正文");
+  });
+  await check("删除失败保留正文并恢复编辑", async () => {
+    const c = harness(); let dialog;
+    c.S.dirty = true;
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async () => { throw new Error("删除失败"); };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    await assert.rejects(dialog.onConfirm(), /删除失败/);
+    assert.equal(c.get("editor").value, "尚未保存的新正文");
+    assert.equal(c.S.dirty, true);
+    assert.equal(c.get("editor").readOnly, false);
+  });
+  for (const fail of [false, true]) for (const editDuringDelete of [false, true]) {
+    await check(`删除其他作品${fail ? "失败" : "成功"}后恢复${editDuringDelete ? "期间新编辑" : "原有编辑"}的自动保存`, async () => {
+      const c = harness(); let finish; let nextTimer = 0;
+      const timers = new Map();
+      c.setTimeout = callback => { timers.set(++nextTimer, callback); return nextTimer; };
+      c.clearTimeout = id => timers.delete(id);
+      c.call = async name => {
+        c.calls.push([name]);
+        if (name === "delete_project") return new Promise((resolve, reject) => {
+          finish = () => fail ? reject(new Error("删除失败")) : resolve({ workspace: [] });
+        });
+        return {};
+      };
+      if (!editDuringDelete) c.scheduleSave();
+      const deleting = c.performProjectDeletion("other");
+      if (editDuringDelete) {
+        c.get("editor").value = "删除期间的新编辑";
+        c.scheduleSave();
+      }
+      // Advance the autosave clock while the deletion is still pending.
+      for (const [id, callback] of [...timers]) { timers.delete(id); await callback(); }
+      assert.deepEqual(c.calls.map(x => x[0]), ["delete_project"]);
+      const completed = fail ? assert.rejects(deleting, /删除失败/) : deleting;
+      finish(); await completed;
+      assert.equal(c.S.dirty, true);
+      assert.equal(timers.size, 1, "one deferred save must resume after deletion");
+      const [id, callback] = [...timers][0]; timers.delete(id); await callback();
+      assert.deepEqual(c.calls.map(x => x[0]), ["delete_project", "save_draft"]);
+      assert.equal(c.S.dirty, false); assert.equal(timers.size, 0);
+      assert.equal(c.get("editor").value, editDuringDelete ? "删除期间的新编辑" : "尚未保存的新正文");
+    });
+  }
+  await check("删除失败恢复原有自动保存计时器且不循环重试", async () => {
+    const c = harness(); let dialog; let scheduled = 0;
+    c.S.dirty = true; c.S.saveTimer = 99;
+    c.setTimeout = () => { scheduled++; return 123; };
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async () => { throw new Error("忙碌"); };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    await assert.rejects(dialog.onConfirm(), /忙碌/);
+    assert.equal(scheduled, 1); assert.equal(c.S.saveTimer, 123);
+    assert.equal(c.S.deletingProject, null); assert.equal(c.S.dirty, true);
+  });
+  await check("删除使尚未发送的旧保存失效", async () => {
+    const c = harness(); let dialog, release;
+    c.S.saveQueue = new Promise(resolve => { release = resolve; });
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async name => { c.calls.push([name]); return { workspace: [] }; };
+    const pending = c.saveDraft();
+    await c.deleteProject({ project_id: "p", title: "作品" }); await dialog.onConfirm();
+    release(); const result = await pending;
+    assert.equal(result.discarded, true);
+    assert.deepEqual(c.calls.map(call => call[0]), ["delete_project"]);
+  });
+  for (const fail of [false, true]) await check(`删除后迟到保存${fail ? "失败" : "成功"}不污染新作品`, async () => {
+    const c = harness(); let dialog, resolveSave, rejectSave;
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async name => name === "save_draft"
+      ? new Promise((resolve, reject) => { resolveSave = resolve; rejectSave = reject; })
+      : { workspace: [] };
+    const pending = c.saveDraft(); await new Promise(setImmediate);
+    await c.deleteProject({ project_id: "p", title: "作品" }); await dialog.onConfirm();
+    c.S.projectId = "other"; c.S.draftId = "other-draft";
+    c.S.saveError = ""; c.S.savedSnapshot = null; c.get("savePill").textContent = "新作品状态";
+    if (fail) rejectSave(new Error("旧作品不存在")); else resolveSave({ changed: true });
+    await pending;
+    assert.equal(c.S.saveError, ""); assert.equal(c.S.savedSnapshot, null);
+    assert.equal(c.get("savePill").textContent, "新作品状态");
+  });
+  await check("删除中不允许导航和重复删除", async () => {
+    const c = harness(); let dialog, finish;
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async name => { c.calls.push([name]); return new Promise(resolve => { finish = resolve; }); };
+    await c.deleteProject({ project_id: "p", title: "作品" });
+    const pending = dialog.onConfirm();
+    assert.equal(await c.loadDraft("other", "d", { force: true }), false);
+    await dialog.onConfirm();
+    assert.deepEqual(c.calls.map(call => call[0]), ["delete_project"]);
+    finish({ workspace: [] }); await pending;
+  });
+  await check("删除成功恢复原有下一作品选择", async () => {
+    const c = harness(); let dialog, selected;
+    c.confirmTyped = options => { dialog = options; };
+    c.selectProject = async id => { selected = id; };
+    c.call = async () => ({ workspace: [{ project_id: "next", chapters: [] }] });
+    await c.deleteProject({ project_id: "p", title: "作品" }); await dialog.onConfirm();
+    assert.equal(selected, "next"); assert.equal(c.S.deletingProject, null);
+  });
+  await check("删除已提交但刷新失败仍清除已删作品", async () => {
+    const c = harness(); let dialog;
+    c.S.workspace = [{ project_id: "p", chapters: [] }];
+    c.confirmTyped = options => { dialog = options; };
+    c.call = async () => ({ workspace: null, warning: "请手动刷新" });
+    await c.deleteProject({ project_id: "p", title: "作品" }); await dialog.onConfirm();
+    assert.equal(c.S.projectId, ""); assert.equal(c.S.workspace.length, 0);
+    assert.equal(c.lastToast, "请手动刷新");
+  });
+  await check("TXT 保存失败不打开另存为", async () => {
+    const c = harness(); await c.exportProjectTxt("p");
+    assert.deepEqual(c.calls.map(x => x[0]), ["save_draft"]);
+    assert.equal(c.S.exportingTxt, false);
+  });
+  for (const keepSibling of [false, true]) await check(`版本删除提交后刷新失败仍${keepSibling ? "选择剩余版本" : "清空最后版本"}并保留作品列表`, async () => {
+    const c = harness(); c.closeModal = () => {};
+    const chapter = { chapter_id: "chapter_1", status: "draft", drafts: [
+      { draft_id: "old" }, ...(keepSibling ? [{ draft_id: "sibling" }] : []),
+    ] };
+    c.S.workspace = [{ project_id: "p", chapters: [chapter] }, { project_id: "other", chapters: [] }];
+    c.call = async (name, project, draft) => {
+      if (name === "delete_draft") return { workspace: null, warning: "版本已删除，请手动刷新。" };
+      if (name === "open_draft") return { project_id: project, draft_id: draft, chapter_id: "chapter_1",
+        content: "剩余版本", draft_ids: [draft] };
+      return {};
+    };
+    await c.deleteDraft("p", chapter, chapter.drafts[0]);
+    await c.dialog.actions[1].onClick();
+    assert.equal(c.S.workspace.length, 2);
+    assert.equal(c.S.workspace[1].project_id, "other");
+    assert.equal(c.S.workspace[0].chapters.length, keepSibling ? 1 : 0);
+    assert.equal(c.S.draftId, keepSibling ? "sibling" : "");
+    assert.equal(c.get("editor").value, keepSibling ? "剩余版本" : "");
+    assert.match(c.lastToast, /手动刷新/);
+  });
+  await check("版本删除成功后的概览失败只提示后续刷新问题", async () => {
+    const c = harness(); c.closeModal = () => {};
+    c.call = async () => ({ workspace: [{ project_id: "p", chapters: [] }] });
+    c.loadOverview = async () => { throw new Error("概览读取失败"); };
+    await c.deleteDraft("p", { chapter_id: "chapter_1" }, { draft_id: "old" });
+    await c.dialog.actions[1].onClick();
+    assert.equal(c.S.draftId, ""); assert.equal(c.get("editor").value, "");
+    assert.match(c.lastToast, /已删除.*概览读取失败/);
+  });
+  await check("TXT 固定目标作品与项目库并传递范围", async () => {
+    const c = harness(); c.S.projectsRoot = "root-A";
+    c.call = async (name, ...args) => {
+      c.calls.push([name, ...args]);
+      return name === "export_txt" ? { chapter_count: 3, draft_count: 2 } : {};
+    };
+    await c.exportProjectTxt("p", "whole");
+    assert.deepEqual(c.calls.map(x => x[0]), ["save_draft", "export_txt"]);
+    assert.deepEqual(c.calls[1], ["export_txt", "p", "whole", "root-A"]);
+    assert.match(c.lastToast, /3 章.*2 章/);
+    assert.equal(c.S.exportingTxt, false); assert.equal(c.get("editor").readOnly, false);
+  });
+  await check("TXT 另存为期间禁止重复导出导航和关闭", async () => {
+    const c = harness(); let finish;
+    c.call = async name => name === "export_txt" ? await new Promise(r => { finish = r; }) : {};
+    const exporting = c.exportProjectTxt("p");
+    for (let i = 0; i < 10 && !finish; i++) await Promise.resolve();
+    assert.equal(c.S.exportingTxt, true); assert.equal(c.get("editor").readOnly, true);
+    assert.equal(await c.loadDraft("other", "x", { force: true }), false);
+    assert.equal(await c.selectProject("other"), false);
+    assert.equal((await c.window.__workbenchFlushBeforeClose()).ok, false);
+    await c.exportProjectTxt("other");
+    finish({ chapter_count: 1 }); await exporting;
+    assert.equal(c.S.exportingTxt, false); assert.equal(c.get("editor").readOnly, false);
+  });
+  await check("TXT 取消与失败恢复编辑器且取消不报错", async () => {
+    for (const cancelled of [true, false]) {
+      const c = harness(); c.get("editor").readOnly = true;
+      c.call = async () => { throw Object.assign(new Error("写入失败"), { cancelled }); };
+      await c.exportProjectTxt("p");
+      assert.equal(c.S.exportingTxt, false); assert.equal(c.get("editor").readOnly, true);
+      assert.equal(c.lastToast, cancelled ? undefined : "写入失败");
+    }
+  });
+  await check("TXT 导出其他作品后恢复当前草稿保存计时", async () => {
+    const c = harness(); let scheduled = 0;
+    c.S.saveTimer = 1; c.S.dirty = true;
+    c.scheduleSave = () => { scheduled++; };
+    c.call = async (name, ...args) => { c.calls.push([name, ...args]); return { chapter_count: 1 }; };
+    await c.exportProjectTxt("other", "confirmed");
+    assert.deepEqual(c.calls.map(x => x[0]), ["export_txt"]);
+    assert.equal(c.calls[0][1], "other"); assert.equal(scheduled, 1);
+    assert.equal(c.S.projectId, "p"); assert.equal(c.get("editor").value, "尚未保存的新正文");
+  });
+  await check("TXT 保存期间切换项目库拒绝跨库导出", async () => {
+    const c = harness(); c.S.projectsRoot = "A";
+    c.flushSave = async () => { c.S.projectsRoot = "B"; return { ok: true }; };
+    await c.exportProjectTxt("p"); assert.equal(c.calls.length, 0);
+    assert.match(c.lastToast, /项目库已切换/);
+  });
+  await check("TXT 范围选择绑定右键作品", async () => {
+    const c = harness(); c.closeModal = () => {}; let args;
+    c.exportProjectTxt = async (...values) => { args = values; };
+    c.openTxtExportSheet("other");
+    await c.dialog.actions[2].onClick();
+    assert.deepEqual(args, ["other", "whole"]);
+    await c.dialog.actions[1].onClick();
+    assert.deepEqual(args, ["other", "confirmed"]);
+  });
   console.log(`Completed ${checks} UI regression checks.`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

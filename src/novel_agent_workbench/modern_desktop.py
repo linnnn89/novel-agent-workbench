@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import os
 import re
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .application_service import WorkbenchApplicationService
+from .exports import safe_txt_filename
 from .task_control import JobControl, JobCancelled, current_job, job_scope
 from .token_budget import InputBudgetExceeded
 from .ui_presenters import (
@@ -76,7 +78,7 @@ USER_GUIDE_TEXT = """基本流程
 5. 点击“生成新章节”，需要时可先预览将发送给模型的结构，再生成草稿。
 6. 草稿经过审稿、改写、确认后，才会进入后续上下文和定稿流程。
 7. 记忆库可查看已保存记忆、预览发送结构，再按勾选章节生成或压缩。
-8. 右侧「导入导出」可以把整部作品打包为作品包（.nawpkg）带走或恢复，不含 API Key。导出 TXT 仍然只导出已确认章节正文。
+8. 右侧「导入导出」可以把整部作品打包为作品包（.nawpkg）带走或恢复，不含 API Key。整部作品另存为 TXT 可选择全部正文或仅已确认章节；全部正文每章优先取已确认稿，否则取最新草稿。
 
 安全边界
 --------
@@ -401,6 +403,8 @@ class WorkbenchBridge:
         self.repo_root = repo_root
         self.app = WorkbenchApplicationService.open(projects_root)
         self._busy = False
+        self._local_operation_name = ""
+        self._active_inspections = 0
         self._busy_lock = threading.Lock()
         self._chapter_input_lock = threading.Lock()
         self._run_log: list[str] = []
@@ -454,9 +458,41 @@ class WorkbenchBridge:
         except Exception:
             pass
 
+    @contextmanager
+    def _local_operation(self, name: str, *, projects_root: str = "", inspection: bool = False):
+        """Admit work under a short state lock; perform ALL I/O outside that lock.
+
+        Multiple inspections may coexist. A job or local mutation is exclusive.
+        Inspections are counted because some service reads initialize/migrate files.
+        Conflicts fail immediately; there is no wait queue or implicit retry.
+        """
+        expected_root = Path(projects_root).resolve() if projects_root else None
+        with self._busy_lock:
+            if expected_root is not None and expected_root != self.projects_root:
+                raise RuntimeError("项目库已切换，请重新打开正确的作品。")
+            if self._busy:
+                raise RuntimeError("请先停止或等待当前任务完成，再执行此操作。")
+            if self._local_operation_name:
+                raise RuntimeError(f"{self._local_operation_name}尚未结束，本次操作未执行。请稍后重试；若长期无响应，请重启程序后重试。")
+            if inspection:
+                self._active_inspections += 1
+            else:
+                if self._active_inspections:
+                    raise RuntimeError("作品资料仍在读取，本次操作未执行，请稍后重试。")
+                self._local_operation_name = name
+            app = self.app
+        try:
+            yield app
+        finally:
+            with self._busy_lock:
+                if inspection:
+                    self._active_inspections -= 1
+                else:
+                    self._local_operation_name = ""
+
     def _begin_job(self) -> bool:
         with self._busy_lock:
-            if self._busy:
+            if self._busy or self._local_operation_name or self._active_inspections:
                 return False
             self._busy = True
             self._job_number += 1
@@ -615,7 +651,8 @@ class WorkbenchBridge:
 
     def project_overview(self, project_id: str) -> dict[str, Any]:
         try:
-            state = self.app.project_state(project_id)
+            with self._local_operation("读取作品概览", inspection=True) as app:
+                state = app.project_state(project_id)
         except Exception as exc:
             return _fail(f"作品概览读取失败: {exc}")
         roles = state.get("provider_roles") if isinstance(state.get("provider_roles"), dict) else {}
@@ -639,7 +676,8 @@ class WorkbenchBridge:
         if not name:
             return _fail("作品标题不能为空。")
         try:
-            result = self.app.rename_project(project_id, title=name)
+            with self._local_operation("重命名作品") as app:
+                result = app.rename_project(project_id, title=name)
         except Exception as exc:
             return _fail(f"重命名作品失败: {exc}")
         return _ok({"result": _jsonable(result), "workspace": build_workspace_tree(self.app)})
@@ -649,54 +687,55 @@ class WorkbenchBridge:
         if not name:
             return _fail("章节标题不能为空。")
         try:
-            result = self.app.rename_chapter(project_id, chapter_id, title=name)
+            with self._local_operation("重命名章节") as app:
+                result = app.rename_chapter(project_id, chapter_id, title=name)
         except Exception as exc:
             return _fail(f"重命名章节失败: {exc}")
         return _ok({"result": _jsonable(result), "workspace": build_workspace_tree(self.app)})
 
     def create_project(self, title: str, project_id: str = "") -> dict[str, Any]:
         title_text = str(title or "").strip()
-        existing = {str(item.get("project_id") or "") for item in self.app.list_projects()}
-        ident = str(project_id or "").strip() or _slug_project_id(title_text or "novel", existing)
         try:
-            created = self.app.create_project(ident, title=title_text or ident)
+            with self._local_operation("新建作品") as app:
+                existing = {str(item.get("project_id") or "") for item in app.list_projects()}
+                ident = str(project_id or "").strip() or _slug_project_id(title_text or "novel", existing)
+                created = app.create_project(ident, title=title_text or ident)
+                workspace = build_workspace_tree(app)
         except Exception as exc:
             return _fail(f"新建作品失败: {exc}")
-        return _ok({"project": _jsonable(created), "workspace": build_workspace_tree(self.app)})
+        return _ok({"project": _jsonable(created), "workspace": workspace})
 
     def chapter_input(self, project_id: str, chapter_id: str, title: str, prompt: str,
                       projects_root: str, restore: bool = False) -> dict[str, Any]:
         """Keep one pending new-chapter form per project, using atomic disk writes."""
         try:
-            with self._busy_lock:
-                if Path(projects_root).resolve() != self.projects_root:
-                    return _fail("项目库已切换，章节输入缓存未写入。")
-                store = self.app._open_store(project_id)
-            with self._chapter_input_lock:
-                path = store.data_dir / "pending_chapter_input.json"
-                previous = store.read_json(path, default={})
-                if restore and previous and previous.get("chapter_id", "").strip() == chapter_id.strip():
-                    return _ok(previous)
-                value = {"chapter_id": chapter_id, "title": title, "prompt": prompt}
-                store.write_json(path, value)
-                return _ok(value)
+            with self._local_operation("保存章节输入", projects_root=projects_root) as app:
+                store = app._open_store(project_id)
+                with self._chapter_input_lock:
+                    path = store.data_dir / "pending_chapter_input.json"
+                    previous = store.read_json(path, default={})
+                    if restore and previous and previous.get("chapter_id", "").strip() == chapter_id.strip():
+                        return _ok(previous)
+                    value = {"chapter_id": chapter_id, "title": title, "prompt": prompt}
+                    store.write_json(path, value)
+                    return _ok(value)
         except Exception as exc:
             return _fail(f"保存章节输入缓存失败: {exc}")
 
     def suggest_chapter(self, project_id: str) -> dict[str, Any]:
         try:
-            settings = self.app.generation_settings(project_id)
-            chapter_id = suggest_next_chapter_id(self.app.list_chapters(project_id))
-            store = self.app._open_store(project_id)
-            pending = store.read_json(store.data_dir / "pending_chapter_input.json", default={})
-            pending_id = str(pending.get("chapter_id") or "").strip()
-            confirmed_ids = {str(item.get("chapter_id") or "")
-                             for item in self.app.list_confirmed_chapters(project_id)}
-            if pending_id and pending_id not in confirmed_ids:
-                chapter_id = pending_id
-        except Exception:
-            settings = {}
-            chapter_id = "chapter_001"
+            with self._local_operation("准备创作设置", inspection=True) as app:
+                settings = app.generation_settings(project_id)
+                chapter_id = suggest_next_chapter_id(app.list_chapters(project_id))
+                store = app._open_store(project_id)
+                pending = store.read_json(store.data_dir / "pending_chapter_input.json", default={})
+                pending_id = str(pending.get("chapter_id") or "").strip()
+                confirmed_ids = {str(item.get("chapter_id") or "")
+                                 for item in app.list_confirmed_chapters(project_id)}
+                if pending_id and pending_id not in confirmed_ids:
+                    chapter_id = pending_id
+        except Exception as exc:
+            return _fail(f"准备章节失败: {exc}")
         prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
         return _ok(
             {
@@ -755,12 +794,8 @@ class WorkbenchBridge:
 
     def save_draft(self, project_id: str, draft_id: str, text: str, projects_root: str = "") -> dict[str, Any]:
         try:
-            # Capture the service and library together, before another UI request can switch them.
-            with self._busy_lock:
-                if projects_root and Path(projects_root).resolve() != self.projects_root:
-                    return _fail("项目库已切换，旧库的保存请求已停止。请重新打开正确的作品。")
-                app = self.app
-            result = app.update_draft_content(project_id, draft_id, text=str(text or ""))
+            with self._local_operation("保存正文", projects_root=projects_root) as app:
+                result = app.update_draft_content(project_id, draft_id, text=str(text or ""))
         except Exception as exc:
             return _fail(f"保存编辑失败: {exc}")
         return _ok(_jsonable(result))
@@ -773,7 +808,8 @@ class WorkbenchBridge:
         if not user_prompt:
             return _fail("本次写作要求不能为空。")
         try:
-            settings = self.app.generation_settings(project_id)
+            with self._local_operation("准备创作设置", inspection=True) as app:
+                settings = app.generation_settings(project_id)
         except Exception as exc:
             return _fail(f"读取创作设置失败: {exc}")
         prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
@@ -814,7 +850,8 @@ class WorkbenchBridge:
     def rewrite_draft(self, project_id: str, draft_id: str, instruction: str = "") -> dict[str, Any]:
         try:
             draft = self.app.read_draft(project_id, draft_id)
-            settings = self.app.generation_settings(project_id)
+            with self._local_operation("准备创作设置", inspection=True) as app:
+                settings = app.generation_settings(project_id)
         except Exception as exc:
             return _fail(f"读取当前稿件失败: {exc}")
         prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
@@ -854,7 +891,8 @@ class WorkbenchBridge:
     def refine_draft(self, project_id: str, draft_id: str, instruction: str = "") -> dict[str, Any]:
         try:
             review = self.app.find_ai_review_for_draft(project_id, draft_id)
-            settings = self.app.generation_settings(project_id)
+            with self._local_operation("准备创作设置", inspection=True) as app:
+                settings = app.generation_settings(project_id)
             draft = self.app.read_draft(project_id, draft_id)
         except Exception as exc:
             return _fail(f"读取精修所需资料失败: {exc}")
@@ -889,7 +927,8 @@ class WorkbenchBridge:
         if existing is not None:
             return _ok({"existing": True, "review": self._review_payload(project_id, existing)})
         try:
-            settings = self.app.generation_settings(project_id)
+            with self._local_operation("准备创作设置", inspection=True) as app:
+                settings = app.generation_settings(project_id)
         except Exception as exc:
             return _fail(f"读取创作设置失败: {exc}")
         context_settings = settings.get("context") if isinstance(settings.get("context"), dict) else {}
@@ -914,20 +953,22 @@ class WorkbenchBridge:
 
     def confirm_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
         try:
-            draft = self.app.read_draft(project_id, draft_id)
-            if str(draft.get("status") or "") == "committed":
-                return _fail("这个版本已经是确认稿。")
-            self.app.accept_draft_manually(project_id, draft_id, reason_code="desktop_confirm")
-            result = self.app.commit_draft(project_id, draft_id, replace_existing=True)
+            with self._local_operation("确认稿件") as app:
+                draft = app.read_draft(project_id, draft_id)
+                if str(draft.get("status") or "") == "committed":
+                    return _fail("这个版本已经是确认稿。")
+                app.accept_draft_manually(project_id, draft_id, reason_code="desktop_confirm")
+                result = app.commit_draft(project_id, draft_id, replace_existing=True)
         except Exception as exc:
             return _fail(f"确认稿件失败: {exc}")
         return _ok(_jsonable(result))
 
     def library(self, project_id: str) -> dict[str, Any]:
         try:
-            planning = self.app.list_planning_items(project_id, include_text=True)
-            memory = self.app.ensure_main_memory_item(project_id)
-            preview = self.app.context_package_preview(project_id, include_text=False)
+            with self._local_operation("读取资料库", inspection=True) as app:
+                planning = app.list_planning_items(project_id, include_text=True)
+                memory = app.ensure_main_memory_item(project_id)
+                preview = app.context_package_preview(project_id, include_text=False)
         except Exception as exc:
             return _fail(f"资料库读取失败: {exc}")
         return _ok(
@@ -1050,9 +1091,10 @@ class WorkbenchBridge:
 
     def memory_state(self, project_id: str) -> dict[str, Any]:
         try:
-            memory = self.app.ensure_main_memory_item(project_id)
-            items = self.app.list_memory_items(project_id, include_text=True)
-            chapters = self.app.list_confirmed_chapters(project_id)
+            with self._local_operation("读取记忆库", inspection=True) as app:
+                memory = app.ensure_main_memory_item(project_id)
+                items = app.list_memory_items(project_id, include_text=True)
+                chapters = app.list_confirmed_chapters(project_id)
         except Exception as exc:
             return _fail(f"记忆库读取失败: {exc}")
         text = str(memory.get("text") or "")
@@ -1090,18 +1132,15 @@ class WorkbenchBridge:
         chapter_ids = [str(item) for item in (data.get("chapter_ids") or []) if str(item)]
         target = normalize_memory_target_tokens(data.get("target_tokens"))
         try:
-            # Share the job-start lock so a UI regression cannot save across an active request.
-            with self._busy_lock:
-                if self._busy:
-                    return _fail("任务正在进行，记忆尚未保存。请停止或等待任务结束后再保存。")
-                self.app.set_memory_text(
+            with self._local_operation("保存记忆") as app:
+                app.set_memory_text(
                     project_id,
                     memory_id,
                     text,
                     source_chapter_ids=chapter_ids,
                     target_token_budget=target,
                 )
-                self.app.set_memory_item_enabled(
+                app.set_memory_item_enabled(
                     project_id,
                     memory_id,
                     enabled=bool(data.get("enabled", True)),
@@ -1141,13 +1180,14 @@ class WorkbenchBridge:
         if not chapter_ids:
             return _fail("请先勾选要写入记忆的已确认章节。")
         try:
-            chapters = [self.app.read_confirmed_chapter(project_id, chapter_id) for chapter_id in chapter_ids]
-            preview = self.app.preview_memory_generation_request(
-                project_id,
-                current_memory=str(data.get("current_memory") or ""),
-                chapters=chapters,
-                target_token_budget=normalize_memory_target_tokens(data.get("target_tokens")),
-            )
+            with self._local_operation("预览记忆生成", inspection=True) as app:
+                chapters = [app.read_confirmed_chapter(project_id, chapter_id) for chapter_id in chapter_ids]
+                preview = app.preview_memory_generation_request(
+                    project_id,
+                    current_memory=str(data.get("current_memory") or ""),
+                    chapters=chapters,
+                    target_token_budget=normalize_memory_target_tokens(data.get("target_tokens")),
+                )
         except Exception as exc:
             return _fail(f"生成记忆预览失败: {exc}")
         return _ok(
@@ -1164,11 +1204,12 @@ class WorkbenchBridge:
         if not current:
             return _fail("当前没有可压缩的记忆正文。")
         try:
-            preview = self.app.preview_memory_compression_request(
-                str(data.get("project_id") or ""),
-                current_memory=current,
-                target_token_budget=normalize_memory_target_tokens(data.get("target_tokens")),
-            )
+            with self._local_operation("预览记忆压缩", inspection=True) as app:
+                preview = app.preview_memory_compression_request(
+                    str(data.get("project_id") or ""),
+                    current_memory=current,
+                    target_token_budget=normalize_memory_target_tokens(data.get("target_tokens")),
+                )
         except Exception as exc:
             return _fail(f"生成缩写预览失败: {exc}")
         return _ok(
@@ -1226,7 +1267,8 @@ class WorkbenchBridge:
         if needs_project and not str(project_id or "").strip():
             return _fail("请先选择或新建一个作品。")
         try:
-            details = self._records_details(kind, str(project_id or "").strip())
+            with self._local_operation("读取记录", inspection=True):
+                details = self._records_details(kind, str(project_id or "").strip())
         except Exception as exc:
             self._log(f"读取{title}失败: {exc}")
             return _fail(f"{title}读取失败: {exc}")
@@ -1410,7 +1452,7 @@ class WorkbenchBridge:
             [
                 "导出设置",
                 "--------",
-                "TXT: 可用。导出范围为当前作品的已确认章节，不包含草稿、审稿记录、API Key 或本地私密设置。",
+                "TXT: 可用。整部作品每章优先取已确认正文，否则取最新草稿；也可选择仅已确认章节。不包含审稿、记忆或 API Key。编码 UTF-8 BOM，换行 CRLF。",
                 "DOCX：开发中。整部作品的打包迁移请用右侧「导入导出」，不要与 TXT 文稿混淆。",
                 "",
                 f"TXT设置: {settings.get('txt_enabled', '默认启用')}",
@@ -1486,10 +1528,11 @@ class WorkbenchBridge:
             "chapter_range": str(data.get("chapter_range") or ""),
         }
         try:
-            if creating:
-                result = self.app.create_planning_item(project_id, planning_id, **fields)
-            else:
-                result = self.app.update_planning_item(project_id, planning_id, **fields)
+            with self._local_operation("保存资料") as app:
+                if creating:
+                    result = app.create_planning_item(project_id, planning_id, **fields)
+                else:
+                    result = app.update_planning_item(project_id, planning_id, **fields)
         except Exception as exc:
             return _fail(f"保存资料失败: {exc}")
         kind = "outline" if fields["item_type"] in {"outline", "chapter_plan"} else "world"
@@ -1498,7 +1541,8 @@ class WorkbenchBridge:
 
     def delete_planning(self, project_id: str, planning_id: str, kind: str = "world") -> dict[str, Any]:
         try:
-            self.app.delete_planning_item(project_id, planning_id)
+            with self._local_operation("删除资料") as app:
+                app.delete_planning_item(project_id, planning_id)
         except Exception as exc:
             return _fail(f"删除资料失败: {exc}")
         return self.planning_state(project_id, kind)
@@ -1506,28 +1550,32 @@ class WorkbenchBridge:
     def new_planning_id(self, item_type: str) -> dict[str, Any]:
         return _ok({"planning_id": default_planning_id(item_type)})
 
-    def export_txt(self, project_id: str) -> dict[str, Any]:
+    def export_txt(self, project_id: str, scope: str = "confirmed", projects_root: str = "") -> dict[str, Any]:
         try:
             import webview
         except ImportError:
             return _fail("当前环境还没有安装 pywebview。")
         if _ACTIVE_WINDOW is None:
             return _fail("窗口尚未就绪。")
-        title = next(
-            (str(item.get("title") or project_id) for item in self.app.list_projects() if item.get("project_id") == project_id),
-            project_id,
-        )
-        safe_name = re.sub(r'[<>:"/\\|?*]+', "_", title).strip() or project_id
-        selected = _ACTIVE_WINDOW.create_file_dialog(
-            webview.SAVE_DIALOG,
-            save_filename=f"{safe_name}.txt",
-            file_types=("文本文件 (*.txt)",),
-        )
-        if not selected:
-            return _fail("已取消导出。", cancelled=True)
-        path = selected[0] if isinstance(selected, (list, tuple)) else selected
         try:
-            result = self.app.export_confirmed_chapters_txt(project_id, path)
+            if scope not in {"whole", "confirmed"}:
+                raise ValueError("未知的 TXT 导出范围。")
+            # Reserve this root/project throughout the native dialog and export.
+            # The state mutex is never held while the user chooses a destination.
+            with self._local_operation("另存为 TXT", projects_root=projects_root) as app:
+                title = str(app._open_store(project_id).read_project_meta().get("title") or project_id)
+                selected = _ACTIVE_WINDOW.create_file_dialog(
+                    webview.SAVE_DIALOG,
+                    save_filename=safe_txt_filename(title),
+                    file_types=("文本文件 (*.txt)",),
+                )
+                if not selected:
+                    return _fail("已取消导出。", cancelled=True)
+                path = selected[0] if isinstance(selected, (list, tuple)) else selected
+                # Do not silently change a path after the native overwrite confirmation.
+                if Path(path).suffix.lower() != ".txt":
+                    raise ValueError("请使用 .txt 扩展名另存为。")
+                result = app.export_manuscript_txt(project_id, path, scope=scope)
         except Exception as exc:
             self._log(f"导出TXT失败: project={project_id} error={exc}")
             return _fail(f"导出失败: {exc}")
@@ -1536,7 +1584,7 @@ class WorkbenchBridge:
 
     def _is_busy(self) -> bool:
         with self._busy_lock:
-            return self._busy
+            return self._busy or bool(self._local_operation_name) or bool(self._active_inspections)
 
     def export_project_package(self, project_id: str) -> dict[str, Any]:
         if self._is_busy():
@@ -1561,7 +1609,8 @@ class WorkbenchBridge:
             return _fail("已取消。", cancelled=True)
         path = selected[0] if isinstance(selected, (list, tuple)) else selected
         try:
-            result = self.app.export_project_package(project_id, path)
+            with self._local_operation("导出作品") as app:
+                result = app.export_project_package(project_id, path)
         except ProjectLockError:
             return _fail("作品正在保存或生成，请稍后重试。")
         except Exception as exc:
@@ -1608,12 +1657,13 @@ class WorkbenchBridge:
         if self._is_busy():
             return _fail("已有任务正在进行，请等待完成。")
         try:
-            imported = self.app.import_project_package(
-                package_path,
-                mode=mode,
-                confirm_text=confirm_text,
-                new_project_id=new_project_id,
-            )
+            with self._local_operation("导入作品") as app:
+                imported = app.import_project_package(
+                    package_path,
+                    mode=mode,
+                    confirm_text=confirm_text,
+                    new_project_id=new_project_id,
+                )
         except ProjectLockError:
             return _fail("作品正在保存或生成，请稍后重试。")
         except Exception as exc:
@@ -1634,27 +1684,22 @@ class WorkbenchBridge:
             return _fail("当前环境还没有安装 pywebview。")
         if _ACTIVE_WINDOW is None:
             return _fail("窗口尚未就绪。")
-        with self._busy_lock:
-            if self._busy:
-                return _fail("当前任务尚未结束，不能切换项目库。")
-            self._busy = True
         try:
-            selected = _ACTIVE_WINDOW.create_file_dialog(webview.FOLDER_DIALOG, directory=str(self.projects_root))
-            if not selected:
-                return _fail("已取消更改项目库。", cancelled=True)
-            path = Path(selected[0] if isinstance(selected, (list, tuple)) else selected).expanduser().resolve()
-            path.mkdir(parents=True, exist_ok=True)
-            candidate = WorkbenchApplicationService.open(path)
-            workspace = build_workspace_tree(candidate)
-            atomic_write_json_file(self.settings_path, {"projects_root": str(path)})
-            with self._busy_lock:
-                self.projects_root = path
-                self.app = candidate
-            return _ok({"projectsRoot": str(path), "workspace": workspace})
+            with self._local_operation("切换项目库"):
+                selected = _ACTIVE_WINDOW.create_file_dialog(webview.FOLDER_DIALOG, directory=str(self.projects_root))
+                if not selected:
+                    return _fail("已取消更改项目库。", cancelled=True)
+                path = Path(selected[0] if isinstance(selected, (list, tuple)) else selected).expanduser().resolve()
+                path.mkdir(parents=True, exist_ok=True)
+                candidate = WorkbenchApplicationService.open(path)
+                workspace = build_workspace_tree(candidate)
+                atomic_write_json_file(self.settings_path, {"projects_root": str(path)})
+                with self._busy_lock:
+                    self.projects_root = path
+                    self.app = candidate
+                return _ok({"projectsRoot": str(path), "workspace": workspace})
         except Exception as exc:
             return _fail(f"切换项目库失败: {exc}")
-        finally:
-            self._end_job()
 
     def history_backups(self) -> dict[str, Any]:
         try:
@@ -1669,18 +1714,12 @@ class WorkbenchBridge:
             return _fail(f"备份校验失败：{exc}")
 
     def restore_history_backup(self, backup_id: str, projects_root: str) -> dict[str, Any]:
-        with self._busy_lock:
-            if self._busy or Path(projects_root).resolve() != self.projects_root:
-                return _fail("项目库已切换或仍有任务运行，请重新打开历史备份。")
-            self._busy = True
-            app = self.app
         try:
-            result = app.restore_history_backup(backup_id)
-            return _ok({"restored": result, "workspace": build_workspace_tree(app)})
+            with self._local_operation("恢复备份", projects_root=projects_root) as app:
+                result = app.restore_history_backup(backup_id)
+                return _ok({"restored": result, "workspace": build_workspace_tree(app)})
         except Exception as exc:
             return _fail(f"恢复失败，原作品未覆盖：{exc}")
-        finally:
-            self._end_job()
 
     def open_folder(self, kind: str = "project", project_id: str = "") -> dict[str, Any]:
         if kind == "library":
@@ -1701,25 +1740,37 @@ class WorkbenchBridge:
         if str(confirm_text or "").strip() != "确认删除":
             return _fail("未输入“确认删除”，已取消。")
         try:
-            result = self.app.delete_project(project_id)
+            with self._local_operation("删除作品") as app:
+                result = app.delete_project(project_id)
+                # Deletion has committed. A refresh error must not report it as failed.
+                try:
+                    workspace = build_workspace_tree(app)
+                except Exception as exc:
+                    self._log(f"作品已删除，目录刷新失败: {exc}")
+                    return _ok({"result": _jsonable(result), "workspace": None,
+                                "warning": "作品已删除，但目录刷新失败，请手动刷新。"})
         except Exception as exc:
             return _fail(f"删除作品失败: {exc}")
-        return _ok({"result": _jsonable(result), "workspace": build_workspace_tree(self.app)})
+        return _ok({"result": _jsonable(result), "workspace": workspace})
 
     def delete_draft(self, project_id: str, draft_id: str) -> dict[str, Any]:
         try:
-            with self._busy_lock:
-                if self._busy:
-                    return _fail("请先停止或等待当前任务完成，再删除版本。")
-                result = self.app.delete_draft(project_id, draft_id)
-                workspace = build_workspace_tree(self.app)
+            with self._local_operation("删除版本") as app:
+                result = app.delete_draft(project_id, draft_id)
+                try:
+                    workspace = build_workspace_tree(app)
+                except Exception as exc:
+                    self._log(f"草稿版本已删除，目录刷新失败: {exc}")
+                    return _ok({"result": _jsonable(result), "workspace": None,
+                                "warning": "草稿版本已删除，但目录刷新失败，请手动刷新。"})
         except Exception as exc:
             return _fail(f"删除草稿版本失败: {exc}")
         return _ok({"result": _jsonable(result), "workspace": workspace})
 
     def delete_chapter_drafts(self, project_id: str, chapter_id: str) -> dict[str, Any]:
         try:
-            result = self.app.delete_chapter_drafts(project_id, chapter_id)
+            with self._local_operation("删除章节草稿") as app:
+                result = app.delete_chapter_drafts(project_id, chapter_id)
         except Exception as exc:
             return _fail(f"删除章节草稿失败: {exc}")
         return _ok({"result": _jsonable(result), "workspace": build_workspace_tree(self.app)})
@@ -1728,18 +1779,20 @@ class WorkbenchBridge:
         if str(confirm_text or "").strip() != "确认删除定稿":
             return _fail("未输入“确认删除定稿”，已取消。")
         try:
-            result = self.app.delete_confirmed_chapter(project_id, chapter_id)
+            with self._local_operation("删除定稿") as app:
+                result = app.delete_confirmed_chapter(project_id, chapter_id)
         except Exception as exc:
             return _fail(f"删除已确认章节失败: {exc}")
         return _ok({"result": _jsonable(result), "workspace": build_workspace_tree(self.app)})
 
     def local_review(self, project_id: str, draft_id: str) -> dict[str, Any]:
         try:
-            existing = self.app.find_review_for_draft(project_id, draft_id)
-            if existing is not None:
-                return _ok({"existing": True, "review": self._review_payload(project_id, existing)})
-            result = self.app.review_draft(project_id, draft_id)
-            review = self.app.read_review(project_id, str(result.get("review_id") or ""))
+            with self._local_operation("本地审稿") as app:
+                existing = app.find_review_for_draft(project_id, draft_id)
+                if existing is not None:
+                    return _ok({"existing": True, "review": self._review_payload(project_id, existing)})
+                result = app.review_draft(project_id, draft_id)
+                review = app.read_review(project_id, str(result.get("review_id") or ""))
         except Exception as exc:
             if "already has a review" in str(exc):
                 existing = self.app.find_review_for_draft(project_id, draft_id)
@@ -1750,42 +1803,45 @@ class WorkbenchBridge:
 
     def generation_settings_state(self, scope: str = "global", project_id: str = "") -> dict[str, Any]:
         try:
-            if scope == "project":
-                if not project_id:
-                    return _fail("请先选择作品。")
-                state = self.app.project_generation_settings_state(project_id)
-                return _ok(_jsonable({**state, "scope": "project", "defaults": default_generation_settings()}))
-            return _ok(
-                {
-                    "scope": "global",
-                    "source": "global",
-                    "has_project_override": False,
-                    "settings": _jsonable(self.app.global_generation_settings()),
-                    "defaults": _jsonable(default_generation_settings()),
-                    "global_settings_path": str(self.app._global_settings_path()),
-                }
-            )
+            with self._local_operation("读取创作设置", inspection=True) as app:
+                if scope == "project":
+                    if not project_id:
+                        return _fail("请先选择作品。")
+                    state = app.project_generation_settings_state(project_id)
+                    return _ok(_jsonable({**state, "scope": "project", "defaults": default_generation_settings()}))
+                return _ok(
+                    {
+                        "scope": "global",
+                        "source": "global",
+                        "has_project_override": False,
+                        "settings": _jsonable(app.global_generation_settings()),
+                        "defaults": _jsonable(default_generation_settings()),
+                        "global_settings_path": str(app._global_settings_path()),
+                    }
+                )
         except Exception as exc:
             return _fail(f"读取创作设置失败: {exc}")
 
     def save_generation_settings(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         data = payload if isinstance(payload, dict) else {}
         try:
-            settings = _normalize_generation_payload(data.get("settings") if isinstance(data.get("settings"), dict) else {})
-            if str(data.get("scope") or "") == "project":
-                updated = self.app.update_generation_settings(str(data.get("project_id") or ""), settings)
-            else:
-                updated = self.app.update_global_generation_settings(settings)
+            with self._local_operation("保存设置") as app:
+                settings = _normalize_generation_payload(data.get("settings") if isinstance(data.get("settings"), dict) else {})
+                if str(data.get("scope") or "") == "project":
+                    updated = app.update_generation_settings(str(data.get("project_id") or ""), settings)
+                else:
+                    updated = app.update_global_generation_settings(settings)
         except Exception as exc:
             return _fail(f"保存创作设置失败: {exc}")
         return _ok(_jsonable(updated))
 
     def reset_generation_settings(self, scope: str = "global", project_id: str = "") -> dict[str, Any]:
         try:
-            if scope == "project":
-                updated = self.app.clear_project_generation_settings(project_id)
-            else:
-                updated = self.app.reset_global_generation_settings()
+            with self._local_operation("重置设置") as app:
+                if scope == "project":
+                    updated = app.clear_project_generation_settings(project_id)
+                else:
+                    updated = app.reset_global_generation_settings()
         except Exception as exc:
             return _fail(f"恢复创作设置失败: {exc}")
         return _ok(_jsonable(updated))
@@ -1795,18 +1851,19 @@ class WorkbenchBridge:
         if not user_prompt:
             return _fail("提示词不能为空。")
         try:
-            settings = self.app.generation_settings(project_id)
-            prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
-            context = settings.get("context") if isinstance(settings.get("context"), dict) else {}
-            sampling = settings.get("sampling") if isinstance(settings.get("sampling"), dict) else {}
-            render = self.app.preview_context_draft(
-                project_id,
-                chapter_id=str(chapter_id or "").strip(),
-                prompt=user_prompt,
-                system_prompt=str(prompting.get("system_prompt") or ""),
-                max_context_tokens=optional_int(context.get("max_context_tokens")),
-                max_tokens=optional_int(sampling.get("max_tokens")),
-            )
+            with self._local_operation("预览上下文", inspection=True) as app:
+                settings = app.generation_settings(project_id)
+                prompting = settings.get("prompting") if isinstance(settings.get("prompting"), dict) else {}
+                context = settings.get("context") if isinstance(settings.get("context"), dict) else {}
+                sampling = settings.get("sampling") if isinstance(settings.get("sampling"), dict) else {}
+                render = app.preview_context_draft(
+                    project_id,
+                    chapter_id=str(chapter_id or "").strip(),
+                    prompt=user_prompt,
+                    system_prompt=str(prompting.get("system_prompt") or ""),
+                    max_context_tokens=optional_int(context.get("max_context_tokens")),
+                    max_tokens=optional_int(sampling.get("max_tokens")),
+                )
         except Exception as exc:
             return _fail(f"预览失败: {exc}")
         return _ok({"details": format_prompt_preview(render), "input_budget": render["input_capacity"]})
@@ -1823,14 +1880,16 @@ class WorkbenchBridge:
 
     def empty_trash(self) -> dict[str, Any]:
         try:
-            result = self.app.clear_trash()
+            with self._local_operation("清理回收站") as app:
+                result = app.clear_trash()
         except Exception as exc:
             return _fail(f"清空回收站失败: {exc}")
         return _ok(_jsonable(result))
 
     def project_health_detail(self, project_id: str) -> dict[str, Any]:
         try:
-            health = self.app.project_health(project_id, repo_root=self.repo_root)
+            with self._local_operation("检查作品", inspection=True) as app:
+                health = app.project_health(project_id, repo_root=self.repo_root)
         except Exception as exc:
             return _fail(f"作品概览读取失败: {exc}")
         return _ok(
@@ -1868,7 +1927,8 @@ class WorkbenchBridge:
 
     def context_preview(self, project_id: str) -> dict[str, Any]:
         try:
-            preview = self.app.context_package_preview(project_id, include_text=True)
+            with self._local_operation("预览资料", inspection=True) as app:
+                preview = app.context_package_preview(project_id, include_text=True)
         except Exception as exc:
             return _fail(f"生成上下文预览失败: {exc}")
         return _ok({"details": format_context_package_preview(preview), "preview": _jsonable(preview)})

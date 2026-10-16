@@ -1597,6 +1597,9 @@ class WorkbenchApplicationService:
     def export_confirmed_chapters_txt(self, project_id: str, output_path: str | Path) -> dict[str, Any]:
         return TxtManuscriptExportService(self._open_store(project_id)).export_confirmed_chapters(output_path).to_dict()
 
+    def export_manuscript_txt(self, project_id: str, output_path: str | Path, *, scope: str = "whole") -> dict[str, Any]:
+        return TxtManuscriptExportService(self._open_store(project_id)).export_manuscript(output_path, scope=scope).to_dict()
+
     def export_project_package(self, project_id: str, output_path: str | Path) -> dict[str, Any]:
         # Dedicated ZIP packer — do not route through _runtime_store (it overlays global secrets).
         return ProjectPackageService(self.registry).pack(project_id, output_path).to_dict()

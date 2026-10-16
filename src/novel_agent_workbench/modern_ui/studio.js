@@ -1732,16 +1732,9 @@ function renderRecordsStudio() {
   refresh.addEventListener("click", () => openRecordsStudio(studio.recordsKind).catch((error) => toast(error.message)));
   actions.append(refresh);
   if (studio.recordsKind === "confirmed" || studio.recordsKind === "export") {
-    const exportBtn = el("button", "btn primary", "导出 TXT");
+    const exportBtn = el("button", "btn primary", "整部作品另存为 TXT…");
     exportBtn.type = "button";
-    exportBtn.addEventListener("click", async () => {
-      try {
-        await call("export_txt", state.projectId);
-        toast("TXT 已导出。");
-      } catch (error) {
-        if (!error.cancelled) toast(error.message);
-      }
-    });
+    exportBtn.addEventListener("click", () => openTxtExportSheet());
     actions.append(exportBtn);
   }
   form.append(actions);
