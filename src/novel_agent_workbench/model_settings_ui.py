@@ -147,7 +147,7 @@ class ModelSettingsDialog:
                 widget = ttk.Combobox(
                     form,
                     textvariable=variable,
-                    values=("openai_compatible", "siliconflow", "chutes_openai", "openrouter"),
+                    values=("openai_compatible", "siliconflow", "chutes_openai", "openrouter", "opencode_go", "commandcode_goat"),
                     state="readonly",
                 )
             else:
@@ -285,7 +285,7 @@ class ModelSettingsDialog:
     def show_page(self, page: str) -> None:
         self.page = page
         titles = {
-            PAGE_PROVIDER: ("API 提供商", "管理服务地址和密钥。内置三家，也可不断添加自定义 OpenAI 兼容接入商。"),
+            PAGE_PROVIDER: ("API 提供商", "管理服务地址和密钥。内置常用接入商，也可添加自定义 OpenAI 兼容接入商。"),
             PAGE_MODELS: ("模型目录", "从接入商刷新模型，也可以手工添加模型 ID；停用后不会出现在功能分配中。"),
             PAGE_ASSIGNMENTS: ("功能分配", "设置主模型，并按正文生成、审稿、精修和记忆任务覆盖模型。"),
         }

@@ -59,6 +59,12 @@
 
 模型设置里已经预置硅基流动、Chutes 和 OpenRouter，也可以添加 DeepSeek、其他 OpenAI 兼容接口，或本机的 LM Studio、Ollama 兼容地址。正文生成与 AI 精修在「功能分配」里共用 None / Low / High / Max 思考控制，支持 DeepSeek Flash / Pro 动态名称和 V4 起的版本名称，不再限定 0731。直连接口发送 `thinking` 和 `reasoning_effort`，OpenRouter / Chutes 发送 `reasoning`；硅基流动使用 `enable_thinking`，只控制开关。新模型名称或接口不兼容时，可在接入商设置中手工指定思考控制接口，或选择不发送开关。未来接口是否兼容仍需以接入商文档为准。
 
+模型设置也内置 **OpenCode Go** 和 **Command Code GOAT**，已有配置升级后自动补充入口，原模型分配和密钥保留。在「模型设置 → 接入商」填写对应的 OpenCode Console / Command Code Studio API Key 并保存，再点击「刷新模型」，到「功能分配」选择模型。
+
+OpenCode Go 默认地址为 `https://opencode.ai/inference/go/openai/v1`，目录从同站的 `/inference/go/v1/models` 获取；请求使用本软件名称和按作品生成的稳定会话标识。Command Code GOAT 默认地址为 `https://api.commandcode.ai/provider/v1`，刷新时还读取[官方 GOAT 套餐表](https://commandcode.ai/docs/plans/goat)，该公开页面不会收到 API Key。两者都只列出目录中支持 Chat Completions 的模型，复用正文、审稿、精修、记忆生成和压缩的流式输出与停止任务流程。套餐解析失败或筛选结果为空时保留原目录；成功刷新后，已下架或不再符合套餐的模型会停用并保留记录。手工填写模型 ID 不能代替订阅目录校验。
+
+OpenCode Go 目录中的限时免费模型是否可调用，取决于账户、地区和服务端权限；该服务主要面向编码代理流量，其他用途是否获准以[官方 Go 说明](https://opencode.ai/docs/console/go/)和服务端判定为准。这里提供协议接入，不保证小说任务可用，也不模拟其他客户端身份。Command Code 的额度、套餐覆盖和最终计费同样由服务端决定。
+
 保存接口和 Key 不会发起请求。以下操作可能联网并产生费用，而且都需要你自己点击：
 
 - 生成、重写或精修草稿；

@@ -1904,7 +1904,7 @@ function confirmTyped({ title, desc, phrase, onConfirm }) {
       { label: "取消", onClick: closeModal },
       {
         label: "确认",
-        style: "success",
+        style: "danger",
         onClick: async () => {
           if (box.value.trim() !== phrase) {
             toast(`未输入“${phrase}”，已取消。`);
@@ -1990,7 +1990,7 @@ async function deleteDraft(projectId, chapter, draft) {
       { label: "取消", onClick: closeModal },
       {
         label: "删除版本",
-        style: "success",
+        style: "danger",
         onClick: async () => {
           if (blockIfGenerating() || !(await flushSave()).ok) return;
           const editingChapter = state.projectId === projectId && state.chapterId === chapter.chapter_id;
@@ -2043,7 +2043,7 @@ async function deleteChapterDrafts(projectId, chapter) {
       { label: "取消", onClick: closeModal },
       {
         label: "删除草稿",
-        style: "success",
+        style: "danger",
         onClick: async () => {
           const result = await call("delete_chapter_drafts", projectId, chapter.chapter_id);
           closeModal();
@@ -2131,7 +2131,7 @@ async function emptyTrash() {
       { label: "取消", onClick: closeModal },
       {
         label: "清空",
-        style: "success",
+        style: "danger",
         onClick: async () => {
           const result = await call("empty_trash");
           closeModal();

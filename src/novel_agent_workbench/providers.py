@@ -18,6 +18,7 @@ from .model_settings import (
     draft_reasoning_effort_from_settings,
     supports_deepseek_thinking,
     resolve_model_role_mapping,
+    SUBSCRIPTION_PROVIDER_IDS,
 )
 from .storage import ProjectStore, utc_stamp
 from .token_budget import capacity_check
@@ -42,6 +43,7 @@ DISABLED_ADAPTER_IDS = (
     OPENROUTER_PROVIDER_ID,
 )
 REAL_NETWORK_PROVIDER_IDS = {
+    *SUBSCRIPTION_PROVIDER_IDS,
     "openai_compatible",
     LOCAL_OPENAI_COMPATIBLE_PROVIDER_ID,
     DEEPSEEK_PROVIDER_ID,
@@ -460,6 +462,14 @@ PROVIDER_ADAPTER_REGISTRY: dict[str, ProviderAdapterInfo] = {
         requires_secret=True,
         description="OpenRouter OpenAI-compatible Chat Completions adapter.",
     ),
+    "opencode_go": ProviderAdapterInfo(
+        adapter_id="opencode_go", enabled=True, network_allowed=True, requires_secret=True,
+        description="OpenCode Go Chat Completions adapter with subscription catalog and session headers.",
+    ),
+    "commandcode_goat": ProviderAdapterInfo(
+        adapter_id="commandcode_goat", enabled=True, network_allowed=True, requires_secret=True,
+        description="Command Code GOAT Chat Completions adapter with official plan filtering.",
+    ),
 }
 
 
@@ -728,6 +738,10 @@ def generate_with_provider(store: ProjectStore, request: ProviderRequest) -> Pro
     try:
         client = create_provider_client(store, request.role, feature_id=request.feature_id)
         check_cancelled()
+        if client.role_config.provider == "opencode_go":
+            # A project is this app's conversation. Hash its path to avoid sending local paths or titles.
+            session_id = "naw-" + sha256(str(store.root.resolve()).encode("utf-8")).hexdigest()
+            request = replace(request, metadata={**request.metadata, "opencode_session_id": session_id})
         if request.max_tokens is None:
             request = replace(request, max_tokens=int(effective_generation_settings(store.read_config()).get("sampling", {}).get("max_tokens") or 16))
         capacity = capacity_check(store.read_config(), request.prompt, request.system_prompt or "",
@@ -1144,6 +1158,9 @@ def send_openai_compatible_chat_completion(
     api_key: str,
     timeout_seconds: float,
 ) -> tuple[int, dict[str, Any]]:
+    if role_config.provider in SUBSCRIPTION_PROVIDER_IDS and not role_config.settings.get("catalog_verified"):
+        raise ProviderError("请先刷新此接入商的模型目录，并选择支持 Chat Completions 的订阅模型。",
+                            error_type="catalog_required")
     endpoint = chat_completions_url(role_config.base_url)
     stream_response = should_stream_response(request, role_config)
     supported_sampling_keys = provider_supported_sampling_keys(role_config, request)
@@ -1153,7 +1170,7 @@ def send_openai_compatible_chat_completion(
         "stream": stream_response,
         "max_tokens": request.max_tokens or 16,
     }
-    if stream_response and role_config.provider == DEEPSEEK_PROVIDER_ID:
+    if stream_response and role_config.provider in {DEEPSEEK_PROVIDER_ID, *SUBSCRIPTION_PROVIDER_IDS}:
         payload["stream_options"] = {"include_usage": True}
     if request.temperature is not None and "temperature" in supported_sampling_keys:
         payload["temperature"] = request.temperature
@@ -1175,6 +1192,10 @@ def send_openai_compatible_chat_completion(
         http_request.add_header("Authorization", f"Bearer {api_key}")
     if role_config.provider == OPENROUTER_PROVIDER_ID:
         http_request.add_header("X-OpenRouter-Title", "NovelAgentWorkbench")
+    if role_config.provider in SUBSCRIPTION_PROVIDER_IDS:
+        http_request.add_header("User-Agent", "NovelAgentWorkbench/1.0")
+    if role_config.provider == "opencode_go":
+        http_request.add_header("x-opencode-session", str(request.metadata.get("opencode_session_id") or uuid4().hex))
     with open_request(http_request, timeout=timeout_seconds) as response:
         status_code = int(getattr(response, "status", 200))
         if stream_response:
@@ -1451,6 +1472,8 @@ def provider_supported_sampling_keys(role_config: ModelRoleConfig, request: Prov
     keys = {"temperature", "top_p", "max_tokens", "stream"}
     if request is not None and thinking_mode_restricts_sampling(request, role_config):
         return {"max_tokens", "stream"}
+    if provider in SUBSCRIPTION_PROVIDER_IDS:
+        return keys.intersection(role_config.settings.get("supported_parameters") or ["max_tokens", "stream"])
     if provider == DEEPSEEK_PROVIDER_ID:
         if request is None and deepseek_thinking_payload(role_config).get("type") == "enabled":
             return {"max_tokens", "stream"}
