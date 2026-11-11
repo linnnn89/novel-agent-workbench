@@ -57,6 +57,7 @@ from .model_catalog import (
 )
 from .model_settings import (
     BUILTIN_PROVIDER_PROFILES,
+    SUBSCRIPTION_PROVIDER_IDS,
     FEATURE_IDS,
     effective_model_ref,
     MODEL_SETTINGS_SCHEMA_VERSION,
@@ -755,12 +756,19 @@ class WorkbenchApplicationService:
             raise ValueError("请先保存该接入商的 API Key。")
         models = fetch_model_catalog(
             provider_profile_id=profile_id,
+            adapter=str(profile.get("adapter") or ""),
             base_url=str(profile.get("base_url") or ""),
             api_key=api_key,
             timeout_seconds=min(60.0, float(profile.get("timeout_seconds") or 30.0)),
         )
         current_models = settings.get("model_profiles") if isinstance(settings.get("model_profiles"), dict) else {}
         merged_models = dict(current_models)
+        if profile.get("adapter") in SUBSCRIPTION_PROVIDER_IDS:
+            available = {make_model_ref(profile_id, item["model_id"]) for item in models}
+            for ref, item in current_models.items():
+                if item.get("provider_profile_id") == profile_id and ref not in available:
+                    # Keep saved references, but do not offer models removed from the subscription catalog.
+                    merged_models[ref] = {**item, "enabled": False, "chat_completions_supported": False}
         for item in models:
             model_ref = make_model_ref(profile_id, str(item.get("model_id") or ""))
             existing = current_models.get(model_ref) if isinstance(current_models.get(model_ref), dict) else {}

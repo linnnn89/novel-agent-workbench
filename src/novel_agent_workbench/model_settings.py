@@ -22,8 +22,29 @@ ROLE_DEFAULT_FEATURE = {
 }
 DRAFT_REASONING_EFFORTS = ("none", "low", "high", "max")
 DEFAULT_DRAFT_REASONING_EFFORT = "none"
+SUBSCRIPTION_PROVIDER_IDS = {"opencode_go", "commandcode_goat"}
 
 BUILTIN_PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
+    "opencode_go": {
+        "profile_id": "opencode_go",
+        "display_name": "OpenCode Go",
+        "adapter": "opencode_go",
+        "base_url": "https://opencode.ai/inference/go/openai/v1",
+        "api_key_ref": "project_secret.provider_opencode_go_api_key",
+        "timeout_seconds": 300.0,
+        "enabled": True,
+        "built_in": True,
+    },
+    "commandcode_goat": {
+        "profile_id": "commandcode_goat",
+        "display_name": "Command Code GOAT",
+        "adapter": "commandcode_goat",
+        "base_url": "https://api.commandcode.ai/provider/v1",
+        "api_key_ref": "project_secret.provider_commandcode_goat_api_key",
+        "timeout_seconds": 300.0,
+        "enabled": True,
+        "built_in": True,
+    },
     "siliconflow": {
         "profile_id": "siliconflow",
         "display_name": "硅基流动",
@@ -166,6 +187,8 @@ def migrate_global_model_settings(value: object) -> tuple[dict[str, Any], bool]:
     defaults = default_model_settings_fields()
 
     raw_profiles = source.get("provider_profiles")
+    if isinstance(raw_profiles, dict) and SUBSCRIPTION_PROVIDER_IDS - raw_profiles.keys():
+        changed = True
     profiles: dict[str, dict[str, Any]] = deepcopy(BUILTIN_PROVIDER_PROFILES)
     if isinstance(raw_profiles, dict):
         for profile_id, profile in raw_profiles.items():
@@ -313,6 +336,10 @@ def resolve_model_role_mapping(
         "settings": {
             "timeout_seconds": profile.get("timeout_seconds", 300.0),
             "thinking_protocol": model.get("thinking_protocol") or profile.get("thinking_protocol") or "auto",
+            **({
+                "catalog_verified": model.get("source") == "remote" and model.get("chat_completions_supported") is True,
+                "supported_parameters": model.get("supported_parameters", []),
+            } if profile.get("adapter") in SUBSCRIPTION_PROVIDER_IDS else {}),
         },
     }
 

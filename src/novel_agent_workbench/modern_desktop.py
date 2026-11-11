@@ -999,6 +999,8 @@ class WorkbenchBridge:
                     {"id": "chutes_openai", "label": "Chutes"},
                     {"id": "deepseek", "label": "DeepSeek"},
                     {"id": "openrouter", "label": "OpenRouter"},
+                    {"id": "opencode_go", "label": "OpenCode Go"},
+                    {"id": "commandcode_goat", "label": "Command Code GOAT"},
                     {"id": "local_openai_compatible", "label": "本地兼容端口"},
                 ],
             }

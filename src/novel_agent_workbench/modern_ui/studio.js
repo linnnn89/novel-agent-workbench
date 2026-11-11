@@ -264,6 +264,11 @@ function renderProviderPage() {
     field("思考控制接口（一般保持自动）", thinkingProtocol),
     el("p", "studio-note", "未来模型名称或第三方接口未被识别时，可按接入商文档选择。手工指定会应用于该接入商下的正文/精修模型；接口不支持时选“不发送”。")
   );
+  if (provider?.adapter === "opencode_go") {
+    form.prepend(el("p", "studio-note", "填写 OpenCode Console API Key，保存后刷新 Go 模型目录。仅列出支持 Chat Completions 的模型，包含目录中的限时免费模型；实际可用性由账户权限、地区和服务端限制决定。"));
+  } else if (provider?.adapter === "commandcode_goat") {
+    form.prepend(el("p", "studio-note", "填写 Command Code Studio API Key，保存后刷新模型目录。按官方 GOAT 套餐及 Chat Completions 接口筛选；仅支持 Messages 或 Responses 的模型不会列入。套餐目录读取失败时保留原模型列表。"));
+  }
   const actions = el("div", "side-actions");
   const save = el("button", "btn primary", "保存当前设置");
   save.type = "button";
